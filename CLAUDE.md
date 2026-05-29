@@ -1,1 +1,233 @@
-@AGENTS.md
+# Helpwise — Project Overview
+
+โปรเจกต์นี้ (**Helpwise**) คือ **Multi-tenant SaaS Help Desk / Ticketing Platform** สำหรับ B2B
+แต่ละบริษัทลูกค้า (tenant) ใช้ Helpwise รับเรื่อง support จากลูกค้าของตัวเอง — มี **app ภายในสำหรับ agent**
+และ **portal สาธารณะสำหรับลูกค้าปลายทาง** เป้าหมาย: ประสิทธิภาพสูง โค้ดอ่านง่าย ดูแลระยะยาวได้ และ
+**ข้อมูลแต่ละ tenant ต้องแยกขาดจากกันโดยสมบูรณ์ (Tenant Isolation)**
+
+> ⚠️ **กฎสูงสุดของโปรเจกต์นี้:** ทุกข้อมูลเป็นของ Tenant ใด Tenant หนึ่งเสมอ. Cross-tenant data leak
+> คือ Critical Bug ที่ร้ายแรงที่สุด. **และเฉพาะของ Help Desk:** "internal note" ของ agent ต้องไม่หลุดไปฝั่ง
+> portal ลูกค้าโดยเด็ดขาด (ดู Ticketing Rules) — ถือเป็นการรั่วระดับ Critical เช่นกัน
+
+---
+
+## 🧭 Agent Ownership Map (orchestrator อ่านก่อน delegate)
+
+| หัวข้อกฎ | เจ้าภาพหลัก (ต้องบังคับใช้) | เกี่ยวข้อง |
+| --- | --- | --- |
+| **Multi-tenancy Rules** | `database` (schema + `tenantId` + RLS), `backend` (tenant-scoped query, context, membership verify) | `security` (audit อันดับ 1), `frontend` |
+| **Identity & Audiences** | `backend` (แยก guard agent vs contact), `security` (privilege/visibility) | `database` (Contact per-tenant), `frontend` (แยก app/portal) |
+| **Ticketing Rules** | `backend` (lifecycle, visibility), `database` (Ticket/Message schema) | `frontend` (ซ่อน internal note ฝั่ง portal), `security` |
+| **SLA Rules** | `backend` (timer, business hours), `database` (SlaPolicy) | `frontend` (badge/นับเวลา) |
+| **Inbound/Outbound Email** | `backend` (parse, idempotent, threading, verify) | `security` (spoof/spam), `devops` (queue, inbound webhook) |
+| **Subscription & Billing** | `backend` (webhook idempotent + signature, sync→DB), `database` (money `Int`) | `security`, `frontend` |
+| **Feature Flag** | `backend` (`hasFeature()`), `database` (seed) | `frontend` |
+| **Audit Log** | `backend` (`audit.log()`), `database` (immutable) | `security` |
+| **UI & Design System** | `frontend` (palette, semantic status color, portal branding) | — |
+| **Definition of Done** | `code-review` + `qa-testing` + `security` ใช้เป็น **เกณฑ์ block** | — |
+
+> สำหรับ reviewer: **Definition of Done + Multi-tenancy + Internal-note isolation = เกณฑ์ block** ไม่ใช่แค่ comment
+
+---
+
+## Tech Stack
+
+- Next.js 16.2 (App Router) + TypeScript
+- Prisma + PostgreSQL (Supabase)
+- Tailwind CSS v4 · UI: Shadcn UI, Radix UI
+- State: Zustand · Forms: React Hook Form + Zod · Icons: Lucide React
+- **Billing: Stripe** (Subscriptions + Webhooks)
+- **Cache / Tenant lookup: Redis** (Upstash)
+- **Email: Postmark/SendGrid** (outbound + inbound parse webhook)
+- **Queue: Redis (BullMQ)** — งาน async: ส่ง email, ตรวจ SLA breach, ประมวลผล inbound
+
+---
+
+## Project Structure
+
+- `app/`
+  - `app/(agent)/` — app ภายในสำหรับ agent (ต้อง login เป็น User + เป็นสมาชิก tenant)
+  - `app/(portal)/` — portal สาธารณะสำหรับลูกค้า (Contact) — เห็นเฉพาะ ticket ของตัวเอง
+  - `app/(marketing)/` — landing, pricing (ไม่มี tenant)
+  - `app/(admin)/` — super-admin (จัดการทุก tenant)
+  - `app/api/` — ทุก route ต้องผ่าน tenant context + audience guard
+  - `app/api/webhooks/stripe/` · `app/api/webhooks/email/` — inbound webhooks (verify signature)
+- `lib/`
+  - `lib/tenant.ts` — tenant context resolution
+  - `lib/prisma.ts` — tenant-scoped Prisma client
+  - `lib/auth.ts` — `requireAgent()` / `requireContact()` guards (แยก audience)
+  - `lib/features.ts` · `lib/audit.ts` · `lib/stripe.ts`
+  - `lib/email.ts` — parse inbound / ส่ง outbound / threading
+  - `lib/sla.ts` — คำนวณ deadline + business hours
+- `middleware.ts` — tenant extraction จาก subdomain (root level)
+
+---
+
+## 🔒 Multi-tenancy Rules (สำคัญที่สุด)
+
+Strategy: **Shared Database + Shared Schema** แยกด้วยคอลัมน์ `tenantId`
+
+1. **ทุก Model ที่เป็นข้อมูล tenant ต้องมี `tenantId`** (ยกเว้น global: `User`, `Plan`, `FeatureFlag`)
+2. **ทุก Query ต้องมีเงื่อนไข `tenantId` เสมอ** — ห้าม query โดยไม่ระบุ tenant
+3. **ห้ามรับ `tenantId` จาก client** — ดึงจาก tenant context ที่ middleware verify แล้วเท่านั้น (กัน tenant spoofing)
+4. **ห้าม raw SQL ที่ไม่มี tenant scope**
+5. **ทุก API route ต้อง verify membership/identity** ก่อนทำงาน (ดู Identity & Audiences)
+
+### Tenant Context Pattern
+
+```typescript
+// ❌ ไม่มี scope / รับ tenantId จาก client
+const tickets = await prisma.ticket.findMany()
+const tickets = await prisma.ticket.findMany({ where: { tenantId: req.body.tenantId } })
+
+// ✅ ใช้ tenant-scoped client (tenantId มาจาก context ที่ verify แล้ว)
+const db = tenantPrisma(ctx.tenantId)
+const tickets = await db.ticket.findMany()
+```
+
+### Subdomain Routing
+
+- URL: `{slug}.helpwise.com` (เช่น `acme.helpwise.com`)
+- `middleware.ts`: แยก `slug` → lookup tenant (cache Redis) → ส่ง `x-tenant-id`, `x-tenant-plan` (**เขียนทับ header จาก client เสมอ**) → ไม่พบ = 404
+
+---
+
+## 👥 Identity & Audiences Rules (ลูกเล่นเด่นของ Help Desk)
+
+ระบบมี **ผู้ใช้สองกลุ่มที่ต้องแยกขาด** — ห้ามปน auth context กัน:
+
+| | **Agent (ภายใน)** | **Contact / ลูกค้า (ภายนอก)** |
+| --- | --- | --- |
+| คือใคร | พนักงาน support | ผู้แจ้ง ticket |
+| โมเดล | `User` (global) + `TenantMember` | `Contact` (**tenant-scoped**) |
+| อยู่หลาย tenant ได้ไหม | ได้ (1 User ทำงานหลายบริษัท) | **ไม่ได้** — คนเดียวที่อีเมลหา 2 บริษัท = 2 Contact คนละ tenant |
+| login ที่ไหน | `app/(agent)/` | `app/(portal)/` (magic-link/email ต่อ tenant) |
+| เห็นอะไร | ticket ทั้ง tenant (ตาม role) | **เฉพาะ ticket ของตัวเอง** ใน tenant นั้น |
+
+กฎเหล็ก:
+1. **`requireAgent()` กับ `requireContact()` แยกกันเด็ดขาด** — endpoint ของ portal ห้ามให้ agent privilege หลุดเข้าไป และกลับกัน
+2. **Contact ถูก scope แคบกว่า tenant อีกชั้น** — query ของ portal ต้องกรอง `requesterContactId = ctx.contactId` ด้วย (tenant scope + own-records scope)
+3. **agent role ผูกกับ `TenantMember`** (`OWNER`/`ADMIN`/`AGENT`/`VIEWER`) ไม่ใช่ผูกกับ `User`
+4. authz pipeline: extract tenant → ระบุ audience (agent/contact) → verify membership/ownership → ตรวจ role/feature → ทำงาน
+
+---
+
+## 🎫 Ticketing Rules
+
+- **Ticket status:** `NEW`, `OPEN`, `PENDING` (รอลูกค้า), `ON_HOLD`, `SOLVED`, `CLOSED`. Priority: `LOW`/`NORMAL`/`HIGH`/`URGENT`
+- **`ticketNumber` unique ต่อ tenant** (เช่น `#1024` ของ acme ไม่ชนกับ globex)
+- **TicketMessage มี `visibility`: `PUBLIC` | `INTERNAL`**
+  - `INTERNAL` = โน้ตระหว่าง agent — **ต้องไม่ถูก return / render ที่ฝั่ง portal เด็ดขาด** (กรองที่ query ฝั่ง backend ไม่ใช่แค่ซ่อนใน UI)
+  - query ของ portal ต้อง `where: { visibility: 'PUBLIC' }` เสมอ
+- assignment: ticket assign ให้ agent ที่เป็น `TenantMember` ของ tenant นั้นเท่านั้น
+- ทุกการเปลี่ยน status/assignee/priority → บันทึก `AuditLog`
+
+---
+
+## ⏱️ SLA Rules
+
+- **SlaPolicy ต่อ tenant** (และอาจผูกกับ plan): กำหนด **first-response time** + **resolution time** ตาม priority
+- timer คิดตาม **business hours** ของ tenant (เก็บใน settings) ไม่ใช่ 24 ชม. เสมอ
+- **pause timer เมื่อ status = `PENDING`** (รอลูกค้าตอบ) แล้ว resume เมื่อกลับมา
+- ตรวจ SLA breach แบบ async ผ่าน queue (BullMQ) — เมื่อใกล้/เกิน deadline → flag + แจ้งเตือน
+- SLA แบบละเอียด (เช่น หลาย policy, business hours) เป็น feature ที่ **gate ตาม plan** ผ่าน `hasFeature()`
+
+---
+
+## 📧 Inbound / Outbound Email Rules
+
+- **Inbound:** ลูกค้าส่งเมลเข้า `support@{slug}.helpwise.com` → provider ยิง webhook → parse เป็น ticket ใหม่/append เข้า ticket เดิม (ดู threading)
+  - **idempotent ด้วย Message-ID** (เก็บใน `ProcessedInboundEmail`) — provider ส่งซ้ำได้ ห้ามสร้าง ticket ซ้ำ (หลักการเดียวกับ Stripe webhook)
+  - **verify** ว่าเมลมาจาก provider จริง (signature/secret) — กัน spoof สร้าง ticket ปลอม
+  - routing: address → resolve tenant (เหมือน subdomain แต่ผ่านอีเมล)
+- **Threading:** ใช้ `Message-ID` / `In-Reply-To` / header `References` จับคู่กลับ ticket เดิม; fallback ใช้ ticket number ใน subject
+- **Outbound:** reply ของ agent ส่งกลับลูกค้า, ตั้ง header threading ให้ถูก, เก็บสำเนาเป็น `TicketMessage(visibility=PUBLIC)`
+
+---
+
+## 💳 Subscription & Billing Rules
+
+- **1 Tenant = 1 Subscription** เสมอ
+- ราคาเก็บเป็น `Int` (satang/cents) — **ห้าม `Float` กับข้อมูลการเงิน**
+- **ห้าม query Stripe API ทุก request** — sync ผ่าน webhook มาเก็บ DB แล้ว query จาก DB
+- webhook ต้อง **idempotent** + **verify signature** ทุกครั้ง
+- เปลี่ยน plan → update `Tenant.plan` ให้ตรง + **ล้าง Redis cache** (`x-tenant-plan` ที่ middleware cache ไว้)
+- Status: `TRIALING`, `ACTIVE`, `PAST_DUE`, `CANCELLED`, `UNPAID`
+- entitlement ที่ผูกกับ plan (ตัวอย่าง): จำนวน agent seats, จำนวน SLA policy, channels, API access
+
+---
+
+## 🚩 Feature Flag Rules
+
+สองชั้น: global default (`FeatureFlag`) + per-tenant override (`TenantFeature`).
+`hasFeature(tenantId, key)`: override ราย tenant ชนะก่อน → ไม่มีก็ดู `requiredPlan` เทียบ plan → ไม่มีก็ `defaultEnabled`
+
+- **ห้าม hardcode** `if (tenant.plan === 'PRO')` ใน business logic — ใช้ `hasFeature()` เสมอ
+- เพิ่ม flag ใหม่ผ่าน **migration/seed** ไม่ใช่ hardcode
+- gate ที่ API → `403` + error code ที่บอกให้ upgrade
+- flag ตัวอย่าง: `sla_policies`, `csat_survey`, `api_access`, `custom_branding`
+
+---
+
+## 📝 Audit Log Rules
+
+- `AuditLog` **immutable** — ไม่มี `updatedAt`, ห้าม update/delete
+- log action สำคัญ: เปลี่ยน status/assignee/priority, merge ticket, เชิญ agent, เปลี่ยน plan, แก้ข้อมูล contact
+- ใช้ helper `audit.log()` เสมอ ไม่ create row ตรง ๆ
+- เก็บ `before`/`after` JSON; **ห้าม log เนื้อหา/PII ที่ sensitive ลง snapshot แบบไม่จำเป็น**
+
+---
+
+## UI & Design System Rules
+
+**Theme:** Clean, calm, trustworthy (เหมาะกับงาน support ที่ต้องอ่านเยอะ). โทนหลักสะอาด, ใช้ **semantic status color** สื่อสถานะ ticket/SLA
+
+> 🏢 **Multi-tenant + Portal branding:** tenant ตั้ง `logoUrl` + accent color ได้ (เก็บใน `Tenant.settings`) โดยเฉพาะ **portal ลูกค้าต้องโชว์ branding ของ tenant** แต่ **base palette + โครงสร้างคงเดิมเสมอ**
+
+### 🎨 Color Palette
+
+- **Background (Soft White):** `#F7F9FB` — พื้นแอป (อย่าใช้ขาวจัด `#FFFFFF` เป็นพื้นหลัก)
+- **Surface (White):** `#FFFFFF` — card, modal, sidebar
+- **Primary / Action (Indigo):** `#3B5BDB` (hover `#2F4BC4`) — ปุ่มหลัก, CTA, active
+- **Success / Solved (Teal):** `#0CA678` — ticket solved, สถานะบวก
+- **Warning / SLA ใกล้ครบ (Amber):** `#E8590C`
+- **Danger / SLA breach (Red):** `#E03131` — เกิน SLA, urgent
+- **Text:** primary `#1F2933` (ห้าม pure black), secondary `#6B7280`
+- **Border:** `#E4E7EB`
+
+ใช้ arbitrary values ที่ตรง palette (เช่น `bg-[#3B5BDB]`) หรือถือว่า map ใน `tailwind.config` แล้ว
+
+---
+
+## Key Conventions & Architecture
+
+- **React Components:** Standard Function Declaration เสมอ (เลี่ยง arrow function สำหรับ component)
+- **TypeScript:** ระบุ Interface/Type ชัดเจนเสมอ
+- **API Routes:** return JSON รูปแบบ `{ data, error }` เสมอ
+- **API Routes (Multi-tenant + audience):** ลำดับ: extract tenant → audience guard (`requireAgent`/`requireContact`) → verify membership/ownership → ตรวจ role/feature → ทำงาน
+- **Database:** ใช้ Prisma เท่านั้น (raw SQL ต้องมี tenant scope), ใช้ `tenantPrisma(tenantId)` ที่ inject scope อัตโนมัติ
+- **Internal note isolation:** query ฝั่ง portal ต้องกรอง `visibility = PUBLIC` ที่ระดับ backend เสมอ — ห้ามพึ่งการซ่อนใน UI
+- **Env vars:** root domain, Stripe keys, email provider keys, Redis URL ดึงจาก `.env` เสมอ ห้าม hardcode
+- **Comments:** อธิบายลอจิกซับซ้อนด้วยคอมเมนต์ไทยสั้น ๆ โดยเฉพาะส่วน tenant isolation + audience/visibility
+
+### Security Conventions
+
+- ห้าม trust `tenantId` จาก client — ใช้จาก middleware context
+- ห้าม return ข้อมูล tenant อื่น หรือ ticket ของ contact อื่น แม้ใน error message
+- Contact เห็นเฉพาะ ticket ของตัวเอง (`requesterContactId = ctx.contactId`)
+- agent action ต้องเช็ค `MemberRole` (เช่น เฉพาะ OWNER/ADMIN ลบ/merge/จัดการ member)
+- inbound email + Stripe webhook ต้อง verify signature ทุกครั้ง
+- validate `slug` ด้วย regex `/^[a-z0-9-]+$/`
+
+### Definition of Done (ก่อน merge ทุก feature)
+
+> `code-review` / `qa-testing` / `security` ใช้เป็น **เกณฑ์ block**
+
+- [ ] ทุก query ใหม่มี tenant scope
+- [ ] ไม่รับ `tenantId` จาก client
+- [ ] audience guard ถูกต้อง (agent vs contact ไม่ปนกัน)
+- [ ] internal note ไม่หลุดไป portal (query กรอง `visibility=PUBLIC`)
+- [ ] contact เห็นเฉพาะ ticket ของตัวเอง
+- [ ] inbound email / Stripe webhook idempotent + verify signature
+- [ ] เช็ค permission/role + `hasFeature()` (ไม่ hardcode plan)
+- [ ] บันทึก `AuditLog` สำหรับ action สำคัญ
