@@ -158,6 +158,7 @@ model Tenant {
   tenantFeatures  TenantFeature[]
   processedEmails ProcessedInboundEmail[]
   auditLogs       AuditLog[]
+  attachments     Attachment[]
 
   @@index([slug])
 }
@@ -382,6 +383,9 @@ model TicketMessage {
 model Attachment {
   id         String        @id @default(cuid())
   tenantId   String
+  // L-3: direct relation ไป Tenant + cascade — กัน orphan row เมื่อลบ tenant
+  // (เดิม cascade ผ่าน Ticket→Message เท่านั้น; การลบ Tenant ตรง ๆ จะทิ้ง orphan)
+  tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   ticketId   String
   ticket     Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   messageId  String

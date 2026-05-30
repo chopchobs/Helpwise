@@ -1,20 +1,16 @@
 // Prisma 7 configuration file
-// Supabase = standard PostgreSQL → ใช้ driver adapter @prisma/adapter-pg (node-postgres)
-// Prisma 7: connection URL ต้องอยู่ที่นี่ (ไม่ใช่ใน schema.prisma datasource block)
-// DATABASE_URL / DIRECT_URL ดึงจาก .env — ห้าม hardcode connection string
-//   - DATABASE_URL: pooled connection (pgbouncer :6543) สำหรับ runtime
-//   - DIRECT_URL:   direct connection (:5432) สำหรับ migrate (ต้องการ direct, ไม่ผ่าน pooler)
+// แยก connection 2 เส้นตาม Supabase:
+//   - runtime PrismaClient: ใช้ driver adapter @prisma/adapter-pg + DATABASE_URL
+//     (pooled, pgbouncer :6543) — ดู src/lib/prisma.ts
+//   - migrate CLI: ใช้ datasource.url + DIRECT_URL (direct :5432, ไม่ผ่าน pooler)
+//     เพราะ migration ต้องการ direct connection
+// ทุกค่าดึงจาก .env — ห้าม hardcode connection string
 import { defineConfig } from "prisma/config";
 
 export default defineConfig({
   schema: "./prisma/schema.prisma",
-  migrate: {
-    async adapter() {
-      const { PrismaPg } = await import("@prisma/adapter-pg");
-      // migrate ใช้ direct connection (DIRECT_URL); fallback เป็น DATABASE_URL
-      const connectionString =
-        process.env.DIRECT_URL ?? process.env.DATABASE_URL ?? "";
-      return new PrismaPg({ connectionString });
-    },
+  // migrate / introspect ใช้ direct connection; fallback เป็น DATABASE_URL
+  datasource: {
+    url: process.env.DIRECT_URL ?? process.env.DATABASE_URL,
   },
 });
