@@ -1,0 +1,498 @@
+// =============================================================================
+// Helpwise — Prisma Schema
+// Multi-tenant SaaS Help Desk / Ticketing Platform (B2B)
+//
+// Strategy: Shared Database + Shared Schema แยกด้วยคอลัมน์ tenantId
+// ID Convention: cuid() ทุก model — compact กว่า uuid, URL-safe, ไม่ต้องการ
+//   extension พิเศษใน Postgres, เหมาะกับ Supabase (ไม่ต้อง enable uuid-ossp)
+//
+// RLS (Row-Level Security) — Supabase รองรับ:
+//   Model ที่มี tenantId ทุกตัวควรเปิด RLS policy:
+//     `tenantId = current_setting('app.current_tenant_id', true)`
+//   เป็น defense-in-depth นอกเหนือจาก app-level tenant scope
+//   ต้องเขียน SQL policy ใน migration แยกต่างหาก (ไม่ใช่ใน schema นี้)
+//   Model ที่ต้องทำ RLS: Tenant, TenantMember, TenantFeature, Contact,
+//     Ticket, TicketMessage, SlaPolicy, Subscription, ProcessedInboundEmail,
+//     AuditLog, Attachment
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Prisma 7: connection URL ย้ายไป prisma.config.ts (driver adapter) แล้ว
+  // datasource block เหลือแค่ provider — ดู prisma.config.ts สำหรับ DATABASE_URL/DIRECT_URL
+  provider = "postgresql"
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  AGENT
+  VIEWER
+}
+
+enum TicketStatus {
+  NEW
+  OPEN
+  PENDING // รอลูกค้าตอบ — SLA timer pause ขณะอยู่ใน state นี้
+  ON_HOLD
+  SOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+// PUBLIC = เห็นได้ทั้ง agent และ contact ฝั่ง portal
+// INTERNAL = internal note ระหว่าง agent — ห้ามส่งออกไปฝั่ง portal เด็ดขาด
+// query ของ portal ต้องกรอง visibility = PUBLIC เสมอ (ระดับ backend ไม่ใช่แค่ UI)
+enum MessageVisibility {
+  PUBLIC
+  INTERNAL
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  UNPAID
+}
+
+// =============================================================================
+// GLOBAL MODELS (ไม่ใช่ tenant-scoped — ไม่มี tenantId)
+// =============================================================================
+
+// Plan — global, ไม่ผูกกับ tenant ใดเป็นพิเศษ
+// เก็บ metadata ของแต่ละ plan (price เป็น Int = satang/cents)
+model Plan {
+  id             String   @id @default(cuid())
+  name           String   @unique // เช่น "starter", "pro", "enterprise"
+  displayName    String
+  // ราคาเก็บเป็น Int (satang/cents) — ห้าม Float กับข้อมูลการเงิน
+  pricePerMonth  Int      @default(0)
+  pricePerYear   Int      @default(0)
+  // ข้อจำกัดของ plan (ใช้ 0 = unlimited)
+  maxAgents      Int      @default(0)
+  maxSlaPolicies Int      @default(1)
+  features       String[] // array of feature keys ที่ plan นี้รวมไว้ (สำหรับ reference)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenants Tenant[]
+}
+
+// FeatureFlag — global default ของแต่ละ feature key
+// 2 ชั้น: FeatureFlag (global default) + TenantFeature (per-tenant override)
+// hasFeature(): override ราย tenant ชนะ → requiredPlan เทียบ plan → defaultEnabled
+model FeatureFlag {
+  id             String   @id @default(cuid())
+  key            String   @unique // เช่น "sla_policies", "api_access", "custom_branding"
+  description    String?
+  defaultEnabled Boolean  @default(false)
+  // requiredPlan null = ไม่ gate ตาม plan (ใช้แค่ defaultEnabled)
+  requiredPlan   String? // ชื่อ plan ขั้นต่ำที่ต้องการ (เช่น "pro")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// User — global model สำหรับ agent (พนักงาน support)
+// 1 User สามารถเป็นสมาชิกหลาย tenant ผ่าน TenantMember
+// ไม่มี tenantId — role ผูกกับ TenantMember ไม่ใช่ User
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  avatarUrl    String?
+  passwordHash String? // null = OAuth only
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships TenantMember[]
+  // audit logs ที่ user นี้เป็นคนทำ (actor)
+  auditLogs   AuditLog[]     @relation("AuditActor")
+}
+
+// =============================================================================
+// TENANT ROOT
+// =============================================================================
+
+// Tenant — root ของทุกอย่างที่ tenant-scoped
+// slug ใช้สำหรับ subdomain routing: {slug}.helpwise.com
+// settings เก็บ business hours + portal branding (logoUrl, accentColor) เป็น Json
+// หมายเหตุ: business hours เก็บใน settings Json แทนที่จะสร้าง model แยก
+//   เพราะ structure ไม่ซับซ้อน (ไม่มี relation) และ query ทั้งก้อนเสมอ
+//   ตัวอย่าง settings: { "businessHours": { "timezone": "Asia/Bangkok",
+//     "days": [{"day": "MON", "start": "09:00", "end": "18:00"}] },
+//     "branding": { "logoUrl": "...", "accentColor": "#3B5BDB" } }
+model Tenant {
+  id        String   @id @default(cuid())
+  // slug ใช้ subdomain routing — validate ด้วย /^[a-z0-9-]+$/ ที่ app layer
+  slug      String   @unique
+  name      String
+  planId    String
+  plan      Plan     @relation(fields: [planId], references: [id])
+  // Json เก็บ business hours + portal branding
+  settings  Json     @default("{}")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members         TenantMember[]
+  contacts        Contact[]
+  tickets         Ticket[]
+  slapolicies     SlaPolicy[]
+  subscription    Subscription?
+  tenantFeatures  TenantFeature[]
+  processedEmails ProcessedInboundEmail[]
+  auditLogs       AuditLog[]
+
+  @@index([slug])
+}
+
+// =============================================================================
+// TENANT-SCOPED MODELS
+// ทุก model ด้านล่างนี้มี tenantId + relation ไป Tenant + @@index([tenantId])
+// =============================================================================
+
+// TenantMember — เชื่อม User กับ Tenant พร้อม role
+// agent role ผูกกับ TenantMember ไม่ใช่ User
+// composite unique: 1 User อยู่ใน 1 Tenant ได้ครั้งเดียว
+model TenantMember {
+  id        String     @id @default(cuid())
+  tenantId  String
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      MemberRole @default(AGENT)
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  // ticket ที่ assign ให้ member นี้
+  assignedTickets Ticket[]        @relation("TicketAssignee")
+  // messages ที่ member นี้ส่ง
+  messages        TicketMessage[] @relation("MessageAuthorMember")
+  // audit logs ที่ member นี้เป็น actor
+  auditLogs       AuditLog[]      @relation("AuditMemberActor")
+
+  // composite unique: 1 user ใน 1 tenant ได้ครั้งเดียว
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+}
+
+// TenantFeature — per-tenant override ของ FeatureFlag
+// hasFeature(): TenantFeature ชนะ global FeatureFlag
+model TenantFeature {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  featureKey String // ต้องตรงกับ FeatureFlag.key
+  enabled    Boolean
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([tenantId, featureKey])
+  @@index([tenantId])
+}
+
+// Contact — ลูกค้าปลายทางที่แจ้ง ticket (ไม่ใช่ agent)
+// tenant-scoped: email ซ้ำข้าม tenant ได้ แต่ในเดียวกัน 1 email = 1 Contact
+// Contact ไม่สามารถอยู่หลาย tenant ได้ — ต่างจาก User (agent)
+model Contact {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email     String
+  name      String?
+  phone     String?
+  avatarUrl String?
+  // metadata เพิ่มเติม (เช่น company, custom fields)
+  metadata  Json     @default("{}")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tickets   Ticket[]
+  // messages ที่ contact ส่งเอง (portal reply)
+  messages  TicketMessage[] @relation("MessageAuthorContact")
+  auditLogs AuditLog[]      @relation("AuditContactActor")
+
+  // composite unique: email ซ้ำข้าม tenant ได้ แต่ในเดียวกันห้ามซ้ำ
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([tenantId, email]) // index ซ้อนเพื่อ lookup ตอน inbound email routing
+}
+
+// SlaPolicy — นโยบาย SLA ต่อ tenant
+// กำหนด first-response time + resolution time ตาม priority (เป็น นาที)
+// gate ตาม plan ผ่าน hasFeature("sla_policies")
+model SlaPolicy {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name                 String // เช่น "Standard SLA", "VIP SLA"
+  isDefault            Boolean  @default(false)
+  // เวลา first-response ตาม priority (นาที, คิดตาม business hours)
+  firstResponseLowMin  Int      @default(480) // 8 ชม.
+  firstResponseNormMin Int      @default(240) // 4 ชม.
+  firstResponseHighMin Int      @default(60) // 1 ชม.
+  firstResponseUrgMin  Int      @default(15) // 15 นาที
+  // เวลา resolution ตาม priority (นาที, คิดตาม business hours)
+  resolutionLowMin     Int      @default(2880) // 48 ชม.
+  resolutionNormMin    Int      @default(1440) // 24 ชม.
+  resolutionHighMin    Int      @default(480) // 8 ชม.
+  resolutionUrgMin     Int      @default(120) // 2 ชม.
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  tickets Ticket[]
+
+  @@index([tenantId])
+}
+
+// Ticket — หัวใจของ Help Desk
+// ticketNumber unique ต่อ tenant: #1024 ของ acme ไม่ชนกับ globex
+// SLA fields: firstResponseDueAt, resolutionDueAt, firstRespondedAt
+//   และ breach flags สำหรับ async check ผ่าน BullMQ
+model Ticket {
+  id           String         @id @default(cuid())
+  tenantId     String
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // ticketNumber unique ต่อ tenant — generate ที่ app layer (เช่น auto-increment per tenant)
+  ticketNumber Int
+  subject      String
+  status       TicketStatus   @default(NEW)
+  priority     TicketPriority @default(NORMAL)
+
+  // ผู้แจ้ง ticket — Contact ของ tenant นี้เท่านั้น
+  requesterContactId String
+  requesterContact   Contact @relation(fields: [requesterContactId], references: [id])
+
+  // agent ที่รับผิดชอบ — TenantMember ของ tenant นี้เท่านั้น (nullable)
+  // FK ชี้ TenantMember ไม่ใช่ User เพื่อกันการ assign ข้าม tenant
+  assigneeId String?
+  assignee   TenantMember? @relation("TicketAssignee", fields: [assigneeId], references: [id])
+
+  // SLA policy ที่ใช้กับ ticket นี้
+  slaPolicyId String?
+  slaPolicy   SlaPolicy? @relation(fields: [slaPolicyId], references: [id])
+
+  // channel ที่ ticket เข้ามา เช่น "email", "portal", "api"
+  channel String @default("portal")
+
+  // === SLA Tracking Fields ===
+  // deadline คำนวณจาก SlaPolicy + business hours ของ tenant
+  firstResponseDueAt    DateTime? // deadline first response
+  resolutionDueAt       DateTime? // deadline resolution
+  firstRespondedAt      DateTime? // timestamp ที่ agent ตอบครั้งแรก (PUBLIC message)
+  resolvedAt            DateTime? // timestamp ที่ status เปลี่ยนเป็น SOLVED/CLOSED
+  // breach flags — set โดย BullMQ job เมื่อเกิน deadline
+  firstResponseBreached Boolean   @default(false)
+  resolutionBreached    Boolean   @default(false)
+  // === SLA Pause/Resume (เมื่อ status = PENDING) ===
+  slaPausedAt           DateTime? // เวลาที่ pause SLA timer ล่าสุด
+  slaPausedDurationMin  Int       @default(0) // รวมเวลาที่ pause ทั้งหมด (นาที)
+
+  // email threading — Message-ID ของ email แรกที่สร้าง ticket นี้
+  emailMessageId String?
+
+  // metadata สำหรับ custom fields / integration data
+  metadata Json @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages    TicketMessage[]
+  attachments Attachment[]
+  auditLogs   AuditLog[]
+
+  // composite unique: ticketNumber unique ต่อ tenant
+  @@unique([tenantId, ticketNumber])
+  @@index([tenantId])
+  @@index([tenantId, status]) // query กรอง status ใน tenant
+  @@index([tenantId, assigneeId]) // query ticket ของ agent คนนั้นใน tenant
+  @@index([tenantId, requesterContactId]) // query ticket ของ contact ใน tenant (portal)
+  @@index([tenantId, priority, status]) // composite สำหรับ SLA dashboard
+  @@index([firstResponseDueAt]) // BullMQ SLA checker
+  @@index([resolutionDueAt]) // BullMQ SLA checker
+}
+
+// TicketMessage — ข้อความในแต่ละ ticket
+// visibility = INTERNAL: internal note ระหว่าง agent — ห้ามส่งออกฝั่ง portal
+// query ของ portal ต้องกรอง visibility = PUBLIC เสมอ (backend, ไม่ใช่แค่ UI)
+// author เป็นได้ทั้ง agent (TenantMember) หรือ contact — ใช้ nullable FK สองตัว
+// email threading: เก็บ emailMessageId / emailInReplyTo / emailReferences
+model TicketMessage {
+  id       String @id @default(cuid())
+  tenantId String
+  // ไม่มี relation ตรงไป Tenant เพราะเข้าถึงผ่าน Ticket เสมอ
+  // แต่มี tenantId เพื่อ RLS + tenant-scoped index
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  // === Audience/Author ===
+  // author เป็น agent หรือ contact ได้ — ใช้ nullable FK สองตัว, exactly one ต้องไม่ null
+  // constraint บังคับที่ app layer: ต้องมี authorMemberId หรือ authorContactId อย่างใดอย่างหนึ่ง
+  authorMemberId  String?
+  authorMember    TenantMember? @relation("MessageAuthorMember", fields: [authorMemberId], references: [id])
+  authorContactId String?
+  authorContact   Contact?      @relation("MessageAuthorContact", fields: [authorContactId], references: [id])
+
+  // visibility = INTERNAL ห้ามหลุดไปฝั่ง portal — กรองที่ query ระดับ backend
+  visibility MessageVisibility @default(PUBLIC)
+  body       String // plain text หรือ HTML
+  bodyFormat String            @default("text") // "text" | "html" | "markdown"
+
+  // === Email Threading Fields ===
+  // เก็บ email headers เพื่อ thread กลับ ticket เดิมเมื่อมี reply
+  emailMessageId  String? // Message-ID ของ email นี้ (outbound/inbound)
+  emailInReplyTo  String? // In-Reply-To header
+  emailReferences String? // References header (space-separated Message-IDs)
+
+  // สำหรับ outbound: เช็คว่า email ส่งออกแล้วหรือยัง
+  emailSentAt DateTime?
+
+  createdAt DateTime @default(now())
+  // TicketMessage ไม่มี updatedAt — ไม่อนุญาตให้แก้ข้อความหลังส่ง (append-only)
+
+  attachments Attachment[]
+
+  @@index([tenantId])
+  @@index([ticketId])
+  @@index([ticketId, visibility]) // portal query: WHERE ticketId = ? AND visibility = 'PUBLIC'
+  @@index([emailMessageId]) // threading lookup
+}
+
+// Attachment — ไฟล์แนบของ TicketMessage
+// เก็บ URL จาก storage (Supabase Storage / S3) ไม่เก็บ binary ใน DB
+model Attachment {
+  id         String        @id @default(cuid())
+  tenantId   String
+  ticketId   String
+  ticket     Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  messageId  String
+  message    TicketMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  fileName   String
+  fileSize   Int // bytes
+  mimeType   String
+  storageUrl String // URL จาก storage provider
+  createdAt  DateTime      @default(now())
+
+  @@index([tenantId])
+  @@index([messageId])
+  @@index([ticketId])
+}
+
+// Subscription — 1 Tenant = 1 Subscription เสมอ
+// sync มาจาก Stripe webhook — ห้าม query Stripe API ทุก request
+// ราคาเก็บเป็น Int (satang/cents) ห้าม Float
+model Subscription {
+  id       String             @id @default(cuid())
+  tenantId String             @unique // 1 Tenant = 1 Subscription
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  status   SubscriptionStatus @default(TRIALING)
+
+  // === Stripe IDs ===
+  stripeCustomerId     String? @unique
+  stripeSubscriptionId String? @unique
+  stripePriceId        String?
+
+  // ราคา Int (satang/cents)
+  currentPriceAmount Int       @default(0)
+  currency           String    @default("thb")
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean   @default(false)
+  canceledAt         DateTime?
+  trialEndAt         DateTime?
+
+  // plan ปัจจุบัน (sync จาก Stripe metadata หรือ lookup)
+  planName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
+}
+
+// ProcessedInboundEmail — idempotency guard สำหรับ inbound email webhook
+// provider อาจส่ง webhook ซ้ำได้ — เช็ค messageId ก่อน process เสมอ
+// composite unique (tenantId, messageId): Message-ID เดียวกันใน tenant เดียวกัน = ข้าม
+model ProcessedInboundEmail {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // Message-ID จาก email header (RFC 5322)
+  messageId   String
+  // ticket ที่สร้างหรือ append จาก email นี้
+  ticketId    String?
+  // ผลการ process
+  processedAt DateTime @default(now())
+  status      String   @default("ok") // "ok" | "error" | "duplicate"
+  errorDetail String?
+
+  // composite unique: กัน process email เดียวกันซ้ำในเดือน tenant
+  @@unique([tenantId, messageId])
+  @@index([tenantId])
+}
+
+// AuditLog — immutable event log
+// ไม่มี updatedAt — ห้าม update/delete record นี้เด็ดขาด
+// เก็บ before/after JSON สำหรับ: เปลี่ยน status/assignee/priority,
+//   merge ticket, เชิญ agent, เปลี่ยน plan, แก้ contact
+// actor เป็นได้ 3 แบบ: User (agent), TenantMember, Contact, หรือ "system"
+model AuditLog {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // === Actor (ผู้กระทำ) ===
+  // actor อาจเป็น User, TenantMember, Contact หรือ system (actorType = "system")
+  actorType      String // "user" | "member" | "contact" | "system"
+  actorUserId    String?
+  actorUser      User?         @relation("AuditActor", fields: [actorUserId], references: [id])
+  actorMemberId  String?
+  actorMember    TenantMember? @relation("AuditMemberActor", fields: [actorMemberId], references: [id])
+  actorContactId String?
+  actorContact   Contact?      @relation("AuditContactActor", fields: [actorContactId], references: [id])
+
+  // === Target ===
+  targetType String // "ticket" | "ticket_message" | "contact" | "tenant_member" | "subscription" | ...
+  targetId   String // ID ของ record ที่ถูกกระทำ
+
+  // === Action & Payload ===
+  action   String // เช่น "ticket.status_changed", "ticket.assigned", "member.invited"
+  // ไม่ log PII ที่ sensitive โดยไม่จำเป็น
+  before   Json? // state ก่อนเปลี่ยน
+  after    Json? // state หลังเปลี่ยน
+  metadata Json   @default("{}")
+
+  // ticketId ไว้ query audit log ของ ticket หนึ่ง ๆ โดยตรง
+  ticketId String?
+  ticket   Ticket? @relation(fields: [ticketId], references: [id])
+
+  // immutable — มีแค่ createdAt ไม่มี updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, targetType, targetId]) // query audit log ของ entity ใด entity หนึ่ง
+  @@index([tenantId, ticketId]) // query audit log ของ ticket
+  @@index([actorUserId])
+  @@index([actorMemberId])
+}
