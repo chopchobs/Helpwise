@@ -330,5 +330,117 @@ export async function requireContact(): Promise<ContactSession> {
  * magic-link token ต้อง expire เร็ว (15 นาที) + ใช้ได้ครั้งเดียว (store ใน Redis + delete หลัง verify)
  */
 
-// Export constants สำหรับ auth route handlers (Phase ถัดไป)
+// Export constants สำหรับ auth route handlers
 export { AGENT_COOKIE_NAME, CONTACT_COOKIE_NAME, TOKEN_EXPIRY };
+
+// =============================================================================
+// TOKEN ISSUANCE
+// =============================================================================
+
+/**
+ * ออก JWT สำหรับ agent หลังจาก verify email + password
+ * payload: { sub: userId, type: "agent", iat, exp }
+ */
+export async function issueAgentToken(userId: string): Promise<string> {
+  return new SignJWT({ type: "agent" } satisfies Omit<AgentTokenPayload, keyof JWTPayload>)
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(userId)
+    .setIssuedAt()
+    .setExpirationTime(TOKEN_EXPIRY)
+    .sign(getJwtSecret());
+}
+
+/**
+ * ออก JWT สำหรับ contact หลังจาก verify magic-link token
+ * payload: { sub: contactId, tenantId, type: "contact", iat, exp }
+ */
+export async function issueContactToken(
+  contactId: string,
+  tenantId: string
+): Promise<string> {
+  return new SignJWT({
+    type: "contact",
+    tenantId,
+  } satisfies Omit<ContactTokenPayload, keyof JWTPayload>)
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(contactId)
+    .setIssuedAt()
+    .setExpirationTime(TOKEN_EXPIRY)
+    .sign(getJwtSecret());
+}
+
+// =============================================================================
+// COOKIE HELPERS
+// cookie attributes บังคับ (security):
+//   httpOnly: true     — กัน JavaScript client อ่าน cookie (XSS)
+//   secure: prod only  — ส่งผ่าน HTTPS เท่านั้นใน production
+//   sameSite: strict   — กัน CSRF ข้าม site
+//   path: /            — ใช้ได้ทุก path ของ subdomain
+// maxAge ตรงกับ TOKEN_EXPIRY (8h = 28800 วินาที)
+// =============================================================================
+
+/** maxAge เป็นวินาที ตรงกับ TOKEN_EXPIRY "8h" */
+const COOKIE_MAX_AGE_SECONDS = 8 * 60 * 60; // 8 ชั่วโมง
+
+/**
+ * set agent session cookie หลัง login สำเร็จ
+ * ⚠️ เรียกใน route handler เท่านั้น (ใช้ next/headers cookies())
+ */
+export async function setAgentCookie(token: string): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.set(AGENT_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+    maxAge: COOKIE_MAX_AGE_SECONDS,
+  });
+}
+
+/**
+ * set contact session cookie หลัง magic-link verify สำเร็จ
+ * ⚠️ เรียกใน route handler เท่านั้น
+ */
+export async function setContactCookie(token: string): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.set(CONTACT_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+    maxAge: COOKIE_MAX_AGE_SECONDS,
+  });
+}
+
+/**
+ * ลบ agent session cookie (logout)
+ *
+ * MEDIUM-1: ใช้ set maxAge=0 แทน delete() — บาง browser ไม่ clear cookie
+ * ถ้า attributes (httpOnly, secure, sameSite, path) ไม่ตรงกับที่ set ไว้ตอน login
+ */
+export async function clearAgentCookie(): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.set(AGENT_COOKIE_NAME, "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+    maxAge: 0,
+  });
+}
+
+/**
+ * ลบ contact session cookie (logout)
+ *
+ * MEDIUM-1: ใช้ set maxAge=0 แทน delete() เหตุผลเดียวกับ clearAgentCookie
+ */
+export async function clearContactCookie(): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.set(CONTACT_COOKIE_NAME, "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+    maxAge: 0,
+  });
+}

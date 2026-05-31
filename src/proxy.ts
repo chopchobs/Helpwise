@@ -73,6 +73,9 @@ const SKIP_TENANT_PATH_PREFIXES = [
   "/api/webhooks/email/",
   "/admin/",
   "/marketing/",
+  // MEDIUM-3: signup อยู่บน root domain (ไม่มี tenant context) — เพิ่มเป็น defense-in-depth
+  // กัน getTenantContext() ถูกเรียกโดยไม่ตั้งใจในอนาคต (เช่น middleware ที่เพิ่มทีหลัง)
+  "/api/auth/signup",
 ];
 
 // =============================================================================
