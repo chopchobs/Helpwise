@@ -184,7 +184,16 @@ async function lookupTenant(slug: string): Promise<CachedTenant | null> {
  * ชื่อ export ต้องเป็น "proxy" (ตาม Next.js proxy file convention)
  */
 export async function proxy(request: NextRequest): Promise<NextResponse> {
-  const { pathname, hostname } = new URL(request.url);
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+  // ⚠️ hostname ต้องอ่านจาก Host header — `request.url` ถูก Next normalize เป็น
+  // host ที่ server bind (localhost) จึงไม่สะท้อน subdomain ของ tenant
+  // fallback: x-forwarded-host (proxy/CDN) → url.host
+  const rawHost =
+    request.headers.get("host") ??
+    request.headers.get("x-forwarded-host") ??
+    url.host;
+  const hostname = rawHost.split(":")[0]; // ตัด port ออก
   const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com";
 
   // H-2: ข้าม path ที่ไม่ต้องการ tenant context (assets, webhooks, admin)
