@@ -1,12 +1,14 @@
-// Layout สำหรับ agent route group — app ภายในสำหรับ agent
-// พื้นหลัง Soft White, center card กลางจอ
+// Layout สำหรับ agent route group — plain wrapper สำหรับ ticket pages
+// หน้า auth (login) จัดการ centering ตัวเองผ่าน flex min-h-screen
+import React from "react";
+
 export default function AgentLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-[#F7F9FB] flex flex-col items-center justify-center px-4 py-12">
+    <div className="min-h-screen bg-[#F7F9FB]">
       {children}
     </div>
   );

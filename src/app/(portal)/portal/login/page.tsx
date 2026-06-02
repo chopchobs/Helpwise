@@ -71,6 +71,8 @@ export default function PortalLoginPage() {
   // === Sent view — แสดงหลังจาก request ส่งแล้ว ===
   if (isSent) {
     return (
+      // centering สำหรับหน้า auth — layout ของ route group เป็น plain wrapper แล้ว
+      <div className="flex min-h-screen items-center justify-center px-4 py-12">
       <AuthCard>
         <div className="flex flex-col items-center text-center gap-4">
           <div className="w-12 h-12 rounded-full bg-teal-50 flex items-center justify-center">
@@ -98,11 +100,14 @@ export default function PortalLoginPage() {
           </button>
         </div>
       </AuthCard>
+      </div>
     );
   }
 
   // === Form view ===
   return (
+    // centering สำหรับหน้า auth — layout ของ route group เป็น plain wrapper แล้ว
+    <div className="flex min-h-screen items-center justify-center px-4 py-12">
     <AuthCard>
       {/* Header */}
       <div className="flex flex-col items-center mb-6">
@@ -145,5 +150,6 @@ export default function PortalLoginPage() {
         </a>
       </p>
     </AuthCard>
+    </div>
   );
 }

@@ -86,9 +86,11 @@ export default function PortalVerifyPage() {
     verifyToken();
   }, [router]);
 
+  // centering สำหรับหน้า auth — layout ของ route group เป็น plain wrapper แล้ว
   // === Verifying state ===
   if (status === "verifying") {
     return (
+      <div className="flex min-h-screen items-center justify-center px-4 py-12">
       <AuthCard>
         <div className="flex flex-col items-center text-center gap-4 py-4">
           <Loader2
@@ -102,12 +104,14 @@ export default function PortalVerifyPage() {
           </div>
         </div>
       </AuthCard>
+      </div>
     );
   }
 
   // === Success state ===
   if (status === "success") {
     return (
+      <div className="flex min-h-screen items-center justify-center px-4 py-12">
       <AuthCard>
         <div className="flex flex-col items-center text-center gap-4 py-4">
           <div className="w-12 h-12 rounded-full bg-teal-50 flex items-center justify-center">
@@ -119,11 +123,13 @@ export default function PortalVerifyPage() {
           </div>
         </div>
       </AuthCard>
+      </div>
     );
   }
 
   // === Error state ===
   return (
+    <div className="flex min-h-screen items-center justify-center px-4 py-12">
     <AuthCard>
       <div className="flex flex-col items-center text-center gap-4 py-4">
         <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center">
@@ -145,5 +151,6 @@ export default function PortalVerifyPage() {
         </a>
       </div>
     </AuthCard>
+    </div>
   );
 }
