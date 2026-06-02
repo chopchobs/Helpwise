@@ -77,7 +77,10 @@ export async function createTicketWithNumber(
 ) {
   const { tenantId, subject, requesterContactId, priority, channel, firstMessage } = input;
 
-  const MAX_RETRIES = 3;
+  // MAX_RETRIES สูงขึ้น + jitter backoff เพื่อทน burst contention บน tenant เดียว
+  // (smoke test: create พร้อมกันหลายอันแล้วชน @@unique([tenantId, ticketNumber]))
+  // วิธี max+1 แย่ง lock กันโดยธรรมชาติ — retry พร้อม jitter ช่วยให้ collide แล้วกระจายตัว
+  const MAX_RETRIES = 10;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -136,11 +139,14 @@ export async function createTicketWithNumber(
         err.code === "P2002" &&
         attempt < MAX_RETRIES - 1
       ) {
-        // retry โดยไม่ sleep — transaction abort แล้ว number จะถูก recalculate ใน round ถัดไป
         console.warn(
           `[tickets] ticketNumber race detected (attempt ${attempt + 1}/${MAX_RETRIES}), retrying...`,
           { tenantId }
         );
+        // jitter backoff: หน่วงสุ่ม (เพิ่มตาม attempt) เพื่อกระจาย retry ที่ชนกัน
+        // transaction abort แล้ว number จะถูก recalculate ใน round ถัดไป
+        const backoffMs = Math.floor(Math.random() * 25) + attempt * 15;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
         continue;
       }
       throw err;
