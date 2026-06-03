@@ -256,6 +256,61 @@ export interface ContactsResponse {
 }
 
 // =============================================================================
+// AUTH & SESSION TYPES (agent workspace)
+// =============================================================================
+
+/** ข้อมูล user ที่ login อยู่ */
+export interface SessionUser {
+  id: string;
+  name: string | null;
+  email: string;
+  avatarUrl: string | null;
+}
+
+/** ข้อมูล membership ใน tenant ปัจจุบัน */
+export interface SessionMember {
+  id: string;
+  role: MemberRole;
+}
+
+/** ข้อมูล tenant ปัจจุบัน */
+export interface SessionTenant {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  logoUrl: string | null;
+  accentColor: string | null;
+}
+
+/** Response shape: GET /api/auth/agent/me */
+export interface MeResponse {
+  data: {
+    user: SessionUser;
+    member: SessionMember;
+    tenant: SessionTenant;
+  } | null;
+  error: ApiError | null;
+}
+
+// =============================================================================
+// DASHBOARD TYPES
+// =============================================================================
+
+/** Response shape: GET /api/dashboard */
+export interface DashboardResponse {
+  data: {
+    statusCounts: Record<TicketStatus, number>;
+    myAssignedCount: number;
+    myAssigned: AgentTicketSummary[];
+    unassignedCount: number;
+    unassigned: AgentTicketSummary[];
+    recent: AgentTicketSummary[];
+  } | null;
+  error: ApiError | null;
+}
+
+// =============================================================================
 // SHARED ERROR SHAPE
 // =============================================================================
 
