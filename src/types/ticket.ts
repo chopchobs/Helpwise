@@ -61,9 +61,12 @@ export interface RequesterContact {
   avatarUrl: string | null;
 }
 
-/** รูปแบบ assignee (agent view) */
+export type MemberRole = "OWNER" | "ADMIN" | "AGENT" | "VIEWER";
+
+/** รูปแบบ assignee (agent view) — ตรงกับ GET /api/tickets/:id ที่ select { id, role, user } */
 export interface AssigneeInfo {
   id: string;
+  role: MemberRole;
   user: {
     name: string | null;
     avatarUrl: string | null;
@@ -213,6 +216,42 @@ export interface PortalPostMessageResponse {
     createdAt: string;
     authorContact: ContactAuthor | null;
   } | null;
+  error: ApiError | null;
+}
+
+// =============================================================================
+// MEMBER & CONTACT LIST (สำหรับ create-ticket form + assignee dropdown)
+// =============================================================================
+
+/** รายชื่อ member ที่ใช้ใน assignee dropdown */
+export interface MemberListItem {
+  id: string; // TenantMember.id — ใช้เป็น assigneeId
+  role: "OWNER" | "ADMIN" | "AGENT" | "VIEWER";
+  user: {
+    id: string;
+    name: string | null;
+    email: string;
+    avatarUrl: string | null;
+  };
+}
+
+/** Response shape: GET /api/members */
+export interface MembersResponse {
+  data: { members: MemberListItem[] } | null;
+  error: ApiError | null;
+}
+
+/** รายชื่อ contact ที่ใช้ใน requester combobox */
+export interface ContactListItem {
+  id: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+}
+
+/** Response shape: GET /api/contacts */
+export interface ContactsResponse {
+  data: { contacts: ContactListItem[] } | null;
   error: ApiError | null;
 }
 

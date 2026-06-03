@@ -188,16 +188,15 @@ export async function PATCH(
     }
 
     // 5. เตรียม update data
-    // FIX-6: ใช้ typed Prisma input — tenantPrisma extension strip tenantId อัตโนมัติ
-    // Omit<Prisma.TicketUpdateInput, "tenant"> เพราะ tenantPrisma ไม่ต้องการ tenantId ใน data
-    const updateData: Prisma.TicketUpdateInput = {};
+    // ใช้ TicketUncheckedUpdateInput เพื่อให้ set scalar FK (assigneeId) ได้โดยตรงแบบ type-safe
+    // (TicketUpdateInput บังคับใช้ connect/disconnect สำหรับ relation — ทำให้ต้อง cast any)
+    // TicketUncheckedUpdateInput อนุญาต scalar assigneeId/tenantId ตรง ๆ และ compatible กับ extension
+    const updateData: Prisma.TicketUncheckedUpdateInput = {};
     if (status !== undefined) updateData.status = status;
     if (priority !== undefined) updateData.priority = priority;
-    // assigneeId เป็น relation → ใช้ connect/disconnect pattern
-    // แต่ tenantPrisma extension รองรับ scalar assigneeId โดยตรง → ใช้ cast ปลอดภัย
+    // assigneeId: null = unassign, string = assign ให้ member ที่ verify แล้ว
     if (assigneeId !== undefined) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (updateData as any).assigneeId = assigneeId; // null = unassign; extension strip tenantId เอง
+      updateData.assigneeId = assigneeId;
     }
 
     // ถ้า status เปลี่ยนเป็น SOLVED หรือ CLOSED → set resolvedAt

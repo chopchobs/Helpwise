@@ -30,6 +30,8 @@ export interface CreateTicketInput {
   tenantId: string;
   subject: string;
   requesterContactId: string;
+  /** assigneeId = TenantMember.id — caller ต้อง verify ผ่าน verifyAssigneeMembership ก่อนส่งมา */
+  assigneeId?: string;
   priority?: TicketPriority;
   channel?: string;
   firstMessage?: {
@@ -75,7 +77,7 @@ export async function createTicketWithNumber(
   db: TenantScopedPrisma,
   input: CreateTicketInput
 ) {
-  const { tenantId, subject, requesterContactId, priority, channel, firstMessage } = input;
+  const { tenantId, subject, requesterContactId, assigneeId, priority, channel, firstMessage } = input;
 
   // MAX_RETRIES สูงขึ้น + jitter backoff เพื่อทน burst contention บน tenant เดียว
   // (smoke test: create พร้อมกันหลายอันแล้วชน @@unique([tenantId, ticketNumber]))
@@ -97,12 +99,15 @@ export async function createTicketWithNumber(
         const nextTicketNumber = (maxResult._max.ticketNumber ?? 0) + 1;
 
         // สร้าง ticket — ใส่ tenantId ใน data อย่างชัดเจน
+        // assigneeId ที่ส่งมาถูก verify จาก verifyAssigneeMembership แล้วที่ caller
+        // tx ไม่มี extension — ใส่ tenantId ใน data เองเพื่อ guarantee tenant scope
         const ticket = await tx.ticket.create({
           data: {
             tenantId,
             ticketNumber: nextTicketNumber,
             subject,
             requesterContactId,
+            assigneeId: assigneeId ?? null,
             priority: priority ?? TicketPriority.NORMAL,
             channel: channel ?? "portal",
             status: TicketStatus.NEW,

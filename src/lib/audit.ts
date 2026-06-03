@@ -9,7 +9,7 @@
  *   - ticket.status_changed, ticket.assigned, ticket.priority_changed
  *   - ticket.merged, ticket.closed, ticket.reopened
  *   - member.invited, member.role_changed, member.deactivated
- *   - contact.updated
+ *   - contact.created, contact.updated
  *   - subscription.plan_changed, subscription.status_changed
  *
  * Actor types:
