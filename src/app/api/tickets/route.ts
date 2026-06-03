@@ -14,9 +14,11 @@ import { z } from "zod";
 import { requireAgent, toAuthErrorResponse } from "@/lib/auth";
 import { tenantPrisma } from "@/lib/tenant";
 import { audit } from "@/lib/audit";
+import { prisma } from "@/lib/prisma";
 import { MessageVisibility, Prisma, TicketPriority, TicketStatus } from "@prisma/client";
 import {
   createTicketWithNumber,
+  verifyAssigneeMembership,
   verifyContactBelongsToTenant,
 } from "@/lib/tickets";
 
@@ -34,20 +36,36 @@ const listQuerySchema = z.object({
 });
 
 // schema สำหรับ POST body
-const createTicketSchema = z.object({
-  // FIX-9: subject min(3).max(200) — aligned กับ portal + frontend
-  subject: z.string().min(3, "subject ต้องมีอย่างน้อย 3 ตัวอักษร").max(200, "subject ยาวเกิน 200 ตัวอักษร"),
-  requesterContactId: z.string().min(1, "requesterContactId ห้ามว่าง"),
-  priority: z.nativeEnum(TicketPriority).optional(),
-  firstMessage: z
-    .object({
-      // FIX-8: max(50000) + FIX-9: min(1) (ไม่บังคับ 10)
-      body: z.string().min(1, "body ของ firstMessage ห้ามว่าง").max(50000, "body ยาวเกิน 50,000 ตัวอักษร"),
-      // FIX-7: ใช้ z.nativeEnum(MessageVisibility) แทน inline object literal
-      visibility: z.nativeEnum(MessageVisibility).optional(),
-    })
-    .optional(),
-});
+// requester รับได้ 2 แบบ: requesterContactId (id โดยตรง) หรือ requesterEmail (upsert)
+// Zod refine บังคับให้มีอย่างน้อยหนึ่งในสองแบบ
+const createTicketSchema = z
+  .object({
+    // FIX-9: subject min(3).max(200) — aligned กับ portal + frontend
+    subject: z.string().min(3, "subject ต้องมีอย่างน้อย 3 ตัวอักษร").max(200, "subject ยาวเกิน 200 ตัวอักษร"),
+    // requester แบบที่ 1: ส่ง contactId โดยตรง
+    requesterContactId: z.string().min(1).optional(),
+    // requester แบบที่ 2: ส่ง email (+ name เพิ่มเติม) แล้ว upsert contact
+    requesterEmail: z.string().email("รูปแบบ requesterEmail ไม่ถูกต้อง").optional(),
+    requesterName: z.string().min(1).optional(),
+    // assigneeId = TenantMember.id (optional)
+    assigneeId: z.string().min(1).optional(),
+    priority: z.nativeEnum(TicketPriority).optional(),
+    firstMessage: z
+      .object({
+        // FIX-8: max(50000) + FIX-9: min(1) (ไม่บังคับ 10)
+        body: z.string().min(1, "body ของ firstMessage ห้ามว่าง").max(50000, "body ยาวเกิน 50,000 ตัวอักษร"),
+        // FIX-7: ใช้ z.nativeEnum(MessageVisibility) แทน inline object literal
+        visibility: z.nativeEnum(MessageVisibility).optional(),
+      })
+      .optional(),
+  })
+  .refine(
+    (data) => !!data.requesterContactId || !!data.requesterEmail,
+    {
+      message: "ต้องระบุ requesterContactId หรือ requesterEmail อย่างใดอย่างหนึ่ง",
+      path: ["requesterContactId"],
+    }
+  );
 
 // =============================================================================
 // GET /api/tickets — list tickets (agent view)
@@ -177,30 +195,98 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const { subject, requesterContactId, priority, firstMessage } = parsed.data;
+    const {
+      subject,
+      requesterContactId: rawContactId,
+      requesterEmail,
+      requesterName,
+      assigneeId,
+      priority,
+      firstMessage,
+    } = parsed.data;
+
     const db = tenantPrisma(ctx.tenantId);
 
-    // 3. verify requesterContact เป็น Contact ของ tenant นี้จริง
-    // กัน agent ระบุ contactId ของ tenant อื่น (cross-tenant spoofing)
-    const contact = await verifyContactBelongsToTenant(db, requesterContactId);
-    if (!contact) {
-      return NextResponse.json(
-        {
-          data: null,
-          error: {
-            code: "CONTACT_NOT_FOUND",
-            message: "ไม่พบ contact ที่ระบุใน workspace นี้",
+    // 3. Resolve requesterContactId — รับ 2 แบบ:
+    //    แบบที่ 1: requesterContactId โดยตรง → verify เป็น contact ของ tenant นี้
+    //    แบบที่ 2: requesterEmail → upsert contact by tenantId_email แล้วใช้ id ที่ได้
+    let resolvedContactId: string;
+
+    if (rawContactId) {
+      // verify ว่า contactId เป็น contact ที่ active ของ tenant นี้จริง
+      // กัน agent ระบุ contactId ของ tenant อื่น (cross-tenant spoofing)
+      const contact = await verifyContactBelongsToTenant(db, rawContactId);
+      if (!contact) {
+        return NextResponse.json(
+          {
+            data: null,
+            error: {
+              code: "CONTACT_NOT_FOUND",
+              message: "ไม่พบ contact ที่ระบุใน workspace นี้",
+            },
           },
-        },
-        { status: 400 }
-      );
+          { status: 400 }
+        );
+      }
+      resolvedContactId = contact.id;
+    } else {
+      // requesterEmail path: upsert contact by composite unique key tenantId_email
+      // ห่อ read + upsert ใน interactive transaction เพื่อให้ atomic
+      // กัน race condition เมื่อ agent 2 คน submit email เดิมพร้อมกัน — name-update logic จะถูกต้องเสมอ
+      // tx ไม่มี extension → ต้องใส่ tenantId เองใน where/create/update ทุกจุด
+      const upserted = await prisma.$transaction(async (tx) => {
+        // อ่าน contact เดิมภายใน transaction เดียวกับ upsert
+        const existingContact = await tx.contact.findFirst({
+          where: { tenantId: ctx.tenantId, email: requesterEmail! },
+          select: { id: true, name: true },
+        });
+
+        return tx.contact.upsert({
+          where: {
+            tenantId_email: {
+              tenantId: ctx.tenantId,
+              email: requesterEmail!,
+            },
+          },
+          create: {
+            email: requesterEmail!,
+            tenantId: ctx.tenantId,
+            ...(requesterName ? { name: requesterName } : {}),
+          },
+          update: {
+            // อัปเดต name เฉพาะเมื่อ requesterName ให้มาและ contact เดิมยังไม่มีชื่อ
+            ...(requesterName && !existingContact?.name ? { name: requesterName } : {}),
+          },
+          select: { id: true, name: true },
+        });
+      });
+      resolvedContactId = upserted.id;
     }
 
-    // 4. สร้าง ticket พร้อม ticketNumber แบบ atomic + retry
+    // 4. ตรวจ assigneeId (ถ้ามี) — ต้องเป็น active TenantMember ของ tenant นี้
+    // กัน cross-tenant assignment (agent tenant A ไม่ควร assign ให้ member tenant B)
+    if (assigneeId) {
+      const assignee = await verifyAssigneeMembership(db, assigneeId);
+      if (!assignee) {
+        return NextResponse.json(
+          {
+            data: null,
+            error: {
+              code: "ASSIGNEE_NOT_FOUND",
+              message: "ไม่พบ assignee ที่ระบุ หรือไม่ใช่สมาชิกที่ active ของ workspace นี้",
+            },
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 5. สร้าง ticket พร้อม ticketNumber แบบ atomic + retry
     const ticket = await createTicketWithNumber(db, {
       tenantId: ctx.tenantId,
       subject,
-      requesterContactId,
+      requesterContactId: resolvedContactId,
+      assigneeId,
       priority,
       channel: "agent", // agent สร้างเอง
       firstMessage: firstMessage
@@ -213,8 +299,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         : undefined,
     });
 
-    // 5. โหลด ticket พร้อม relations เพื่อ return
-    const ticketWithRelations = await db.ticket.findFirst({
+    // 6. โหลด ticket พร้อม relations เพื่อ return
+    // หมายเหตุ: agent เห็น messages ทุก visibility (PUBLIC + INTERNAL) ได้ — จงใจไม่กรอง visibility ที่นี่
+    // (portal route เท่านั้นที่กรอง visibility = PUBLIC เพื่อซ่อน internal note จากลูกค้า)
+    const ticketWithRelations = await db.ticket.findUnique({
       where: { id: ticket.id },
       include: {
         requesterContact: {
@@ -242,7 +330,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
 
     // FIX-11: audit log ticket.created
-    // log แค่ metadata ไม่ log body ข้อความ (อาจเป็น PII)
+    // log แค่ metadata ไม่ log subject (อาจมี PII) หรือ body ข้อความ
+    // subject ดึงได้จาก Ticket record โดยตรงถ้าต้องการ — AuditLog immutable ลบไม่ได้
     void audit.log({
       tenantId: ctx.tenantId,
       actor: { type: "member", memberId: member.id },
@@ -251,12 +340,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       action: "ticket.created",
       after: {
         ticketNumber: ticket.ticketNumber,
-        subject: ticket.subject,
         status: ticket.status,
         priority: ticket.priority,
+        requesterContactId: resolvedContactId,
+        channel: ticket.channel,
       },
       ticketId: ticket.id,
     });
+
+    // ถ้า create พร้อม assignee ให้ log ticket.assigned เพิ่มด้วย
+    // before: null เพราะ ticket เพิ่งสร้าง ยังไม่มี assignee มาก่อน
+    if (assigneeId) {
+      void audit.log({
+        tenantId: ctx.tenantId,
+        actor: { type: "member", memberId: member.id },
+        targetType: "ticket",
+        targetId: ticket.id,
+        action: "ticket.assigned",
+        before: { assigneeId: null },
+        after: { assigneeId },
+        ticketId: ticket.id,
+      });
+    }
 
     return NextResponse.json({ data: ticketWithRelations, error: null }, { status: 201 });
   } catch (err) {

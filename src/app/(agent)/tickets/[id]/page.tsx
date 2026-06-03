@@ -28,6 +28,8 @@ import type {
   TicketStatus,
   TicketPriority,
   MessageVisibility,
+  MemberListItem,
+  MembersResponse,
 } from "@/types/ticket";
 
 // =============================================================================
@@ -282,7 +284,7 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
       <div className="flex justify-end mt-3">
         <button
           type="button"
-          onClick={handleSend}
+          onClick={() => void handleSend()}
           disabled={isSubmitting || !body.trim()}
           className={[
             "inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors",
@@ -320,6 +322,9 @@ export default function AgentTicketDetailPage() {
   const [patchError, setPatchError] = useState<string | null>(null);
   const [isPatchingStatus, setIsPatchingStatus] = useState(false);
   const [isPatchingPriority, setIsPatchingPriority] = useState(false);
+  const [isPatchingAssignee, setIsPatchingAssignee] = useState(false);
+  // รายชื่อ members สำหรับ assignee dropdown
+  const [members, setMembers] = useState<MemberListItem[]>([]);
   const [, startTransition] = useTransition();
 
   const fetchTicket = useCallback(async () => {
@@ -357,6 +362,22 @@ export default function AgentTicketDetailPage() {
   useEffect(() => {
     startTransition(() => { void fetchTicket(); });
   }, [fetchTicket]);
+
+  // โหลด members สำหรับ assignee dropdown เมื่อ mount
+  useEffect(() => {
+    async function loadMembers() {
+      try {
+        const res = await fetch("/api/members", { credentials: "include" });
+        const json = (await res.json()) as MembersResponse;
+        if (res.ok && json.data) {
+          setMembers(json.data.members);
+        }
+      } catch {
+        // ไม่ block UI — assignee dropdown จะแสดง list ว่างแต่ยังใช้งานได้
+      }
+    }
+    void loadMembers();
+  }, []);
 
   async function handleStatusChange(status: TicketStatus) {
     if (!ticket || isPatchingStatus) return;
@@ -420,6 +441,41 @@ export default function AgentTicketDetailPage() {
       setPatchError("ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่");
     } finally {
       setIsPatchingPriority(false);
+    }
+  }
+
+  async function handleAssigneeChange(assigneeId: string) {
+    if (!ticket || isPatchingAssignee) return;
+    setIsPatchingAssignee(true);
+    setPatchError(null);
+
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        // ส่ง null เมื่อ assigneeId เป็นสตริงว่าง (unassign)
+        body: JSON.stringify({ assigneeId: assigneeId || null }),
+      });
+
+      const json = (await res.json()) as AgentPatchTicketResponse;
+
+      if (!res.ok || json.error) {
+        setPatchError(json.error?.message ?? "อัปเดต assignee ไม่สำเร็จ");
+        return;
+      }
+
+      if (json.data) {
+        // capture ไว้ก่อนเข้า setState closure เพื่อหลีกเลี่ยง non-null assertion ใน closure
+        const updated = json.data;
+        setTicket((prev) =>
+          prev ? { ...prev, assignee: updated.assignee } : prev
+        );
+      }
+    } catch {
+      setPatchError("ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่");
+    } finally {
+      setIsPatchingAssignee(false);
     }
   }
 
@@ -496,15 +552,9 @@ export default function AgentTicketDetailPage() {
             <span>
               ผู้แจ้ง: <span className="text-[#1F2933] font-medium">{requesterName}</span>
             </span>
-            <span>
-              ผู้รับผิดชอบ:{" "}
-              <span className="text-[#1F2933] font-medium">
-                {ticket.assignee?.user?.name ?? "ยังไม่ได้มอบหมาย"}
-              </span>
-            </span>
           </div>
 
-          {/* Controls: เปลี่ยน status + priority */}
+          {/* Controls: เปลี่ยน status + priority + assignee */}
           <div className="flex flex-wrap gap-3 mt-4 pt-4 border-t border-[#E4E7EB]">
             <div className="flex flex-col gap-1">
               <label htmlFor="ctrl-status" className="text-xs font-medium text-[#6B7280]">
@@ -539,6 +589,27 @@ export default function AgentTicketDetailPage() {
                 {PRIORITY_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Assignee dropdown — รูปแบบเดียวกับ status/priority control */}
+            <div className="flex flex-col gap-1">
+              <label htmlFor="ctrl-assignee" className="text-xs font-medium text-[#6B7280]">
+                ผู้รับผิดชอบ
+              </label>
+              <select
+                id="ctrl-assignee"
+                value={ticket.assignee?.id ?? ""}
+                disabled={isPatchingAssignee}
+                onChange={(e) => void handleAssigneeChange(e.target.value)}
+                className="rounded-lg border border-[#E4E7EB] bg-white px-3 py-1.5 text-sm text-[#1F2933] focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] disabled:opacity-60"
+              >
+                <option value="">ยังไม่มอบหมาย</option>
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.user.name ?? m.user.email}
                   </option>
                 ))}
               </select>
