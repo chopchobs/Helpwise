@@ -75,17 +75,17 @@ export default function PortalLoginPage() {
       <div className="flex min-h-screen items-center justify-center px-4 py-12">
       <AuthCard>
         <div className="flex flex-col items-center text-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-teal-50 flex items-center justify-center">
-            <Mail size={24} className="text-[#0CA678]" aria-hidden="true" />
+          <div className="w-12 h-12 rounded-full bg-success-tint flex items-center justify-center">
+            <Mail size={24} className="text-success" aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-[#1F2933]">ตรวจสอบอีเมลของคุณ</h1>
-            <p className="mt-2 text-sm text-[#6B7280]">
+            <h1 className="text-xl font-bold text-foreground">ตรวจสอบอีเมลของคุณ</h1>
+            <p className="mt-2 text-sm text-secondary">
               ถ้าอีเมล{" "}
-              <span className="font-medium text-[#1F2933]">{getValues("email")}</span>{" "}
+              <span className="font-medium text-foreground">{getValues("email")}</span>{" "}
               มีในระบบ เราได้ส่งลิงก์เข้าสู่ระบบไปแล้ว กรุณาตรวจอีเมล
             </p>
-            <p className="mt-2 text-xs text-[#6B7280]">
+            <p className="mt-2 text-xs text-secondary">
               ลิงก์มีอายุ 15 นาที และใช้ได้ครั้งเดียวเท่านั้น
             </p>
           </div>
@@ -94,7 +94,7 @@ export default function PortalLoginPage() {
           <button
             type="button"
             onClick={() => setIsSent(false)}
-            className="text-sm text-[#3B5BDB] hover:underline font-medium focus:outline-none focus:underline"
+            className="text-sm text-primary-ink hover:underline font-medium focus:outline-none focus:underline"
           >
             ไม่ได้รับอีเมล? ส่งลิงก์ใหม่
           </button>
@@ -111,11 +111,11 @@ export default function PortalLoginPage() {
     <AuthCard>
       {/* Header */}
       <div className="flex flex-col items-center mb-6">
-        <div className="w-10 h-10 rounded-xl bg-[#3B5BDB] flex items-center justify-center mb-3">
+        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center mb-3">
           <Mail size={20} className="text-white" aria-hidden="true" />
         </div>
-        <h1 className="text-2xl font-bold text-[#1F2933]">เข้าสู่ระบบ</h1>
-        <p className="mt-1 text-sm text-[#6B7280] text-center">
+        <h1 className="text-2xl font-bold text-foreground">เข้าสู่ระบบ</h1>
+        <p className="mt-1 text-sm text-secondary text-center">
           กรอกอีเมลของคุณ เราจะส่งลิงก์เข้าสู่ระบบให้
         </p>
       </div>
@@ -143,9 +143,9 @@ export default function PortalLoginPage() {
         </FormButton>
       </form>
 
-      <p className="mt-4 text-center text-xs text-[#6B7280]">
+      <p className="mt-4 text-center text-xs text-secondary">
         ต้องการความช่วยเหลือ?{" "}
-        <a href="mailto:support@helpwise.com" className="text-[#3B5BDB] hover:underline font-medium">
+        <a href="mailto:support@helpwise.com" className="text-primary-ink hover:underline font-medium">
           ติดต่อทีม support
         </a>
       </p>

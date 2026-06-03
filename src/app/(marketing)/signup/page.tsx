@@ -102,22 +102,22 @@ export default function SignupPage() {
     return (
       <AuthCard>
         <div className="flex flex-col items-center text-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-teal-50 flex items-center justify-center">
-            <Building2 size={24} className="text-[#0CA678]" aria-hidden="true" />
+          <div className="w-12 h-12 rounded-full bg-success-tint flex items-center justify-center">
+            <Building2 size={24} className="text-success" aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-[#1F2933]">สมัครสำเร็จแล้ว!</h1>
-            <p className="mt-2 text-sm text-[#6B7280]">
+            <h1 className="text-xl font-bold text-foreground">สมัครสำเร็จแล้ว!</h1>
+            <p className="mt-2 text-sm text-secondary">
               Workspace ของคุณพร้อมใช้งานแล้ว กรุณาไป login ที่ workspace ของคุณ
             </p>
           </div>
           <a
             href={workspaceUrl}
-            className="w-full flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold text-white bg-[#3B5BDB] hover:bg-[#2F4BC4] transition-colors focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:ring-offset-2"
+            className="w-full flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold text-white bg-primary-strong hover:bg-primary-strong-hover transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
           >
             ไปยัง {successState.slug}.{successState.rootDomain}
           </a>
-          <p className="text-xs text-[#6B7280] break-all">
+          <p className="text-xs text-secondary break-all">
             {workspaceUrl}
           </p>
         </div>
@@ -130,11 +130,11 @@ export default function SignupPage() {
     <AuthCard>
       {/* Header */}
       <div className="flex flex-col items-center mb-6">
-        <div className="w-10 h-10 rounded-xl bg-[#3B5BDB] flex items-center justify-center mb-3">
+        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center mb-3">
           <Building2 size={20} className="text-white" aria-hidden="true" />
         </div>
-        <h1 className="text-2xl font-bold text-[#1F2933]">เริ่มใช้งาน Helpwise</h1>
-        <p className="mt-1 text-sm text-[#6B7280] text-center">
+        <h1 className="text-2xl font-bold text-foreground">เริ่มใช้งาน Helpwise</h1>
+        <p className="mt-1 text-sm text-secondary text-center">
           สร้าง workspace ของบริษัทคุณ ใช้งานฟรีทันที
         </p>
       </div>
@@ -160,13 +160,13 @@ export default function SignupPage() {
 
         {/* Workspace slug */}
         <div className="flex flex-col gap-1">
-          <label htmlFor="slug" className="text-sm font-medium text-[#1F2933]">
+          <label htmlFor="slug" className="text-sm font-medium text-foreground">
             Workspace URL
           </label>
-          <div className="flex items-center rounded-lg border border-[#E4E7EB] bg-white overflow-hidden focus-within:ring-2 focus-within:ring-[#3B5BDB] focus-within:border-transparent hover:border-[#3B5BDB] transition-colors">
+          <div className="flex items-center rounded-lg border border-border bg-surface overflow-hidden focus-within:ring-2 focus-within:ring-primary focus-within:border-transparent hover:border-primary transition-colors">
             {/* prefix — aria-hidden เพราะ input id ระบุ label ชัดอยู่แล้ว */}
             <span
-              className="px-3 py-2 bg-[#F7F9FB] text-sm text-[#6B7280] border-r border-[#E4E7EB] select-none whitespace-nowrap"
+              className="px-3 py-2 bg-stone text-sm text-secondary border-r border-border select-none whitespace-nowrap"
               aria-hidden="true"
             >
               https://
@@ -178,22 +178,22 @@ export default function SignupPage() {
               autoComplete="off"
               aria-describedby={errors.slug ? "slug-error" : "slug-hint"}
               aria-invalid={errors.slug ? true : undefined}
-              className="flex-1 px-3 py-2 text-sm text-[#1F2933] placeholder:text-[#6B7280] focus:outline-none bg-transparent"
+              className="flex-1 px-3 py-2 text-sm text-foreground placeholder:text-muted focus:outline-none bg-transparent"
               {...register("slug")}
             />
             <span
-              className="px-3 py-2 bg-[#F7F9FB] text-sm text-[#6B7280] border-l border-[#E4E7EB] select-none whitespace-nowrap"
+              className="px-3 py-2 bg-stone text-sm text-secondary border-l border-border select-none whitespace-nowrap"
               aria-hidden="true"
             >
               .helpwise.com
             </span>
           </div>
           {errors.slug ? (
-            <p id="slug-error" role="alert" className="text-xs text-[#E03131] mt-0.5">
+            <p id="slug-error" role="alert" className="text-xs text-danger mt-0.5">
               {errors.slug.message}
             </p>
           ) : (
-            <p id="slug-hint" className="text-xs text-[#6B7280] mt-0.5">
+            <p id="slug-hint" className="text-xs text-secondary mt-0.5">
               ใช้ได้เฉพาะตัวอักษรพิมพ์เล็ก, ตัวเลข, และ hyphen
             </p>
           )}
@@ -237,9 +237,9 @@ export default function SignupPage() {
         </FormButton>
       </form>
 
-      <p className="mt-4 text-center text-xs text-[#6B7280]">
+      <p className="mt-4 text-center text-xs text-secondary">
         มี workspace อยู่แล้ว?{" "}
-        <a href="/login" className="text-[#3B5BDB] hover:underline font-medium">
+        <a href="/login" className="text-primary-ink hover:underline font-medium">
           เข้าสู่ระบบ
         </a>
       </p>

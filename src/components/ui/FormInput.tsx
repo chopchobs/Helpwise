@@ -18,7 +18,7 @@ const FormInput = forwardRef<HTMLInputElement, FormInputProps>(function FormInpu
     <div className="flex flex-col gap-1">
       <label
         htmlFor={id}
-        className="text-sm font-medium text-[#1F2933]"
+        className="text-sm font-medium text-foreground"
       >
         {label}
       </label>
@@ -28,13 +28,13 @@ const FormInput = forwardRef<HTMLInputElement, FormInputProps>(function FormInpu
         aria-describedby={error ? `${id}-error` : undefined}
         aria-invalid={error ? true : undefined}
         className={[
-          "w-full rounded-lg border px-3 py-2 text-sm text-[#1F2933]",
-          "placeholder:text-[#6B7280]",
-          "focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:border-transparent",
+          "w-full rounded-lg border px-3 py-2 text-sm text-foreground",
+          "placeholder:text-muted",
+          "focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
           "transition-colors",
           error
-            ? "border-[#E03131] bg-red-50"
-            : "border-[#E4E7EB] bg-white hover:border-[#3B5BDB]",
+            ? "border-danger bg-danger-tint"
+            : "border-border bg-surface hover:border-primary",
           className,
         ]
           .filter(Boolean)
@@ -45,7 +45,7 @@ const FormInput = forwardRef<HTMLInputElement, FormInputProps>(function FormInpu
         <p
           id={`${id}-error`}
           role="alert"
-          className="text-xs text-[#E03131] mt-0.5"
+          className="text-xs text-danger mt-0.5"
         >
           {error}
         </p>

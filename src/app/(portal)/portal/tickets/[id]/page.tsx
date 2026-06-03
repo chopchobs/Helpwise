@@ -42,23 +42,23 @@ function PortalMessageBubble({ message }: PortalMessageBubbleProps) {
   const fromSupport = isAgentMessage(message.authorMember);
 
   if (fromSupport) {
-    // ข้อความจากทีม support → align ซ้าย พื้นหลัง indigo อ่อน
+    // ข้อความจากทีม support → align ซ้าย พื้นหลัง primary-tint
     return (
       <div className="flex flex-col items-start gap-1">
         <div className="flex items-center gap-2 mb-0.5">
-          <div className="w-7 h-7 rounded-full bg-[#3B5BDB] flex items-center justify-center">
+          <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center">
             <User size={13} className="text-white" aria-hidden="true" />
           </div>
-          <span className="text-xs font-medium text-[#6B7280]">
+          <span className="text-xs font-medium text-secondary">
             {authorName} · ทีม Support
           </span>
         </div>
-        <div className="max-w-[80%] bg-[#EEF2FF] border border-[#C5D0FF] rounded-2xl rounded-tl-md px-4 py-3">
-          <p className="text-sm text-[#1F2933] whitespace-pre-wrap leading-relaxed">
+        <div className="max-w-[80%] bg-primary-tint border border-primary-tint rounded-2xl rounded-tl-md px-4 py-3">
+          <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
             {message.body}
           </p>
         </div>
-        <time className="text-xs text-[#6B7280] ml-9" dateTime={message.createdAt}>
+        <time className="text-xs text-secondary ml-9" dateTime={message.createdAt}>
           {formatDateFull(message.createdAt)}
         </time>
       </div>
@@ -68,12 +68,12 @@ function PortalMessageBubble({ message }: PortalMessageBubbleProps) {
   // ข้อความจากฉัน → align ขวา
   return (
     <div className="flex flex-col items-end gap-1">
-      <div className="max-w-[80%] bg-white border border-[#E4E7EB] rounded-2xl rounded-tr-md px-4 py-3 shadow-sm">
-        <p className="text-sm text-[#1F2933] whitespace-pre-wrap leading-relaxed">
+      <div className="max-w-[80%] bg-surface border border-border rounded-2xl rounded-tr-md px-4 py-3 shadow-sm">
+        <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
           {message.body}
         </p>
       </div>
-      <time className="text-xs text-[#6B7280]" dateTime={message.createdAt}>
+      <time className="text-xs text-secondary" dateTime={message.createdAt}>
         {formatDateFull(message.createdAt)}
       </time>
     </div>
@@ -156,8 +156,8 @@ function PortalReplyBox({ ticketId, isClosed, isSolved, onMessageSent }: PortalR
 
   if (isClosed) {
     return (
-      <div className="bg-white rounded-xl border border-[#E4E7EB] p-4 text-center">
-        <p className="text-sm text-[#6B7280]">
+      <div className="bg-surface rounded-xl border border-border p-4 text-center">
+        <p className="text-sm text-secondary">
           คำขอนี้ถูกปิดแล้ว — หากยังมีปัญหาโปรดสร้างคำขอใหม่
         </p>
       </div>
@@ -165,10 +165,10 @@ function PortalReplyBox({ ticketId, isClosed, isSolved, onMessageSent }: PortalR
   }
 
   return (
-    <div className="bg-white rounded-xl border border-[#E4E7EB] p-4">
+    <div className="bg-surface rounded-xl border border-border p-4">
       {/* hint สำหรับ SOLVED — แจ้งว่าการตอบกลับจะเปิด ticket ใหม่ */}
       {isSolved && (
-        <p className="text-xs text-[#6B7280] mb-2">
+        <p className="text-xs text-secondary mb-2">
           ticket นี้ได้รับการแก้ไขแล้ว — ตอบกลับเพื่อเปิด ticket นี้อีกครั้ง
         </p>
       )}
@@ -179,7 +179,7 @@ function PortalReplyBox({ ticketId, isClosed, isSolved, onMessageSent }: PortalR
         placeholder="พิมพ์ข้อความตอบกลับ... (Ctrl+Enter เพื่อส่ง)"
         rows={4}
         aria-label="ข้อความตอบกลับ"
-        className="w-full rounded-lg border border-[#E4E7EB] bg-white px-3 py-2 text-sm text-[#1F2933] resize-none placeholder:text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:border-transparent transition-colors hover:border-[#3B5BDB]"
+        className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground resize-none placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors hover:border-primary"
       />
 
       {error && (
@@ -193,7 +193,7 @@ function PortalReplyBox({ ticketId, isClosed, isSolved, onMessageSent }: PortalR
           type="button"
           onClick={handleSend}
           disabled={isSubmitting || !body.trim()}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#3B5BDB] hover:bg-[#2F4BC4] text-white text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#3B5BDB]"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-strong hover:bg-primary-strong-hover text-white text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-strong"
         >
           {isSubmitting ? (
             <RefreshCw size={14} className="animate-spin" aria-hidden="true" />
@@ -266,8 +266,8 @@ export default function PortalTicketDetailPage() {
   // ─── Loading ───────────────────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#F7F9FB] flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-[#6B7280]">
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-secondary">
           <RefreshCw size={28} className="animate-spin" aria-hidden="true" />
           <span className="text-sm">กำลังโหลด...</span>
         </div>
@@ -278,13 +278,13 @@ export default function PortalTicketDetailPage() {
   // ─── Error ─────────────────────────────────────────────────────────────────
   if (error || !ticket) {
     return (
-      <div className="min-h-screen bg-[#F7F9FB] flex items-center justify-center px-4">
-        <div className="bg-white rounded-xl border border-[#E4E7EB] p-8 max-w-md w-full text-center">
-          <p className="text-[#E03131] font-medium mb-4">{error ?? "เกิดข้อผิดพลาด"}</p>
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="bg-surface rounded-xl border border-border p-8 max-w-md w-full text-center">
+          <p className="text-danger font-medium mb-4">{error ?? "เกิดข้อผิดพลาด"}</p>
           <button
             type="button"
             onClick={() => router.push("/portal/tickets")}
-            className="text-sm text-[#3B5BDB] hover:underline"
+            className="text-sm text-primary-ink hover:underline"
           >
             กลับไปรายการ
           </button>
@@ -297,34 +297,34 @@ export default function PortalTicketDetailPage() {
   const isClosed = ticket.status === "CLOSED";
 
   return (
-    <div className="min-h-screen bg-[#F7F9FB]">
+    <div className="min-h-screen bg-background">
       <div className="max-w-2xl mx-auto px-4 py-8">
 
         {/* Back button */}
         <button
           type="button"
           onClick={() => router.push("/portal/tickets")}
-          className="inline-flex items-center gap-2 text-sm text-[#6B7280] hover:text-[#1F2933] mb-6 transition-colors focus:outline-none focus:underline"
+          className="inline-flex items-center gap-2 text-sm text-secondary hover:text-foreground mb-6 transition-colors focus:outline-none focus:underline"
         >
           <ArrowLeft size={16} aria-hidden="true" />
           กลับไปรายการ
         </button>
 
         {/* Ticket header */}
-        <div className="bg-white rounded-xl border border-[#E4E7EB] p-5 mb-4 shadow-sm">
+        <div className="bg-surface rounded-xl border border-border p-5 mb-4 shadow-sm">
           <div className="flex flex-wrap items-center gap-2 mb-2">
-            <span className="text-xs font-semibold text-[#6B7280]">
+            <span className="text-xs font-semibold text-secondary">
               #{ticket.ticketNumber}
             </span>
             <StatusBadge status={ticket.status} />
           </div>
-          <h1 className="text-lg font-bold text-[#1F2933] leading-snug">
+          <h1 className="text-lg font-bold text-foreground leading-snug">
             {ticket.subject}
           </h1>
           {ticket.assignee && (
-            <p className="mt-2 text-sm text-[#6B7280]">
+            <p className="mt-2 text-sm text-secondary">
               ผู้ดูแล:{" "}
-              <span className="text-[#1F2933] font-medium">
+              <span className="text-foreground font-medium">
                 {ticket.assignee.user.name ?? "ทีม Support"}
               </span>
             </p>
@@ -332,16 +332,16 @@ export default function PortalTicketDetailPage() {
         </div>
 
         {/* Message thread */}
-        <div className="bg-white rounded-xl border border-[#E4E7EB] shadow-sm overflow-hidden mb-4">
-          <div className="px-5 py-3 border-b border-[#E4E7EB] bg-[#F7F9FB]">
-            <h2 className="text-sm font-semibold text-[#1F2933]">
+        <div className="bg-surface rounded-xl border border-border shadow-sm overflow-hidden mb-4">
+          <div className="px-5 py-3 border-b border-border bg-stone">
+            <h2 className="text-sm font-semibold text-foreground">
               การสนทนา ({ticket.messages.length} ข้อความ)
             </h2>
           </div>
 
           <div className="px-5 py-4 flex flex-col gap-4">
             {ticket.messages.length === 0 ? (
-              <p className="text-sm text-[#6B7280] text-center py-8">
+              <p className="text-sm text-secondary text-center py-8">
                 ยังไม่มีข้อความ — ทีม support จะตอบกลับโดยเร็ว
               </p>
             ) : (

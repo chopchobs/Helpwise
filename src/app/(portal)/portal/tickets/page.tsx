@@ -48,22 +48,22 @@ function TicketCard({ ticket }: TicketCardProps) {
   return (
     <Link
       href={`/portal/tickets/${ticket.id}`}
-      className="block bg-white rounded-xl border border-[#E4E7EB] p-4 hover:border-[#3B5BDB] hover:shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:ring-offset-2"
+      className="block bg-surface rounded-xl border border-border p-4 hover:border-primary hover:shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-xs text-[#6B7280] font-medium">
+            <span className="text-xs text-secondary font-medium">
               #{ticket.ticketNumber}
             </span>
             <StatusBadge status={ticket.status} />
           </div>
-          <p className="text-sm font-medium text-[#1F2933] line-clamp-2">
+          <p className="text-sm font-medium text-foreground line-clamp-2">
             {ticket.subject}
           </p>
         </div>
       </div>
-      <div className="mt-3 flex items-center gap-4 text-xs text-[#6B7280]">
+      <div className="mt-3 flex items-center gap-4 text-xs text-secondary">
         <span>อัปเดต: {formatDate(ticket.updatedAt)}</span>
         {ticket._count && (
           <span>{ticket._count.messages} ข้อความ</span>
@@ -84,7 +84,7 @@ function PaginationBar({ page, totalPages, onPageChange }: PaginationBarProps) {
 
   return (
     <div className="flex items-center justify-between mt-4">
-      <span className="text-sm text-[#6B7280]">
+      <span className="text-sm text-secondary">
         หน้า {page} / {totalPages}
       </span>
       <div className="flex gap-2">
@@ -92,7 +92,7 @@ function PaginationBar({ page, totalPages, onPageChange }: PaginationBarProps) {
           type="button"
           disabled={page <= 1}
           onClick={() => onPageChange(page - 1)}
-          className="px-3 py-1.5 text-sm rounded-lg border border-[#E4E7EB] bg-white text-[#1F2933] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F7F9FB] transition-colors focus:outline-none focus:ring-2 focus:ring-[#3B5BDB]"
+          className="px-3 py-1.5 text-sm rounded-lg border border-border bg-surface text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-stone transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
           aria-label="หน้าก่อนหน้า"
         >
           ก่อนหน้า
@@ -101,7 +101,7 @@ function PaginationBar({ page, totalPages, onPageChange }: PaginationBarProps) {
           type="button"
           disabled={page >= totalPages}
           onClick={() => onPageChange(page + 1)}
-          className="px-3 py-1.5 text-sm rounded-lg border border-[#E4E7EB] bg-white text-[#1F2933] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F7F9FB] transition-colors focus:outline-none focus:ring-2 focus:ring-[#3B5BDB]"
+          className="px-3 py-1.5 text-sm rounded-lg border border-border bg-surface text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-stone transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
           aria-label="หน้าถัดไป"
         >
           ถัดไป
@@ -172,15 +172,15 @@ export default function PortalTicketListPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F7F9FB]">
+    <div className="min-h-screen bg-background">
       <div className="max-w-2xl mx-auto px-4 py-8">
 
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-[#1F2933]">คำขอของฉัน</h1>
+          <h1 className="text-2xl font-bold text-foreground">คำขอของฉัน</h1>
           <Link
             href="/portal/tickets/new"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#3B5BDB] hover:bg-[#2F4BC4] text-white text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:ring-offset-2"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-strong hover:bg-primary-strong-hover text-white text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
           >
             <Plus size={16} aria-hidden="true" />
             แจ้งปัญหาใหม่
@@ -189,14 +189,14 @@ export default function PortalTicketListPage() {
 
         {/* Filter */}
         <div className="flex items-center gap-3 mb-4">
-          <label htmlFor="portal-filter-status" className="text-sm text-[#6B7280]">
+          <label htmlFor="portal-filter-status" className="text-sm text-secondary">
             กรองตามสถานะ:
           </label>
           <select
             id="portal-filter-status"
             value={statusFilter}
             onChange={(e) => handleStatusChange(e.target.value as TicketStatus | "")}
-            className="rounded-lg border border-[#E4E7EB] bg-white px-3 py-1.5 text-sm text-[#1F2933] focus:outline-none focus:ring-2 focus:ring-[#3B5BDB]"
+            className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           >
             {STATUS_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -216,18 +216,18 @@ export default function PortalTicketListPage() {
         {/* List */}
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
-            <div className="flex flex-col items-center gap-3 text-[#6B7280]">
+            <div className="flex flex-col items-center gap-3 text-secondary">
               <RefreshCw size={24} className="animate-spin" aria-hidden="true" />
               <span className="text-sm">กำลังโหลด...</span>
             </div>
           </div>
         ) : tickets.length === 0 && !error ? (
-          <div className="flex flex-col items-center py-16 gap-3 text-[#6B7280]">
+          <div className="flex flex-col items-center py-16 gap-3 text-secondary">
             <Inbox size={40} aria-hidden="true" className="opacity-40" />
             <p className="text-sm">ยังไม่มีคำขอ</p>
             <Link
               href="/portal/tickets/new"
-              className="text-sm text-[#3B5BDB] hover:underline font-medium"
+              className="text-sm text-primary-ink hover:underline font-medium"
             >
               สร้างคำขอแรกของคุณ
             </Link>

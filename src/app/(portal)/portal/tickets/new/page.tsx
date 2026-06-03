@@ -97,7 +97,7 @@ export default function PortalNewTicketPage() {
       <button
         type="button"
         onClick={() => router.push("/portal/tickets")}
-        className="inline-flex items-center gap-2 text-sm text-[#6B7280] hover:text-[#1F2933] mb-5 transition-colors focus:outline-none focus:underline"
+        className="inline-flex items-center gap-2 text-sm text-secondary hover:text-foreground mb-5 transition-colors focus:outline-none focus:underline"
       >
         <ArrowLeft size={16} aria-hidden="true" />
         กลับไปรายการ
@@ -105,8 +105,8 @@ export default function PortalNewTicketPage() {
 
       <AuthCard>
         <div className="mb-6">
-          <h1 className="text-xl font-bold text-[#1F2933]">แจ้งปัญหาใหม่</h1>
-          <p className="mt-1 text-sm text-[#6B7280]">
+          <h1 className="text-xl font-bold text-foreground">แจ้งปัญหาใหม่</h1>
+          <p className="mt-1 text-sm text-secondary">
             อธิบายปัญหาที่พบ — ทีม support จะตอบกลับโดยเร็ว
           </p>
         </div>
@@ -135,7 +135,7 @@ export default function PortalNewTicketPage() {
           <div className="flex flex-col gap-1">
             <label
               htmlFor="body"
-              className="text-sm font-medium text-[#1F2933]"
+              className="text-sm font-medium text-foreground"
             >
               รายละเอียด
             </label>
@@ -146,13 +146,13 @@ export default function PortalNewTicketPage() {
               aria-describedby={errors.body ? "body-error" : undefined}
               aria-invalid={errors.body ? true : undefined}
               className={[
-                "w-full rounded-lg border px-3 py-2 text-sm text-[#1F2933] resize-none",
-                "placeholder:text-[#6B7280]",
-                "focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:border-transparent",
+                "w-full rounded-lg border px-3 py-2 text-sm text-foreground resize-none",
+                "placeholder:text-muted",
+                "focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
                 "transition-colors",
                 errors.body
-                  ? "border-[#E03131] bg-red-50"
-                  : "border-[#E4E7EB] bg-white hover:border-[#3B5BDB]",
+                  ? "border-danger bg-danger-tint"
+                  : "border-border bg-surface hover:border-primary",
               ].join(" ")}
               {...register("body")}
             />
@@ -160,7 +160,7 @@ export default function PortalNewTicketPage() {
               <p
                 id="body-error"
                 role="alert"
-                className="text-xs text-[#E03131] mt-0.5"
+                className="text-xs text-danger mt-0.5"
               >
                 {errors.body.message}
               </p>

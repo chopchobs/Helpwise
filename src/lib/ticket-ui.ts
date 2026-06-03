@@ -11,52 +11,57 @@ import type { TicketStatus, TicketPriority } from "@/types/ticket";
 
 export interface StatusStyle {
   label: string;
-  /** Tailwind arbitrary class สำหรับ background */
+  /** Tailwind class สำหรับ background */
   bg: string;
-  /** Tailwind arbitrary class สำหรับ text */
+  /** Tailwind class สำหรับ text */
   text: string;
-  /** Tailwind arbitrary class สำหรับ border */
+  /** Tailwind class สำหรับ border */
   border: string;
 }
 
 /** map TicketStatus → label + semantic color ตาม design system */
 export function getStatusStyle(status: TicketStatus): StatusStyle {
   const map: Record<TicketStatus, StatusStyle> = {
+    // NEW/OPEN — primary (Terracotta tint) แสดงว่า active / ต้องดำเนินการ
     NEW: {
-      label: "ใหม่",
-      bg: "bg-[#EEF2FF]",
-      text: "text-[#3B5BDB]",
-      border: "border-[#C5D0FF]",
+      label:  "ใหม่",
+      bg:     "bg-primary-tint",
+      text:   "text-primary-ink",
+      border: "border-primary-tint",
     },
     OPEN: {
-      label: "เปิด",
-      bg: "bg-[#EEF2FF]",
-      text: "text-[#3B5BDB]",
-      border: "border-[#C5D0FF]",
+      label:  "เปิด",
+      bg:     "bg-primary-tint",
+      text:   "text-primary-ink",
+      border: "border-primary-tint",
     },
+    // PENDING — warning (Amber) รอลูกค้าตอบ
     PENDING: {
-      label: "รอลูกค้า",
-      bg: "bg-[#FFF4F0]",
-      text: "text-[#E8590C]",
-      border: "border-[#FFCAAD]",
+      label:  "รอลูกค้า",
+      bg:     "bg-warning-tint",
+      text:   "text-warning-ink",
+      border: "border-warning-tint",
     },
+    // ON_HOLD — neutral (Stone/muted) พักชั่วคราว
     ON_HOLD: {
-      label: "พัก",
-      bg: "bg-[#F3F4F6]",
-      text: "text-[#6B7280]",
-      border: "border-[#E4E7EB]",
+      label:  "พัก",
+      bg:     "bg-stone",
+      text:   "text-muted",
+      border: "border-border",
     },
+    // SOLVED — success (Sage green) แก้แล้ว
     SOLVED: {
-      label: "แก้แล้ว",
-      bg: "bg-[#ECFDF5]",
-      text: "text-[#0CA678]",
-      border: "border-[#A7F3D0]",
+      label:  "แก้แล้ว",
+      bg:     "bg-success-tint",
+      text:   "text-success",
+      border: "border-success-tint",
     },
+    // CLOSED — neutral (Stone/muted) ปิดแล้ว
     CLOSED: {
-      label: "ปิด",
-      bg: "bg-[#F3F4F6]",
-      text: "text-[#6B7280]",
-      border: "border-[#E4E7EB]",
+      label:  "ปิด",
+      bg:     "bg-stone",
+      text:   "text-muted",
+      border: "border-border",
     },
   };
   return map[status];
@@ -76,29 +81,33 @@ export interface PriorityStyle {
 /** map TicketPriority → label + semantic color ตาม design system */
 export function getPriorityStyle(priority: TicketPriority): PriorityStyle {
   const map: Record<TicketPriority, PriorityStyle> = {
+    // LOW — neutral (Stone/muted)
     LOW: {
-      label: "ต่ำ",
-      bg: "bg-[#F3F4F6]",
-      text: "text-[#6B7280]",
-      border: "border-[#E4E7EB]",
+      label:  "ต่ำ",
+      bg:     "bg-stone",
+      text:   "text-muted",
+      border: "border-border",
     },
+    // NORMAL — primary (Terracotta tint) ระดับปกติ
     NORMAL: {
-      label: "ปกติ",
-      bg: "bg-[#EEF2FF]",
-      text: "text-[#3B5BDB]",
-      border: "border-[#C5D0FF]",
+      label:  "ปกติ",
+      bg:     "bg-primary-tint",
+      text:   "text-primary-ink",
+      border: "border-primary-tint",
     },
+    // HIGH — warning (Amber) ต้องรีบดูแล
     HIGH: {
-      label: "สูง",
-      bg: "bg-[#FFF4F0]",
-      text: "text-[#E8590C]",
-      border: "border-[#FFCAAD]",
+      label:  "สูง",
+      bg:     "bg-warning-tint",
+      text:   "text-warning-ink",
+      border: "border-warning-tint",
     },
+    // URGENT — danger (Sienna) เร่งด่วนสูงสุด
     URGENT: {
-      label: "เร่งด่วน",
-      bg: "bg-[#FFF5F5]",
-      text: "text-[#E03131]",
-      border: "border-[#FFC9C9]",
+      label:  "เร่งด่วน",
+      bg:     "bg-danger-tint",
+      text:   "text-danger",
+      border: "border-danger-tint",
     },
   };
   return map[priority];
@@ -112,10 +121,10 @@ export function getPriorityStyle(priority: TicketPriority): PriorityStyle {
 export function formatDate(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleString("th-TH", {
-    day: "numeric",
-    month: "short",
-    year: "2-digit",
-    hour: "2-digit",
+    day:    "numeric",
+    month:  "short",
+    year:   "2-digit",
+    hour:   "2-digit",
     minute: "2-digit",
   });
 }
@@ -124,10 +133,10 @@ export function formatDate(iso: string): string {
 export function formatDateFull(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleString("th-TH", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
+    day:    "numeric",
+    month:  "long",
+    year:   "numeric",
+    hour:   "2-digit",
     minute: "2-digit",
   });
 }
