@@ -10,9 +10,9 @@ interface FormAlertProps {
 // แสดง alert แบบ form-level (ไม่ใช่ field-level)
 export default function FormAlert({ variant, message }: FormAlertProps) {
   const styles: Record<AlertVariant, string> = {
-    error: "bg-red-50 border-[#E03131] text-[#E03131]",
-    success: "bg-teal-50 border-[#0CA678] text-[#0CA678]",
-    info: "bg-blue-50 border-[#3B5BDB] text-[#3B5BDB]",
+    error:   "bg-danger-tint border-danger text-danger",
+    success: "bg-success-tint border-success text-success",
+    info:    "bg-primary-tint border-primary text-primary-ink",
   };
 
   return (

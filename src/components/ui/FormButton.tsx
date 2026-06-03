@@ -25,10 +25,10 @@ export default function FormButton({
       className={[
         "w-full flex items-center justify-center gap-2 rounded-lg px-4 py-2.5",
         "text-sm font-semibold text-white",
-        "bg-[#3B5BDB] hover:bg-[#2F4BC4]",
-        "focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:ring-offset-2",
+        "bg-primary-strong hover:bg-primary-strong-hover",
+        "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
         "transition-colors",
-        "disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-[#3B5BDB]",
+        "disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-primary-strong",
         className,
       ]
         .filter(Boolean)

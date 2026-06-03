@@ -90,11 +90,11 @@ export default function AgentLoginPage() {
     <AuthCard>
       {/* Header */}
       <div className="flex flex-col items-center mb-6">
-        <div className="w-10 h-10 rounded-xl bg-[#3B5BDB] flex items-center justify-center mb-3">
+        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center mb-3">
           <Headphones size={20} className="text-white" aria-hidden="true" />
         </div>
-        <h1 className="text-2xl font-bold text-[#1F2933]">เข้าสู่ระบบ</h1>
-        <p className="mt-1 text-sm text-[#6B7280] text-center">
+        <h1 className="text-2xl font-bold text-foreground">เข้าสู่ระบบ</h1>
+        <p className="mt-1 text-sm text-secondary text-center">
           สำหรับทีม support — กรุณา login ด้วยบัญชีของคุณ
         </p>
       </div>
@@ -132,11 +132,11 @@ export default function AgentLoginPage() {
         </FormButton>
       </form>
 
-      <p className="mt-4 text-center text-xs text-[#6B7280]">
+      <p className="mt-4 text-center text-xs text-secondary">
         ยังไม่มี workspace?{" "}
         <a
           href={`https://${process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com"}/signup`}
-          className="text-[#3B5BDB] hover:underline font-medium"
+          className="text-primary-ink hover:underline font-medium"
         >
           สมัครใช้งาน
         </a>

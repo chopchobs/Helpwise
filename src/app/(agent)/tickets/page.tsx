@@ -69,8 +69,8 @@ function TicketRow({ ticket }: TicketRowProps) {
   const assigneeName = ticket.assignee?.user?.name ?? "ยังไม่ได้มอบหมาย";
 
   return (
-    <tr className="border-b border-[#E4E7EB] hover:bg-[#F7F9FB] transition-colors">
-      <td className="px-4 py-3 text-sm font-medium text-[#3B5BDB]">
+    <tr className="border-b border-border hover:bg-stone transition-colors">
+      <td className="px-4 py-3 text-sm font-medium text-primary-ink">
         <Link
           href={`/tickets/${ticket.id}`}
           className="hover:underline focus:outline-none focus:underline"
@@ -78,10 +78,10 @@ function TicketRow({ ticket }: TicketRowProps) {
           #{ticket.ticketNumber}
         </Link>
       </td>
-      <td className="px-4 py-3 text-sm text-[#1F2933] max-w-xs">
+      <td className="px-4 py-3 text-sm text-foreground max-w-xs">
         <Link
           href={`/tickets/${ticket.id}`}
-          className="hover:text-[#3B5BDB] hover:underline focus:outline-none focus:underline line-clamp-2"
+          className="hover:text-primary-ink hover:underline focus:outline-none focus:underline line-clamp-2"
         >
           {ticket.subject}
         </Link>
@@ -92,9 +92,9 @@ function TicketRow({ ticket }: TicketRowProps) {
       <td className="px-4 py-3">
         <PriorityBadge priority={ticket.priority} />
       </td>
-      <td className="px-4 py-3 text-sm text-[#6B7280]">{requesterName}</td>
-      <td className="px-4 py-3 text-sm text-[#6B7280]">{assigneeName}</td>
-      <td className="px-4 py-3 text-xs text-[#6B7280] whitespace-nowrap">
+      <td className="px-4 py-3 text-sm text-secondary">{requesterName}</td>
+      <td className="px-4 py-3 text-sm text-secondary">{assigneeName}</td>
+      <td className="px-4 py-3 text-xs text-secondary whitespace-nowrap">
         {formatDate(ticket.updatedAt)}
       </td>
     </tr>
@@ -111,8 +111,8 @@ function PaginationBar({ page, totalPages, onPageChange }: PaginationBarProps) {
   if (totalPages <= 1) return null;
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-t border-[#E4E7EB]">
-      <span className="text-sm text-[#6B7280]">
+    <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+      <span className="text-sm text-secondary">
         หน้า {page} / {totalPages}
       </span>
       <div className="flex gap-2">
@@ -120,7 +120,7 @@ function PaginationBar({ page, totalPages, onPageChange }: PaginationBarProps) {
           type="button"
           disabled={page <= 1}
           onClick={() => onPageChange(page - 1)}
-          className="px-3 py-1.5 text-sm rounded-lg border border-[#E4E7EB] text-[#1F2933] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F7F9FB] transition-colors focus:outline-none focus:ring-2 focus:ring-[#3B5BDB]"
+          className="px-3 py-1.5 text-sm rounded-lg border border-border text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-stone transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
           aria-label="หน้าก่อนหน้า"
         >
           ก่อนหน้า
@@ -129,7 +129,7 @@ function PaginationBar({ page, totalPages, onPageChange }: PaginationBarProps) {
           type="button"
           disabled={page >= totalPages}
           onClick={() => onPageChange(page + 1)}
-          className="px-3 py-1.5 text-sm rounded-lg border border-[#E4E7EB] text-[#1F2933] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F7F9FB] transition-colors focus:outline-none focus:ring-2 focus:ring-[#3B5BDB]"
+          className="px-3 py-1.5 text-sm rounded-lg border border-border text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-stone transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
           aria-label="หน้าถัดไป"
         >
           ถัดไป
@@ -218,15 +218,15 @@ export default function AgentTicketListPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F7F9FB]">
+    <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-[#1F2933]">Tickets</h1>
+            <h1 className="text-2xl font-bold text-foreground">Tickets</h1>
             {!isLoading && total > 0 && (
-              <p className="mt-1 text-sm text-[#6B7280]">{total} tickets ทั้งหมด</p>
+              <p className="mt-1 text-sm text-secondary">{total} tickets ทั้งหมด</p>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -235,13 +235,13 @@ export default function AgentTicketListPage() {
               onClick={handleRefresh}
               disabled={isLoading}
               aria-label="รีเฟรชข้อมูล"
-              className="p-2 rounded-lg border border-[#E4E7EB] text-[#6B7280] hover:bg-[#F7F9FB] disabled:opacity-40 transition-colors focus:outline-none focus:ring-2 focus:ring-[#3B5BDB]"
+              className="p-2 rounded-lg border border-border text-secondary hover:bg-stone disabled:opacity-40 transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
             >
               <RefreshCw size={16} className={isLoading ? "animate-spin" : ""} aria-hidden="true" />
             </button>
             <Link
               href="/tickets/new"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#3B5BDB] hover:bg-[#2F4BC4] text-white text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:ring-offset-2"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-strong hover:bg-primary-strong-hover text-white text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
             >
               <Plus size={16} aria-hidden="true" />
               สร้าง Ticket
@@ -252,14 +252,14 @@ export default function AgentTicketListPage() {
         {/* Filters */}
         <div className="flex flex-wrap gap-3 mb-4">
           <div className="flex flex-col gap-1">
-            <label htmlFor="filter-status" className="text-xs font-medium text-[#6B7280]">
+            <label htmlFor="filter-status" className="text-xs font-medium text-secondary">
               สถานะ
             </label>
             <select
               id="filter-status"
               value={filters.status}
               onChange={(e) => handleStatusChange(e.target.value as TicketStatus | "")}
-              className="rounded-lg border border-[#E4E7EB] bg-white px-3 py-1.5 text-sm text-[#1F2933] focus:outline-none focus:ring-2 focus:ring-[#3B5BDB]"
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             >
               {STATUS_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -270,14 +270,14 @@ export default function AgentTicketListPage() {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label htmlFor="filter-priority" className="text-xs font-medium text-[#6B7280]">
+            <label htmlFor="filter-priority" className="text-xs font-medium text-secondary">
               Priority
             </label>
             <select
               id="filter-priority"
               value={filters.priority}
               onChange={(e) => handlePriorityChange(e.target.value as TicketPriority | "")}
-              className="rounded-lg border border-[#E4E7EB] bg-white px-3 py-1.5 text-sm text-[#1F2933] focus:outline-none focus:ring-2 focus:ring-[#3B5BDB]"
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             >
               {PRIORITY_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -296,16 +296,16 @@ export default function AgentTicketListPage() {
         )}
 
         {/* Table */}
-        <div className="bg-white rounded-xl border border-[#E4E7EB] overflow-hidden shadow-sm">
+        <div className="bg-surface rounded-xl border border-border overflow-hidden shadow-sm">
           {isLoading ? (
             <div className="flex items-center justify-center py-16">
-              <div className="flex flex-col items-center gap-3 text-[#6B7280]">
+              <div className="flex flex-col items-center gap-3 text-secondary">
                 <RefreshCw size={24} className="animate-spin" aria-hidden="true" />
                 <span className="text-sm">กำลังโหลด...</span>
               </div>
             </div>
           ) : tickets.length === 0 && !error ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3 text-[#6B7280]">
+            <div className="flex flex-col items-center justify-center py-16 gap-3 text-secondary">
               <Inbox size={40} aria-hidden="true" className="opacity-40" />
               <p className="text-sm">ไม่มี ticket ที่ตรงกับเงื่อนไข</p>
             </div>
@@ -314,26 +314,26 @@ export default function AgentTicketListPage() {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[700px]">
                   <thead>
-                    <tr className="border-b border-[#E4E7EB] bg-[#F7F9FB]">
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-[#6B7280] uppercase tracking-wide">
+                    <tr className="border-b border-border bg-stone">
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase tracking-wide">
                         #
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-[#6B7280] uppercase tracking-wide">
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase tracking-wide">
                         หัวข้อ
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-[#6B7280] uppercase tracking-wide">
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase tracking-wide">
                         สถานะ
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-[#6B7280] uppercase tracking-wide">
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase tracking-wide">
                         Priority
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-[#6B7280] uppercase tracking-wide">
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase tracking-wide">
                         ผู้แจ้ง
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-[#6B7280] uppercase tracking-wide">
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase tracking-wide">
                         ผู้รับผิดชอบ
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-[#6B7280] uppercase tracking-wide">
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase tracking-wide">
                         อัปเดตล่าสุด
                       </th>
                     </tr>

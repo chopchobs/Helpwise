@@ -2,7 +2,7 @@
 
 /**
  * หน้า Ticket Detail (agent) — แสดง thread ทั้งหมด รวม PUBLIC + INTERNAL
- * INTERNAL note แสดงด้วย visual แยกชัดเจน (amber tint + badge "🔒 Internal note")
+ * INTERNAL note แสดงด้วย visual แยกชัดเจน (warning tint + badge "🔒 Internal note")
  * เพื่อให้ agent รู้ชัดว่าลูกค้าไม่เห็นข้อความนั้น
  *
  * Rendering: client fetch เพื่อให้ session cookie + tenant subdomain header ทำงานถูกต้อง
@@ -62,7 +62,7 @@ interface MessageBubbleProps {
 
 /**
  * MessageBubble — แสดงข้อความ 1 บรรทัดใน thread
- * INTERNAL note: พื้นหลัง amber-tint พร้อม badge "🔒 Internal note"
+ * INTERNAL note: พื้นหลัง warning-tint พร้อม badge "🔒 Internal note"
  * PUBLIC: แยกซ้าย (ลูกค้า) / ขวา (agent) ตามผู้ส่ง
  */
 function MessageBubble({ message }: MessageBubbleProps) {
@@ -73,22 +73,22 @@ function MessageBubble({ message }: MessageBubbleProps) {
   // internal note แสดงด้วย visual แยกชัดเจนเพื่อให้ agent รู้ว่าลูกค้าไม่เห็น
   if (message.visibility === "INTERNAL") {
     return (
-      <div className="flex flex-col gap-1.5 px-4 py-3 rounded-xl border border-[#FFCAAD] bg-[#FFF4F0]">
+      <div className="flex flex-col gap-1.5 px-4 py-3 rounded-xl border border-warning-tint bg-warning-tint">
         {/* Badge บอกชัดว่าเป็น internal note */}
         <div className="flex items-center gap-1.5">
-          <Lock size={12} className="text-[#E8590C]" aria-hidden="true" />
-          <span className="text-xs font-semibold text-[#E8590C]">
+          <Lock size={12} className="text-warning" aria-hidden="true" />
+          <span className="text-xs font-semibold text-warning-ink">
             Internal note — ลูกค้าไม่เห็น
           </span>
         </div>
-        <p className="text-sm text-[#1F2933] whitespace-pre-wrap leading-relaxed">
+        <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
           {message.body}
         </p>
         <div className="flex items-center gap-2 mt-1">
-          <span className="text-xs text-[#6B7280]">โดย {authorName}</span>
-          <span className="text-xs text-[#6B7280]">·</span>
+          <span className="text-xs text-secondary">โดย {authorName}</span>
+          <span className="text-xs text-secondary">·</span>
           <time
-            className="text-xs text-[#6B7280]"
+            className="text-xs text-secondary"
             dateTime={message.createdAt}
           >
             {formatDateFull(message.createdAt)}
@@ -103,13 +103,13 @@ function MessageBubble({ message }: MessageBubbleProps) {
   if (fromAgent) {
     return (
       <div className="flex flex-col items-end gap-1">
-        <div className="max-w-[80%] bg-[#3B5BDB] text-white rounded-2xl rounded-tr-md px-4 py-3 shadow-sm">
+        <div className="max-w-[80%] bg-primary-strong text-white rounded-2xl rounded-tr-md px-4 py-3 shadow-sm">
           <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.body}</p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-[#6B7280]">{authorName}</span>
-          <span className="text-xs text-[#6B7280]">·</span>
-          <time className="text-xs text-[#6B7280]" dateTime={message.createdAt}>
+          <span className="text-xs text-secondary">{authorName}</span>
+          <span className="text-xs text-secondary">·</span>
+          <time className="text-xs text-secondary" dateTime={message.createdAt}>
             {formatDateFull(message.createdAt)}
           </time>
         </div>
@@ -121,17 +121,17 @@ function MessageBubble({ message }: MessageBubbleProps) {
   return (
     <div className="flex flex-col items-start gap-1">
       <div className="flex items-center gap-2 mb-0.5">
-        <div className="w-6 h-6 rounded-full bg-[#E4E7EB] flex items-center justify-center">
-          <User size={12} className="text-[#6B7280]" aria-hidden="true" />
+        <div className="w-6 h-6 rounded-full bg-border flex items-center justify-center">
+          <User size={12} className="text-secondary" aria-hidden="true" />
         </div>
-        <span className="text-xs font-medium text-[#6B7280]">{authorName}</span>
+        <span className="text-xs font-medium text-secondary">{authorName}</span>
       </div>
-      <div className="max-w-[80%] bg-white border border-[#E4E7EB] rounded-2xl rounded-tl-md px-4 py-3 shadow-sm">
-        <p className="text-sm text-[#1F2933] whitespace-pre-wrap leading-relaxed">
+      <div className="max-w-[80%] bg-surface border border-border rounded-2xl rounded-tl-md px-4 py-3 shadow-sm">
+        <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
           {message.body}
         </p>
       </div>
-      <time className="text-xs text-[#6B7280] ml-8" dateTime={message.createdAt}>
+      <time className="text-xs text-secondary ml-8" dateTime={message.createdAt}>
         {formatDateFull(message.createdAt)}
       </time>
     </div>
@@ -209,8 +209,8 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
       className={[
         "rounded-xl border p-4 transition-colors",
         isInternal
-          ? "border-[#FFCAAD] bg-[#FFF8F5]"
-          : "border-[#E4E7EB] bg-white",
+          ? "border-warning-tint bg-warning-tint"
+          : "border-border bg-surface",
       ].join(" ")}
     >
       {/* Toggle PUBLIC / INTERNAL */}
@@ -220,10 +220,10 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
           onClick={() => setVisibility("PUBLIC")}
           aria-pressed={!isInternal}
           className={[
-            "px-3 py-1 rounded-full text-xs font-semibold border transition-colors focus:outline-none focus:ring-2 focus:ring-[#3B5BDB]",
+            "px-3 py-1 rounded-full text-xs font-semibold border transition-colors focus:outline-none focus:ring-2 focus:ring-primary",
             !isInternal
-              ? "bg-[#3B5BDB] text-white border-[#3B5BDB]"
-              : "bg-white text-[#6B7280] border-[#E4E7EB] hover:border-[#3B5BDB]",
+              ? "bg-primary-strong text-white border-primary"
+              : "bg-surface text-secondary border-border hover:border-primary",
           ].join(" ")}
         >
           Reply สาธารณะ
@@ -233,10 +233,10 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
           onClick={() => setVisibility("INTERNAL")}
           aria-pressed={isInternal}
           className={[
-            "inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border transition-colors focus:outline-none focus:ring-2 focus:ring-[#E8590C]",
+            "inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border transition-colors focus:outline-none focus:ring-2 focus:ring-warning",
             isInternal
-              ? "bg-[#E8590C] text-white border-[#E8590C]"
-              : "bg-white text-[#6B7280] border-[#E4E7EB] hover:border-[#E8590C]",
+              ? "bg-warning-strong text-white border-warning-strong"
+              : "bg-surface text-secondary border-border hover:border-warning",
           ].join(" ")}
         >
           <Lock size={10} aria-hidden="true" />
@@ -246,7 +246,7 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
 
       {/* Internal note hint */}
       {isInternal && (
-        <p className="text-xs text-[#E8590C] mb-2 flex items-center gap-1">
+        <p className="text-xs text-warning-ink mb-2 flex items-center gap-1">
           <Lock size={10} aria-hidden="true" />
           ข้อความนี้จะมองเห็นเฉพาะทีม agent เท่านั้น — ลูกค้าไม่เห็น
         </p>
@@ -265,13 +265,13 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
         rows={4}
         aria-label="ข้อความ"
         className={[
-          "w-full rounded-lg border px-3 py-2 text-sm text-[#1F2933] resize-none",
-          "placeholder:text-[#6B7280]",
+          "w-full rounded-lg border px-3 py-2 text-sm text-foreground resize-none",
+          "placeholder:text-muted",
           "focus:outline-none focus:ring-2 focus:border-transparent",
           "transition-colors",
           isInternal
-            ? "border-[#FFCAAD] focus:ring-[#E8590C] bg-[#FFF4F0]"
-            : "border-[#E4E7EB] focus:ring-[#3B5BDB] bg-white",
+            ? "border-warning-tint focus:ring-warning bg-surface"
+            : "border-border focus:ring-primary bg-surface",
         ].join(" ")}
       />
 
@@ -291,8 +291,8 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
             "focus:outline-none focus:ring-2 focus:ring-offset-2",
             "disabled:opacity-50 disabled:cursor-not-allowed",
             isInternal
-              ? "bg-[#E8590C] hover:bg-[#D44D07] focus:ring-[#E8590C] disabled:hover:bg-[#E8590C]"
-              : "bg-[#3B5BDB] hover:bg-[#2F4BC4] focus:ring-[#3B5BDB] disabled:hover:bg-[#3B5BDB]",
+              ? "bg-warning-strong hover:bg-warning-strong-hover focus:ring-warning disabled:hover:bg-warning-strong"
+              : "bg-primary-strong hover:bg-primary-strong-hover focus:ring-primary disabled:hover:bg-primary-strong",
           ].join(" ")}
         >
           {isSubmitting ? (
@@ -488,8 +488,8 @@ export default function AgentTicketDetailPage() {
   // ─── Loading ───────────────────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#F7F9FB] flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-[#6B7280]">
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-secondary">
           <RefreshCw size={28} className="animate-spin" aria-hidden="true" />
           <span className="text-sm">กำลังโหลด ticket...</span>
         </div>
@@ -500,13 +500,13 @@ export default function AgentTicketDetailPage() {
   // ─── Error ─────────────────────────────────────────────────────────────────
   if (error || !ticket) {
     return (
-      <div className="min-h-screen bg-[#F7F9FB] flex items-center justify-center px-4">
-        <div className="bg-white rounded-xl border border-[#E4E7EB] p-8 max-w-md w-full text-center">
-          <p className="text-[#E03131] font-medium mb-4">{error ?? "เกิดข้อผิดพลาด"}</p>
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="bg-surface rounded-xl border border-border p-8 max-w-md w-full text-center">
+          <p className="text-danger font-medium mb-4">{error ?? "เกิดข้อผิดพลาด"}</p>
           <button
             type="button"
             onClick={() => router.push("/tickets")}
-            className="text-sm text-[#3B5BDB] hover:underline"
+            className="text-sm text-primary-ink hover:underline"
           >
             กลับไปหน้า Ticket List
           </button>
@@ -521,43 +521,43 @@ export default function AgentTicketDetailPage() {
     "ไม่ระบุ";
 
   return (
-    <div className="min-h-screen bg-[#F7F9FB]">
+    <div className="min-h-screen bg-background">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
         {/* Back button */}
         <button
           type="button"
           onClick={() => router.push("/tickets")}
-          className="inline-flex items-center gap-2 text-sm text-[#6B7280] hover:text-[#1F2933] mb-6 transition-colors focus:outline-none focus:underline"
+          className="inline-flex items-center gap-2 text-sm text-secondary hover:text-foreground mb-6 transition-colors focus:outline-none focus:underline"
         >
           <ArrowLeft size={16} aria-hidden="true" />
           กลับไป Ticket List
         </button>
 
         {/* Ticket header */}
-        <div className="bg-white rounded-xl border border-[#E4E7EB] p-6 mb-4 shadow-sm">
+        <div className="bg-surface rounded-xl border border-border p-6 mb-4 shadow-sm">
           <div className="flex flex-wrap items-start gap-3 mb-3">
-            <span className="text-sm font-semibold text-[#6B7280]">
+            <span className="text-sm font-semibold text-secondary">
               #{ticket.ticketNumber}
             </span>
             <StatusBadge status={ticket.status} />
             <PriorityBadge priority={ticket.priority} />
           </div>
 
-          <h1 className="text-xl font-bold text-[#1F2933] leading-snug mb-4">
+          <h1 className="text-xl font-bold text-foreground leading-snug mb-4">
             {ticket.subject}
           </h1>
 
-          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-[#6B7280]">
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-secondary">
             <span>
-              ผู้แจ้ง: <span className="text-[#1F2933] font-medium">{requesterName}</span>
+              ผู้แจ้ง: <span className="text-foreground font-medium">{requesterName}</span>
             </span>
           </div>
 
           {/* Controls: เปลี่ยน status + priority + assignee */}
-          <div className="flex flex-wrap gap-3 mt-4 pt-4 border-t border-[#E4E7EB]">
+          <div className="flex flex-wrap gap-3 mt-4 pt-4 border-t border-border">
             <div className="flex flex-col gap-1">
-              <label htmlFor="ctrl-status" className="text-xs font-medium text-[#6B7280]">
+              <label htmlFor="ctrl-status" className="text-xs font-medium text-secondary">
                 เปลี่ยนสถานะ
               </label>
               <select
@@ -565,7 +565,7 @@ export default function AgentTicketDetailPage() {
                 value={ticket.status}
                 disabled={isPatchingStatus}
                 onChange={(e) => handleStatusChange(e.target.value as TicketStatus)}
-                className="rounded-lg border border-[#E4E7EB] bg-white px-3 py-1.5 text-sm text-[#1F2933] focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] disabled:opacity-60"
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
               >
                 {STATUS_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -576,7 +576,7 @@ export default function AgentTicketDetailPage() {
             </div>
 
             <div className="flex flex-col gap-1">
-              <label htmlFor="ctrl-priority" className="text-xs font-medium text-[#6B7280]">
+              <label htmlFor="ctrl-priority" className="text-xs font-medium text-secondary">
                 เปลี่ยน Priority
               </label>
               <select
@@ -584,7 +584,7 @@ export default function AgentTicketDetailPage() {
                 value={ticket.priority}
                 disabled={isPatchingPriority}
                 onChange={(e) => handlePriorityChange(e.target.value as TicketPriority)}
-                className="rounded-lg border border-[#E4E7EB] bg-white px-3 py-1.5 text-sm text-[#1F2933] focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] disabled:opacity-60"
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
               >
                 {PRIORITY_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -596,7 +596,7 @@ export default function AgentTicketDetailPage() {
 
             {/* Assignee dropdown — รูปแบบเดียวกับ status/priority control */}
             <div className="flex flex-col gap-1">
-              <label htmlFor="ctrl-assignee" className="text-xs font-medium text-[#6B7280]">
+              <label htmlFor="ctrl-assignee" className="text-xs font-medium text-secondary">
                 ผู้รับผิดชอบ
               </label>
               <select
@@ -604,7 +604,7 @@ export default function AgentTicketDetailPage() {
                 value={ticket.assignee?.id ?? ""}
                 disabled={isPatchingAssignee}
                 onChange={(e) => void handleAssigneeChange(e.target.value)}
-                className="rounded-lg border border-[#E4E7EB] bg-white px-3 py-1.5 text-sm text-[#1F2933] focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] disabled:opacity-60"
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
               >
                 <option value="">ยังไม่มอบหมาย</option>
                 {members.map((m) => (
@@ -624,20 +624,20 @@ export default function AgentTicketDetailPage() {
         </div>
 
         {/* Message thread */}
-        <div className="bg-white rounded-xl border border-[#E4E7EB] shadow-sm overflow-hidden mb-4">
-          <div className="px-6 py-4 border-b border-[#E4E7EB] bg-[#F7F9FB]">
-            <h2 className="text-sm font-semibold text-[#1F2933]">
+        <div className="bg-surface rounded-xl border border-border shadow-sm overflow-hidden mb-4">
+          <div className="px-6 py-4 border-b border-border bg-stone">
+            <h2 className="text-sm font-semibold text-foreground">
               Messages ({ticket.messages.length})
             </h2>
             {/* คำอธิบาย legend สำหรับ agent */}
-            <p className="text-xs text-[#6B7280] mt-0.5">
-              ข้อความที่มีพื้นหลังสีส้ม = Internal note (ลูกค้าไม่เห็น)
+            <p className="text-xs text-secondary mt-0.5">
+              ข้อความที่มีพื้นหลังสีเหลือง/ส้มอ่อน = Internal note (ลูกค้าไม่เห็น)
             </p>
           </div>
 
           <div className="px-6 py-4 flex flex-col gap-4">
             {ticket.messages.length === 0 ? (
-              <p className="text-sm text-[#6B7280] text-center py-8">
+              <p className="text-sm text-secondary text-center py-8">
                 ยังไม่มีข้อความ
               </p>
             ) : (

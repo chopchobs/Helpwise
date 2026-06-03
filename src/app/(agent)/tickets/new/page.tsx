@@ -218,30 +218,30 @@ function RequesterCombobox({
 
   return (
     <div ref={wrapperRef} className="flex flex-col gap-1">
-      <label htmlFor="requester-email" className="text-sm font-medium text-[#1F2933]">
+      <label htmlFor="requester-email" className="text-sm font-medium text-foreground">
         ผู้แจ้ง (Requester)
       </label>
 
       {/* Status badge แสดงโหมดปัจจุบัน */}
       {isContactSelected && (
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#EEF2FF] border border-[#C5D0FF] text-sm">
-          <Check size={14} className="text-[#3B5BDB] shrink-0" aria-hidden="true" />
-          <span className="text-[#3B5BDB] font-medium">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary-tint border border-primary-tint text-sm">
+          <Check size={14} className="text-primary shrink-0" aria-hidden="true" />
+          <span className="text-primary-ink font-medium">
             เลือกคนเดิม: {selectedContact.name ?? selectedContact.email}
           </span>
           <button
             type="button"
             onClick={handleClear}
             aria-label="ล้างการเลือก"
-            className="ml-auto text-[#6B7280] hover:text-[#E03131] text-xs focus:outline-none focus:underline"
+            className="ml-auto text-secondary hover:text-danger text-xs focus:outline-none focus:underline"
           >
             ล้าง
           </button>
         </div>
       )}
       {isNewEmail && !isContactSelected && (
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#F0FDF4] border border-[#A7F3D0] text-sm">
-          <span className="text-[#0CA678] font-medium">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-success-tint border border-success-tint text-sm">
+          <span className="text-success font-medium">
             สร้าง contact ใหม่: {query}
           </span>
         </div>
@@ -249,7 +249,7 @@ function RequesterCombobox({
 
       {/* Input อีเมล */}
       <div className="relative">
-        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280]">
+        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary">
           {isSearching ? (
             <Loader2 size={14} className="animate-spin" aria-hidden="true" />
           ) : (
@@ -269,13 +269,13 @@ function RequesterCombobox({
           aria-describedby={emailError ? "requester-error" : undefined}
           aria-invalid={emailError ? true : undefined}
           className={[
-            "w-full rounded-lg border pl-9 pr-3 py-2 text-sm text-[#1F2933]",
-            "placeholder:text-[#6B7280]",
-            "focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:border-transparent",
+            "w-full rounded-lg border pl-9 pr-3 py-2 text-sm text-foreground",
+            "placeholder:text-muted",
+            "focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
             "transition-colors",
             emailError
-              ? "border-[#E03131] bg-red-50"
-              : "border-[#E4E7EB] bg-white hover:border-[#3B5BDB]",
+              ? "border-danger bg-danger-tint"
+              : "border-border bg-surface hover:border-primary",
           ].join(" ")}
         />
 
@@ -285,7 +285,7 @@ function RequesterCombobox({
             id="requester-suggestions"
             role="listbox"
             aria-label="Contact suggestions"
-            className="absolute z-10 mt-1 w-full bg-white border border-[#E4E7EB] rounded-lg shadow-lg max-h-48 overflow-y-auto"
+            className="absolute z-10 mt-1 w-full bg-surface border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto"
           >
             {suggestions.map((contact) => (
               <li
@@ -295,13 +295,13 @@ function RequesterCombobox({
                 onClick={() => handleSelect(contact)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleSelect(contact); }}
                 tabIndex={0}
-                className="flex flex-col px-3 py-2 cursor-pointer hover:bg-[#F7F9FB] focus:bg-[#F7F9FB] focus:outline-none transition-colors border-b border-[#E4E7EB] last:border-0"
+                className="flex flex-col px-3 py-2 cursor-pointer hover:bg-stone focus:bg-stone focus:outline-none transition-colors border-b border-border last:border-0"
               >
-                <span className="text-sm font-medium text-[#1F2933]">
+                <span className="text-sm font-medium text-foreground">
                   {contact.name ?? contact.email}
                 </span>
                 {contact.name && (
-                  <span className="text-xs text-[#6B7280]">{contact.email}</span>
+                  <span className="text-xs text-secondary">{contact.email}</span>
                 )}
               </li>
             ))}
@@ -310,7 +310,7 @@ function RequesterCombobox({
       </div>
 
       {emailError && (
-        <p id="requester-error" role="alert" className="text-xs text-[#E03131] mt-0.5">
+        <p id="requester-error" role="alert" className="text-xs text-danger mt-0.5">
           {emailError}
         </p>
       )}
@@ -323,14 +323,14 @@ function RequesterCombobox({
             value={nameInput}
             onChange={handleNameChange}
             placeholder="ชื่อผู้แจ้ง (optional)"
-            className="w-full rounded-lg border border-[#E4E7EB] bg-white px-3 py-2 text-sm text-[#1F2933] placeholder:text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:border-transparent transition-colors hover:border-[#3B5BDB]"
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors hover:border-primary"
             aria-label="ชื่อผู้แจ้ง (สำหรับ contact ใหม่)"
           />
         </div>
       )}
 
       {/* Helper text */}
-      <p className="text-xs text-[#6B7280]">
+      <p className="text-xs text-secondary">
         ค้นหา contact เดิม หรือพิมพ์อีเมลใหม่เพื่อสร้าง contact อัตโนมัติ
       </p>
     </div>
@@ -467,24 +467,24 @@ export default function AgentCreateTicketPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F7F9FB]">
+    <div className="min-h-screen bg-background">
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
         {/* Back button */}
         <button
           type="button"
           onClick={() => router.push("/tickets")}
-          className="inline-flex items-center gap-2 text-sm text-[#6B7280] hover:text-[#1F2933] mb-6 transition-colors focus:outline-none focus:underline"
+          className="inline-flex items-center gap-2 text-sm text-secondary hover:text-foreground mb-6 transition-colors focus:outline-none focus:underline"
         >
           <ArrowLeft size={16} aria-hidden="true" />
           กลับไป Ticket List
         </button>
 
         {/* Form card */}
-        <div className="bg-white rounded-xl border border-[#E4E7EB] shadow-sm p-6 sm:p-8">
+        <div className="bg-surface rounded-xl border border-border shadow-sm p-6 sm:p-8">
           <div className="mb-6">
-            <h1 className="text-xl font-bold text-[#1F2933]">สร้าง Ticket ใหม่</h1>
-            <p className="mt-1 text-sm text-[#6B7280]">
+            <h1 className="text-xl font-bold text-foreground">สร้าง Ticket ใหม่</h1>
+            <p className="mt-1 text-sm text-secondary">
               กรอกรายละเอียดเพื่อเปิด ticket ให้ลูกค้า
             </p>
           </div>
@@ -523,13 +523,13 @@ export default function AgentCreateTicketPage() {
 
             {/* Priority */}
             <div className="flex flex-col gap-1">
-              <label htmlFor="priority" className="text-sm font-medium text-[#1F2933]">
+              <label htmlFor="priority" className="text-sm font-medium text-foreground">
                 Priority
               </label>
               <select
                 id="priority"
                 {...register("priority")}
-                className="rounded-lg border border-[#E4E7EB] bg-white px-3 py-2 text-sm text-[#1F2933] focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] transition-colors hover:border-[#3B5BDB]"
+                className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition-colors hover:border-primary"
               >
                 {PRIORITY_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -541,7 +541,7 @@ export default function AgentCreateTicketPage() {
 
             {/* Assignee dropdown */}
             <div className="flex flex-col gap-1">
-              <label htmlFor="assignee" className="text-sm font-medium text-[#1F2933]">
+              <label htmlFor="assignee" className="text-sm font-medium text-foreground">
                 ผู้รับผิดชอบ (optional)
               </label>
               <select
@@ -549,7 +549,7 @@ export default function AgentCreateTicketPage() {
                 value={selectedAssigneeId}
                 disabled={isMembersLoading}
                 onChange={(e) => setSelectedAssigneeId(e.target.value)}
-                className="rounded-lg border border-[#E4E7EB] bg-white px-3 py-2 text-sm text-[#1F2933] focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] disabled:opacity-60 transition-colors hover:border-[#3B5BDB]"
+                className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 transition-colors hover:border-primary"
               >
                 <option value="">ยังไม่มอบหมาย</option>
                 {members.map((m) => (
@@ -560,17 +560,17 @@ export default function AgentCreateTicketPage() {
                 ))}
               </select>
               {isMembersLoading && (
-                <p className="text-xs text-[#6B7280]">กำลังโหลดรายชื่อ agent...</p>
+                <p className="text-xs text-secondary">กำลังโหลดรายชื่อ agent...</p>
               )}
               {/* FIX-4: แสดง error แทนการปล่อย dropdown ว่างโดยไม่บอก user */}
               {!isMembersLoading && isMembersError && (
-                <p className="text-xs text-[#E03131]">โหลดรายชื่อ agent ไม่ได้ — assignee เป็น optional สามารถกำหนดทีหลังได้</p>
+                <p className="text-xs text-danger">โหลดรายชื่อ agent ไม่ได้ — assignee เป็น optional สามารถกำหนดทีหลังได้</p>
               )}
             </div>
 
             {/* First message (optional textarea) */}
             <div className="flex flex-col gap-1">
-              <label htmlFor="firstMessage" className="text-sm font-medium text-[#1F2933]">
+              <label htmlFor="firstMessage" className="text-sm font-medium text-foreground">
                 ข้อความแรก (optional)
               </label>
               <textarea
@@ -580,13 +580,13 @@ export default function AgentCreateTicketPage() {
                 aria-describedby={errors.firstMessage ? "firstMessage-error" : undefined}
                 aria-invalid={errors.firstMessage ? true : undefined}
                 className={[
-                  "w-full rounded-lg border px-3 py-2 text-sm text-[#1F2933] resize-none",
-                  "placeholder:text-[#6B7280]",
-                  "focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:border-transparent",
+                  "w-full rounded-lg border px-3 py-2 text-sm text-foreground resize-none",
+                  "placeholder:text-muted",
+                  "focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
                   "transition-colors",
                   errors.firstMessage
-                    ? "border-[#E03131] bg-red-50"
-                    : "border-[#E4E7EB] bg-white hover:border-[#3B5BDB]",
+                    ? "border-danger bg-danger-tint"
+                    : "border-border bg-surface hover:border-primary",
                 ].join(" ")}
                 {...register("firstMessage")}
               />
@@ -594,7 +594,7 @@ export default function AgentCreateTicketPage() {
                 <p
                   id="firstMessage-error"
                   role="alert"
-                  className="text-xs text-[#E03131] mt-0.5"
+                  className="text-xs text-danger mt-0.5"
                 >
                   {errors.firstMessage.message}
                 </p>

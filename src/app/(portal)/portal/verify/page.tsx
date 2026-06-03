@@ -95,12 +95,12 @@ export default function PortalVerifyPage() {
         <div className="flex flex-col items-center text-center gap-4 py-4">
           <Loader2
             size={40}
-            className="text-[#3B5BDB] animate-spin"
+            className="text-primary animate-spin"
             aria-label="กำลังตรวจสอบลิงก์"
           />
           <div>
-            <h1 className="text-lg font-bold text-[#1F2933]">กำลังตรวจสอบ...</h1>
-            <p className="mt-1 text-sm text-[#6B7280]">กรุณารอสักครู่</p>
+            <h1 className="text-lg font-bold text-foreground">กำลังตรวจสอบ...</h1>
+            <p className="mt-1 text-sm text-secondary">กรุณารอสักครู่</p>
           </div>
         </div>
       </AuthCard>
@@ -114,12 +114,12 @@ export default function PortalVerifyPage() {
       <div className="flex min-h-screen items-center justify-center px-4 py-12">
       <AuthCard>
         <div className="flex flex-col items-center text-center gap-4 py-4">
-          <div className="w-12 h-12 rounded-full bg-teal-50 flex items-center justify-center">
-            <ShieldCheck size={28} className="text-[#0CA678]" aria-hidden="true" />
+          <div className="w-12 h-12 rounded-full bg-success-tint flex items-center justify-center">
+            <ShieldCheck size={28} className="text-success" aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-[#1F2933]">เข้าสู่ระบบสำเร็จ!</h1>
-            <p className="mt-1 text-sm text-[#6B7280]">กำลังพาคุณไปยังหน้าหลัก...</p>
+            <h1 className="text-lg font-bold text-foreground">เข้าสู่ระบบสำเร็จ!</h1>
+            <p className="mt-1 text-sm text-secondary">กำลังพาคุณไปยังหน้าหลัก...</p>
           </div>
         </div>
       </AuthCard>
@@ -132,11 +132,11 @@ export default function PortalVerifyPage() {
     <div className="flex min-h-screen items-center justify-center px-4 py-12">
     <AuthCard>
       <div className="flex flex-col items-center text-center gap-4 py-4">
-        <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center">
-          <ShieldX size={28} className="text-[#E03131]" aria-hidden="true" />
+        <div className="w-12 h-12 rounded-full bg-danger-tint flex items-center justify-center">
+          <ShieldX size={28} className="text-danger" aria-hidden="true" />
         </div>
         <div>
-          <h1 className="text-lg font-bold text-[#1F2933]">ลิงก์ไม่สามารถใช้งานได้</h1>
+          <h1 className="text-lg font-bold text-foreground">ลิงก์ไม่สามารถใช้งานได้</h1>
           {errorMessage && (
             <div className="mt-3 w-full text-left">
               <FormAlert variant="error" message={errorMessage} />
@@ -145,7 +145,7 @@ export default function PortalVerifyPage() {
         </div>
         <a
           href="/portal/login"
-          className="w-full flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold text-white bg-[#3B5BDB] hover:bg-[#2F4BC4] transition-colors focus:outline-none focus:ring-2 focus:ring-[#3B5BDB] focus:ring-offset-2"
+          className="w-full flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold text-white bg-primary-strong hover:bg-primary-strong-hover transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
         >
           ขอลิงก์ใหม่
         </a>

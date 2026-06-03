@@ -1,26 +1,92 @@
 @import "tailwindcss";
 
+/* =============================================================================
+   CSS Custom Properties — single source of truth สำหรับ palette อุ่น Terracotta
+   override --color-primary ใน portal layout element เพื่อ per-tenant branding ในอนาคต
+============================================================================= */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Background */
+  --color-background: #F5F0E8;
+  --color-stone:      #EDE8DE;
+  --color-surface:    #FAF7F2;
+
+  /* Border */
+  --color-border:     #D9D4CC;
+
+  /* Text */
+  --color-foreground: #1A1A1A;
+  --color-secondary:  #555555;
+  --color-muted:      #888888;
+
+  /* Primary action (Terracotta) — override ตรงนี้เพื่อ per-tenant portal branding */
+  --color-primary:       #C4652A;
+  --color-primary-hover: #A8541F; /* reserved: hover ของ accent base (เช่น border/active) — ปุ่ม fill ใช้ primary-strong-hover */
+  --color-primary-tint:  #F3E3DA;
+  /* AA-accessible variants — ใช้เมื่อมี text จริงทับ (WCAG 4.5:1) ไม่กระทบสีแบรนด์ #C4652A
+     - strong: พื้น fill ที่มี text ขาว (white/#A8541F = 5.31)
+     - strong-hover: hover ของปุ่ม strong (white/#8C4216 = 7.23)
+     - ink: สี text terracotta บนพื้นอ่อน เช่น link/badge (บน tint = 5.44) */
+  --color-primary-strong:       #A8541F;
+  --color-primary-strong-hover: #8C4216;
+  --color-primary-ink:          #92451A;
+
+  /* Semantic status */
+  --color-success:      #3B6D11;
+  --color-success-tint: #E7EFDD;
+
+  --color-warning:      #BA7517;
+  --color-warning-tint: #F6EAD3;
+  /* ink: สี text amber บนพื้นอ่อน เช่น badge (บน warning-tint = 5.11) */
+  --color-warning-ink:  #8A570D;
+  /* strong: พื้น fill amber ที่มี text ขาว เช่น ปุ่ม internal-note active (white/#94590E = 5.68) */
+  --color-warning-strong:       #94590E;
+  --color-warning-strong-hover: #7D4F0C;
+
+  --color-danger:       #993C1D;
+  --color-danger-tint:  #F1DED7;
 }
 
+/* =============================================================================
+   Tailwind v4 Theme — reference ตัวแปร CSS ด้านบน
+   @theme inline ทำให้ generate utility class ได้ครบ (bg-*, text-*, border-*)
+   และ inherit override จาก :root ทุกครั้งที่ re-render
+============================================================================= */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background:    var(--color-background);
+  --color-stone:         var(--color-stone);
+  --color-surface:       var(--color-surface);
+
+  --color-border:        var(--color-border);
+
+  --color-foreground:    var(--color-foreground);
+  --color-secondary:     var(--color-secondary);
+  --color-muted:         var(--color-muted);
+
+  --color-primary:       var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-primary-tint:  var(--color-primary-tint);
+  --color-primary-strong:       var(--color-primary-strong);
+  --color-primary-strong-hover: var(--color-primary-strong-hover);
+  --color-primary-ink:          var(--color-primary-ink);
+
+  --color-success:       var(--color-success);
+  --color-success-tint:  var(--color-success-tint);
+
+  --color-warning:       var(--color-warning);
+  --color-warning-tint:  var(--color-warning-tint);
+  --color-warning-ink:   var(--color-warning-ink);
+  --color-warning-strong:       var(--color-warning-strong);
+  --color-warning-strong-hover: var(--color-warning-strong-hover);
+
+  --color-danger:        var(--color-danger);
+  --color-danger-tint:   var(--color-danger-tint);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--color-background);
+  color: var(--color-foreground);
   font-family: Arial, Helvetica, sans-serif;
 }

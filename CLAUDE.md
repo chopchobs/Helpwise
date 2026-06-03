@@ -186,16 +186,24 @@ const tickets = await db.ticket.findMany()
 
 ### 🎨 Color Palette
 
-- **Background (Soft White):** `#F7F9FB` — พื้นแอป (อย่าใช้ขาวจัด `#FFFFFF` เป็นพื้นหลัก)
-- **Surface (White):** `#FFFFFF` — card, modal, sidebar
-- **Primary / Action (Indigo):** `#3B5BDB` (hover `#2F4BC4`) — ปุ่มหลัก, CTA, active
-- **Success / Solved (Teal):** `#0CA678` — ticket solved, สถานะบวก
-- **Warning / SLA ใกล้ครบ (Amber):** `#E8590C`
-- **Danger / SLA breach (Red):** `#E03131` — เกิน SLA, urgent
-- **Text:** primary `#1F2933` (ห้าม pure black), secondary `#6B7280`
-- **Border:** `#E4E7EB`
+- **Background Primary (Sand): #F5F0E8 — พื้นแอปหลัก (อย่าใช้ขาวล้วน #FFFFFF เป็นพื้นหลัก)
+- **Background Secondary (Stone): #EDE8DE — section สลับ, sidebar, subtle surface
+- **Surface (Warm White): #FAF7F2 — card, modal, dropdown
+- **Primary / Action (Terracotta): #C4652A (hover #A8541F) — ปุ่มหลัก, CTA, active state
+- **Success (Sage Green): #3B6D11 — สถานะสำเร็จ, สถานะบวก
+- **Warning / ใกล้ครบกำหนด (Amber): #BA7517 — แจ้งเตือน, ใกล้เกิน deadline
+- **Danger / เกินกำหนด (Sienna): #993C1D — urgent, error, breach
+- **Text: primary #1A1A1A (ห้าม pure black #000000), secondary #555555, muted #888888
+- **Border: #D9D4CC (subtle rgba(0,0,0,0.06))
 
-ใช้ arbitrary values ที่ตรง palette (เช่น `bg-[#3B5BDB]`) หรือถือว่า map ใน `tailwind.config` แล้ว
+**Theme tokens (single source of truth):** palette ทั้งหมดเป็น Tailwind v4 `@theme` token ใน `src/app/globals.css` — ใช้ semantic class เสมอ (`bg-background`, `bg-surface`, `bg-stone`, `text-foreground`, `text-secondary`, `text-muted`, `bg-primary`, `text-success/warning/danger`, `*-tint`). **ห้าม hardcode arbitrary hex** (`bg-[#C4652A]`) — เปลี่ยน palette/per-tenant branding ที่ token เดียว
+
+**AA-accessible variants (WCAG 4.5:1):** เมื่อมี **text จริงทับสี** ให้ใช้เฉดเข้มที่ผ่าน AA (สี base ด้านบนเป็นโทนกลาง-สว่าง contrast ไม่พอ):
+- ปุ่ม/fill ที่มี text ขาว → `bg-primary-strong` (#A8541F, hover `bg-primary-strong-hover` #8C4216) ไม่ใช่ `bg-primary`
+- text terracotta บนพื้นอ่อน (link, badge, ticket#) → `text-primary-ink` (#92451A) ไม่ใช่ `text-primary`
+- text amber บนพื้นอ่อน (badge/label) → `text-warning-ink` (#8A570D) ไม่ใช่ `text-warning`
+- ปุ่ม/fill amber ที่มี text ขาว (เช่น internal-note active) → `bg-warning-strong` (#94590E, hover `bg-warning-strong-hover` #7D4F0C) ไม่ใช่ `bg-warning`
+- `text-primary`/`text-warning`/`bg-primary` (base) สงวนไว้ให้ icon / border / focus ring / decorative fill ที่ contrast 3:1 พอ
 
 ---
 
