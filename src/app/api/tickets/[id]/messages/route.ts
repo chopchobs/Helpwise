@@ -10,6 +10,13 @@
  *   - ถ้า ticket.status = NEW และ agent ส่ง PUBLIC message → เปลี่ยนเป็น OPEN
  *   - visibility=INTERNAL = internal note ระหว่าง agent เท่านั้น (ไม่ส่ง email ออก)
  *
+ * Outbound Email (visibility=PUBLIC เท่านั้น):
+ *   - fetch requesterContact + ticket details สำหรับ threading
+ *   - generate Message-ID สำหรับ reply
+ *   - เก็บ threading fields บน TicketMessage ก่อน send
+ *   - send email ผ่าน sendEmail() — ถ้า send ล้ม log แต่ไม่ fail request
+ *     (emailSentAt จะเป็น null ไว้สำหรับ retry ในอนาคต ผ่าน BullMQ)
+ *
  * Audience: requireAgent() — เฉพาะ agent ของ tenant นี้เท่านั้น
  */
 
@@ -20,6 +27,7 @@ import { tenantPrisma } from "@/lib/tenant";
 import { audit } from "@/lib/audit";
 import { MessageVisibility, Prisma, TicketStatus } from "@prisma/client";
 import { createTicketMessage } from "@/lib/tickets";
+import { sendEmail } from "@/lib/email";
 
 // =============================================================================
 // VALIDATION SCHEMA
@@ -30,6 +38,49 @@ const createMessageSchema = z.object({
   // agent สามารถเลือก visibility ได้ (PUBLIC หรือ INTERNAL)
   visibility: z.enum(["PUBLIC", "INTERNAL"]).default("PUBLIC"),
 });
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * generate RFC 5322 Message-ID สำหรับ outbound email
+ * รูปแบบ: <{ticketId}-{timestamp}-{random}@{slug}.{rootDomain}>
+ * ไม่รวม angle brackets ใน value — caller เพิ่มเองเมื่อใส่ใน header
+ */
+function generateOutboundMessageId(ticketId: string, slug: string, rootDomain: string): string {
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `${ticketId}-${ts}-${rand}@${slug}.${rootDomain}`;
+}
+
+/**
+ * escape HTML special chars กัน HTML injection ในกล่องเมลลูกค้า
+ * agent อาจพิมพ์ '<', '>', '&', quote — ต้อง escape ก่อน interpolate เข้า outbound HTML
+ */
+function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * สร้าง References header ใหม่โดยรวม references เดิม + inReplyTo
+ * RFC 5322: References ประกอบด้วย thread ทั้งหมด (previous refs + message ที่ reply)
+ */
+function buildReferences(existingRefs: string | null, inReplyToId: string | null): string | undefined {
+  const parts: string[] = [];
+  if (existingRefs) {
+    parts.push(...existingRefs.split(/\s+/).filter(Boolean));
+  }
+  if (inReplyToId && !parts.includes(inReplyToId)) {
+    parts.push(inReplyToId);
+  }
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
 
 // =============================================================================
 // POST /api/tickets/:id/messages
@@ -76,12 +127,19 @@ export async function POST(
     const { body: messageBody, visibility } = parsed.data;
 
     // 3. ดึง ticket ปัจจุบัน — tenantPrisma inject tenantId อัตโนมัติ
+    // ดึง fields สำหรับ business logic + outbound email threading
     const ticket = await db.ticket.findFirst({
       where: { id: ticketId },
       select: {
         id: true,
         status: true,
         firstRespondedAt: true,
+        subject: true,
+        ticketNumber: true,
+        emailMessageId: true, // Message-ID ของ inbound email แรก
+        requesterContact: {
+          select: { id: true, email: true, name: true },
+        },
       },
     });
 
@@ -92,16 +150,65 @@ export async function POST(
       );
     }
 
-    // 4. สร้าง message — author = agent member ที่ login อยู่
+    // 4. เตรียม threading fields สำหรับ outbound email (เฉพาะ PUBLIC)
+    // INTERNAL note ห้ามส่ง email เด็ดขาด — ตรวจที่นี่ก่อน
+    let outboundMessageId: string | undefined;
+    let outboundInReplyTo: string | undefined;
+    let outboundReferences: string | undefined;
+
+    if (visibility === "PUBLIC") {
+      // หา Message-ID ล่าสุดของ thread สำหรับ In-Reply-To
+      // ลำดับ: หา emailMessageId ของ message ล่าสุด → fallback ไป ticket.emailMessageId
+      const lastEmailMsg = await db.ticketMessage.findFirst({
+        where: {
+          ticketId,
+          visibility: MessageVisibility.PUBLIC,
+          emailMessageId: { not: null },
+        },
+        orderBy: { createdAt: "desc" },
+        select: {
+          emailMessageId: true,
+          emailReferences: true,
+        },
+      });
+
+      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com";
+      // ใช้ slug จาก tenant ถ้ามี — fallback ใช้ tenantId เพื่อ unique
+      // Note: ctx ไม่มี slug โดยตรง — ดึง subdomain จาก tenant record ถ้าต้องการ
+      // สำหรับ Message-ID ใช้ tenantId แทน slug ก็พอ (ไม่จำเป็นต้อง valid subdomain)
+      const slugForId = ctx.tenantId.slice(0, 8); // ใช้ prefix ของ tenantId
+
+      outboundMessageId = generateOutboundMessageId(ticketId, slugForId, rootDomain);
+
+      // In-Reply-To = emailMessageId ของ message ล่าสุด หรือ ticket.emailMessageId
+      outboundInReplyTo =
+        lastEmailMsg?.emailMessageId ??
+        ticket.emailMessageId ??
+        undefined;
+
+      // References = รวม references เดิม + in-reply-to ใหม่
+      outboundReferences = buildReferences(
+        lastEmailMsg?.emailReferences ?? null,
+        outboundInReplyTo ?? null
+      );
+    }
+
+    // 5. สร้าง message — author = agent member ที่ login อยู่
+    // บันทึก threading fields พร้อมกัน (emailSentAt = null ก่อนส่ง)
     const message = await createTicketMessage(db, {
       tenantId: ctx.tenantId,
       ticketId,
       body: messageBody,
       visibility: visibility as MessageVisibility,
       authorMemberId: member.id,
+      // threading fields — ใส่เฉพาะ PUBLIC message
+      emailMessageId: outboundMessageId,
+      emailInReplyTo: outboundInReplyTo,
+      emailReferences: outboundReferences,
+      // emailSentAt = null ก่อนส่ง — set หลังส่งสำเร็จ
     });
 
-    // 5. ตรวจสอบและ update ticket state ตาม business logic
+    // 6. ตรวจสอบและ update ticket state ตาม business logic
     const ticketUpdate: Prisma.TicketUpdateInput = {};
 
     // ถ้า agent ส่ง PUBLIC message และ ticket ยังไม่เคยมี first response → set firstRespondedAt
@@ -138,6 +245,49 @@ export async function POST(
         after: { status: TicketStatus.OPEN },
         ticketId,
       });
+    }
+
+    // 7. ส่ง outbound email เฉพาะ PUBLIC message ที่มี email ของ requester
+    // INTERNAL note ห้ามส่ง email เด็ดขาด (กฎ CLAUDE.md verbatim)
+    // ส่ง AFTER persist message — ถ้าส่งล้ม message ยังอยู่ใน DB (ไม่สูญหาย)
+    if (visibility === "PUBLIC" && ticket.requesterContact?.email && outboundMessageId) {
+      const contactEmail = ticket.requesterContact.email;
+      // สร้าง subject ที่มี ticket number prefix (กัน duplicate ถ้า subject มีอยู่แล้ว)
+      const replySubjectPrefix = `[#${ticket.ticketNumber}]`;
+      const emailSubject = ticket.subject.startsWith(replySubjectPrefix)
+        ? ticket.subject
+        : `${replySubjectPrefix} ${ticket.subject}`;
+
+      try {
+        await sendEmail({
+          to: contactEmail,
+          subject: emailSubject,
+          html: `<p>${escapeHtml(messageBody).replace(/\n/g, "<br>")}</p>`,
+          text: messageBody,
+          headers: {
+            messageId: outboundMessageId,
+            inReplyTo: outboundInReplyTo,
+            references: outboundReferences,
+          },
+        });
+
+        // update emailSentAt หลังส่งสำเร็จ
+        // ใช้ raw prisma เพราะ tenantPrisma strip updatedAt fields บาง operation
+        // แต่ inject tenantId เองเพื่อ tenant safety
+        await db.ticketMessage.update({
+          where: { id: message.id },
+          data: { emailSentAt: new Date() },
+        });
+      } catch (sendErr) {
+        // ส่ง email ล้ม — log แต่ไม่ fail request
+        // emailSentAt ยัง null → สามารถ retry ผ่าน BullMQ ในอนาคต
+        console.error("[POST /api/tickets/:id/messages] sendEmail failed:", {
+          ticketId,
+          messageId: message.id,
+          error: sendErr instanceof Error ? sendErr.message : String(sendErr),
+        });
+        // ไม่ return error — message บันทึกแล้ว ลูกค้าอาจไม่ได้รับ email แต่ agent action ไม่สูญ
+      }
     }
 
     return NextResponse.json({ data: message, error: null }, { status: 201 });
