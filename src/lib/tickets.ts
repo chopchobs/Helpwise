@@ -34,12 +34,19 @@ export interface CreateTicketInput {
   assigneeId?: string;
   priority?: TicketPriority;
   channel?: string;
+  /** Message-ID ของ inbound email ที่สร้าง ticket นี้ — เก็บที่ Ticket.emailMessageId */
+  emailMessageId?: string;
   firstMessage?: {
     body: string;
     visibility?: MessageVisibility;
     /** authorMemberId หรือ authorContactId อย่างใดอย่างหนึ่งต้องไม่ null */
     authorMemberId?: string;
     authorContactId?: string;
+    // === Email threading fields ===
+    emailMessageId?: string;
+    emailInReplyTo?: string;
+    emailReferences?: string;
+    emailSentAt?: Date;
   };
 }
 
@@ -51,6 +58,11 @@ export interface CreateMessageInput {
   /** authorMemberId หรือ authorContactId อย่างใดอย่างหนึ่งต้องไม่ null */
   authorMemberId?: string;
   authorContactId?: string;
+  // === Email threading fields ===
+  emailMessageId?: string;
+  emailInReplyTo?: string;
+  emailReferences?: string;
+  emailSentAt?: Date;
 }
 
 // =============================================================================
@@ -77,7 +89,7 @@ export async function createTicketWithNumber(
   db: TenantScopedPrisma,
   input: CreateTicketInput
 ) {
-  const { tenantId, subject, requesterContactId, assigneeId, priority, channel, firstMessage } = input;
+  const { tenantId, subject, requesterContactId, assigneeId, priority, channel, emailMessageId, firstMessage } = input;
 
   // MAX_RETRIES สูงขึ้น + jitter backoff เพื่อทน burst contention บน tenant เดียว
   // (smoke test: create พร้อมกันหลายอันแล้วชน @@unique([tenantId, ticketNumber]))
@@ -111,6 +123,8 @@ export async function createTicketWithNumber(
             priority: priority ?? TicketPriority.NORMAL,
             channel: channel ?? "portal",
             status: TicketStatus.NEW,
+            // เก็บ Message-ID ของ inbound email ที่สร้าง ticket นี้ (ถ้ามี)
+            emailMessageId: emailMessageId ?? null,
           },
         });
 
@@ -129,6 +143,11 @@ export async function createTicketWithNumber(
               visibility: firstMessage.visibility ?? MessageVisibility.PUBLIC,
               authorMemberId: firstMessage.authorMemberId ?? null,
               authorContactId: firstMessage.authorContactId ?? null,
+              // threading fields สำหรับ inbound email (ถ้ามี)
+              emailMessageId: firstMessage.emailMessageId ?? null,
+              emailInReplyTo: firstMessage.emailInReplyTo ?? null,
+              emailReferences: firstMessage.emailReferences ?? null,
+              emailSentAt: firstMessage.emailSentAt ?? null,
             },
           });
         }
@@ -224,7 +243,18 @@ export async function createTicketMessage(
   db: TenantScopedPrisma,
   input: CreateMessageInput
 ) {
-  const { tenantId, ticketId, body, visibility, authorMemberId, authorContactId } = input;
+  const {
+    tenantId,
+    ticketId,
+    body,
+    visibility,
+    authorMemberId,
+    authorContactId,
+    emailMessageId,
+    emailInReplyTo,
+    emailReferences,
+    emailSentAt,
+  } = input;
 
   // app layer constraint: exactly one author ต้องไม่ null
   if (!authorMemberId && !authorContactId) {
@@ -244,6 +274,11 @@ export async function createTicketMessage(
       visibility,
       authorMemberId: authorMemberId ?? null,
       authorContactId: authorContactId ?? null,
+      // threading fields — null ถ้าไม่ใช่ email message
+      emailMessageId: emailMessageId ?? null,
+      emailInReplyTo: emailInReplyTo ?? null,
+      emailReferences: emailReferences ?? null,
+      emailSentAt: emailSentAt ?? null,
     },
     include: {
       authorMember: {
