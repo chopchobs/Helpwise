@@ -21,6 +21,8 @@
 import { Prisma, TicketStatus, TicketPriority, MessageVisibility } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { TenantScopedPrisma } from "@/lib/tenant";
+import { hasFeature, FEATURE_KEYS } from "@/lib/features";
+import { parseBusinessHours, computeDeadlines } from "@/lib/sla";
 
 // =============================================================================
 // TYPES
@@ -36,6 +38,12 @@ export interface CreateTicketInput {
   channel?: string;
   /** Message-ID ของ inbound email ที่สร้าง ticket นี้ — เก็บที่ Ticket.emailMessageId */
   emailMessageId?: string;
+  /**
+   * plan ปัจจุบันของ tenant — ส่งเพื่อกัน extra DB query ใน hasFeature()
+   * ได้จาก ctx.plan ของ TenantContext (proxy inject ไว้แล้ว)
+   * ถ้าไม่ส่ง hasFeature จะ query DB เอง (1 query เพิ่ม)
+   */
+  plan?: string;
   firstMessage?: {
     body: string;
     visibility?: MessageVisibility;
@@ -89,7 +97,72 @@ export async function createTicketWithNumber(
   db: TenantScopedPrisma,
   input: CreateTicketInput
 ) {
-  const { tenantId, subject, requesterContactId, assigneeId, priority, channel, emailMessageId, firstMessage } = input;
+  const { tenantId, subject, requesterContactId, assigneeId, priority, channel, emailMessageId, firstMessage, plan } = input;
+
+  // ==========================================================================
+  // SLA: คำนวณ deadline ก่อนเปิด transaction (หลีกเลี่ยง async inside tx)
+  // ขั้นตอน:
+  //   1. ตรวจ feature gate sla_policies — ถ้าปิดอยู่ไม่ต้อง query policy
+  //   2. หา default SlaPolicy ของ tenant (tenant-scoped)
+  //   3. อ่าน Tenant.settings → businessHours
+  //   4. คำนวณ deadline จาก createdAt baseline (ใช้ now() ณ จุดนี้)
+  //   5. ส่ง precomputed due dates เข้า tx.ticket.create เพื่อ atomic
+  // ==========================================================================
+
+  interface SlaCreateData {
+    slaPolicyId?: string;
+    firstResponseDueAt?: Date;
+    resolutionDueAt?: Date;
+  }
+
+  let slaData: SlaCreateData = {};
+
+  const slaEnabled = await hasFeature(tenantId, FEATURE_KEYS.SLA_POLICIES, plan);
+
+  if (slaEnabled) {
+    // query default policy + tenant settings แบบ parallel เพื่อลด latency
+    const [defaultPolicy, tenantSettings] = await Promise.all([
+      // tenant-scoped: ค้นหา default SlaPolicy ของ tenant นี้
+      // ใช้ prisma โดยตรง (ไม่ใช้ db/tenantPrisma) เพราะต้องระบุ tenantId เองใน where
+      // และการ query นี้เกิดก่อน tx — ไม่มี race condition กับ ticket create
+      prisma.slaPolicy.findFirst({
+        where: { tenantId, isDefault: true },
+        select: {
+          id: true,
+          firstResponseLowMin: true,
+          firstResponseNormMin: true,
+          firstResponseHighMin: true,
+          firstResponseUrgMin: true,
+          resolutionLowMin: true,
+          resolutionNormMin: true,
+          resolutionHighMin: true,
+          resolutionUrgMin: true,
+        },
+      }),
+      // อ่าน settings ของ tenant เพื่อดึง business hours
+      prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { settings: true },
+      }),
+    ]);
+
+    const businessHours = parseBusinessHours(tenantSettings?.settings ?? null);
+    const startAt = new Date(); // baseline = เวลาสร้าง ticket
+    const effectivePriority = priority ?? TicketPriority.NORMAL;
+
+    const { firstResponseDueAt, resolutionDueAt } = computeDeadlines({
+      startAt,
+      priority: effectivePriority,
+      policy: defaultPolicy ?? null,
+      businessHours,
+    });
+
+    slaData = {
+      ...(defaultPolicy ? { slaPolicyId: defaultPolicy.id } : {}),
+      firstResponseDueAt,
+      resolutionDueAt,
+    };
+  }
 
   // MAX_RETRIES สูงขึ้น + jitter backoff เพื่อทน burst contention บน tenant เดียว
   // (smoke test: create พร้อมกันหลายอันแล้วชน @@unique([tenantId, ticketNumber]))
@@ -113,6 +186,7 @@ export async function createTicketWithNumber(
         // สร้าง ticket — ใส่ tenantId ใน data อย่างชัดเจน
         // assigneeId ที่ส่งมาถูก verify จาก verifyAssigneeMembership แล้วที่ caller
         // tx ไม่มี extension — ใส่ tenantId ใน data เองเพื่อ guarantee tenant scope
+        // slaData ถูก precompute ก่อน tx — inject ตรงนี้เพื่อ atomic (ไม่มี post-create update)
         const ticket = await tx.ticket.create({
           data: {
             tenantId,
@@ -125,6 +199,8 @@ export async function createTicketWithNumber(
             status: TicketStatus.NEW,
             // เก็บ Message-ID ของ inbound email ที่สร้าง ticket นี้ (ถ้ามี)
             emailMessageId: emailMessageId ?? null,
+            // SLA deadlines — set เฉพาะเมื่อ feature เปิดอยู่ (slaData ไม่ว่างเปล่า)
+            ...slaData,
           },
         });
 
