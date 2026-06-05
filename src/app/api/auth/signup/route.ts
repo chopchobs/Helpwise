@@ -187,6 +187,18 @@ export async function POST(request: Request): Promise<NextResponse> {
         select: { id: true },
       });
 
+      // --- Default SlaPolicy ---
+      // สร้าง policy ค่า default ให้ tenant ใหม่ทุกราย (isDefault: true)
+      // column minutes ปล่อยเป็น @default ใน schema — ไม่ต้อง hardcode ค่า
+      // feature gate จะตรวจ sla_policies ตาม plan ก่อนใช้ policy นี้
+      await tx.slaPolicy.create({
+        data: {
+          tenantId: tenant.id,
+          name: "Standard SLA",
+          isDefault: true,
+        },
+      });
+
       return { tenant, userId: user.id, memberId: member.id };
     });
 
