@@ -84,6 +84,21 @@ export interface AgentTicketMessage {
   authorContact: ContactAuthor | null;
 }
 
+/**
+ * SLA state snapshot ที่ agent เห็น — null เมื่อ ticket ไม่มี SLA เลย (dueAt ทั้งคู่ null)
+ * ใช้ทั้งใน list summary และ detail view
+ */
+export interface TicketSlaInfo {
+  firstResponseDueAt: string | null;
+  resolutionDueAt: string | null;
+  firstRespondedAt: string | null;
+  resolvedAt: string | null;
+  firstResponseBreached: boolean;
+  resolutionBreached: boolean;
+  /** null = ไม่ได้ pause อยู่; ISO string = กำลัง pause ณ timestamp นี้ */
+  slaPausedAt: string | null;
+}
+
 /** Ticket summary สำหรับ list (agent) */
 export interface AgentTicketSummary {
   id: string;
@@ -98,6 +113,11 @@ export interface AgentTicketSummary {
   _count?: {
     messages: number;
   };
+  /**
+   * SLA info — null เมื่อ ticket ไม่มี deadline (SLA feature ปิด หรือสร้างก่อน policy)
+   * agent-side เท่านั้น ห้าม expose ผ่าน portal
+   */
+  sla: TicketSlaInfo | null;
 }
 
 /** Ticket detail ฝั่ง agent — มี messages array */
