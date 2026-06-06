@@ -86,6 +86,10 @@ model Plan {
   maxAgents      Int      @default(0)
   maxSlaPolicies Int      @default(1)
   features       String[] // array of feature keys ที่ plan นี้รวมไว้ (สำหรับ reference)
+  // Stripe Price IDs — null หมายความว่ายังไม่ผูก Stripe Price กับ plan นี้
+  // Postgres อนุญาต multiple NULL ใน unique constraint — ปลอดภัย
+  stripePriceIdMonthly String? @unique // Stripe Price ID (รายเดือน)
+  stripePriceIdYearly  String? @unique // Stripe Price ID (รายปี)
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -454,6 +458,24 @@ model ProcessedInboundEmail {
   // composite unique: กัน process email เดียวกันซ้ำในเดือน tenant
   @@unique([tenantId, messageId])
   @@index([tenantId])
+}
+
+// ProcessedStripeEvent — idempotency guard สำหรับ Stripe webhook
+// GLOBAL model (ไม่มี tenantId) — Stripe event เป็น account-level
+// idempotency ต้องทำงานได้ก่อนจะ resolve tenant (pattern เดียวกับ ProcessedInboundEmail)
+// เช็ค eventId ก่อน process เสมอ — Stripe อาจส่ง event ซ้ำได้
+model ProcessedStripeEvent {
+  id          String   @id @default(cuid())
+  // Stripe event.id — globally unique ฝั่ง Stripe
+  eventId     String   @unique
+  // event type เช่น "customer.subscription.updated", "invoice.payment_succeeded"
+  type        String
+  // "ok" | "error" | "processing"
+  status      String   @default("ok")
+  errorDetail String?
+  processedAt DateTime @default(now())
+
+  @@index([eventId])
 }
 
 // AuditLog — immutable event log

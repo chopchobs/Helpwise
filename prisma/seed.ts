@@ -35,6 +35,9 @@ const PLANS = [
     maxAgents: 3,
     maxSlaPolicies: 1,
     features: [] as string[], // starter ไม่รวม feature พิเศษ
+    // Stripe Price IDs — null จนกว่าจะผูก Price จาก Stripe Dashboard
+    stripePriceIdMonthly: null as string | null,
+    stripePriceIdYearly: null as string | null,
     isActive: true,
   },
   {
@@ -45,6 +48,8 @@ const PLANS = [
     maxAgents: 15,
     maxSlaPolicies: 5,
     features: ["sla_policies", "csat_survey", "custom_branding"],
+    stripePriceIdMonthly: null as string | null,
+    stripePriceIdYearly: null as string | null,
     isActive: true,
   },
   {
@@ -55,6 +60,8 @@ const PLANS = [
     maxAgents: 0, // 0 = unlimited
     maxSlaPolicies: 0, // 0 = unlimited
     features: ["sla_policies", "csat_survey", "custom_branding", "api_access"],
+    stripePriceIdMonthly: null as string | null,
+    stripePriceIdYearly: null as string | null,
     isActive: true,
   },
 ] as const;
@@ -108,6 +115,10 @@ async function main(): Promise<void> {
           maxAgents: plan.maxAgents,
           maxSlaPolicies: plan.maxSlaPolicies,
           features: [...plan.features],
+          // stripePriceId* ไม่ overwrite หาก set ไว้แล้ว (ป้องกัน seed ล้างค่าที่ผูกจาก Dashboard)
+          // ใช้ undefined แทน null เพื่อให้ Prisma ข้าม field นี้ในคำสั่ง UPDATE
+          stripePriceIdMonthly: plan.stripePriceIdMonthly ?? undefined,
+          stripePriceIdYearly: plan.stripePriceIdYearly ?? undefined,
           isActive: plan.isActive,
         },
         create: {
@@ -118,6 +129,8 @@ async function main(): Promise<void> {
           maxAgents: plan.maxAgents,
           maxSlaPolicies: plan.maxSlaPolicies,
           features: [...plan.features],
+          stripePriceIdMonthly: plan.stripePriceIdMonthly,
+          stripePriceIdYearly: plan.stripePriceIdYearly,
           isActive: plan.isActive,
         },
       });
