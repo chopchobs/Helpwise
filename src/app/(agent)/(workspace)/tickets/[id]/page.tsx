@@ -13,6 +13,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Lock, Send, RefreshCw, User } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import PriorityBadge from "@/components/ui/PriorityBadge";
+import SlaBadge from "@/components/ui/SlaBadge";
 import FormAlert from "@/components/ui/FormAlert";
 import {
   formatDateFull,
@@ -402,8 +403,10 @@ export default function AgentTicketDetailPage() {
       if (json.data) {
         // capture ไว้ก่อนเข้า setState closure เพื่อหลีกเลี่ยง non-null assertion ใน closure
         const updated = json.data;
-        // อัปเดต local state เฉพาะ fields ที่เปลี่ยน ไม่ต้อง refetch ทั้งหมด
-        setTicket((prev) => (prev ? { ...prev, status: updated.status } : prev));
+        // อัปเดต status + sla (deadline ถูก shift หลัง pause/resume) เพื่อให้ badge ไม่ stale
+        setTicket((prev) =>
+          prev ? { ...prev, status: updated.status, sla: updated.sla } : prev
+        );
       }
     } catch {
       setPatchError("ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่");
@@ -435,7 +438,10 @@ export default function AgentTicketDetailPage() {
       if (json.data) {
         // capture ไว้ก่อนเข้า setState closure เพื่อหลีกเลี่ยง non-null assertion ใน closure
         const updated = json.data;
-        setTicket((prev) => (prev ? { ...prev, priority: updated.priority } : prev));
+        // priority เปลี่ยน → deadline ถูก recompute → อัปเดต sla ด้วย
+        setTicket((prev) =>
+          prev ? { ...prev, priority: updated.priority, sla: updated.sla } : prev
+        );
       }
     } catch {
       setPatchError("ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่");
@@ -542,6 +548,8 @@ export default function AgentTicketDetailPage() {
             </span>
             <StatusBadge status={ticket.status} />
             <PriorityBadge priority={ticket.priority} />
+            {/* SLA badge เด่นใกล้ status — แสดง deadline label เต็ม */}
+            <SlaBadge sla={ticket.sla} />
           </div>
 
           <h1 className="text-xl font-bold text-foreground leading-snug mb-4">

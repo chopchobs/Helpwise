@@ -17,6 +17,7 @@ import {
   ChevronDown,
   Menu,
   X,
+  CreditCard,
 } from "lucide-react";
 import type {
   MeResponse,
@@ -113,6 +114,10 @@ interface SidebarNavProps {
  * ใช้ซ้ำทั้ง desktop sidebar และ mobile drawer
  */
 function SidebarNav({ session, pathname }: SidebarNavProps) {
+  // เฉพาะ OWNER/ADMIN เท่านั้นที่เห็น Settings nav
+  const isAdmin =
+    session.member.role === "OWNER" || session.member.role === "ADMIN";
+
   return (
     <>
       {/* โลโก้ / ชื่อ tenant */}
@@ -153,7 +158,7 @@ function SidebarNav({ session, pathname }: SidebarNavProps) {
         + Ticket ใหม่
       </Link>
 
-      {/* Nav links */}
+      {/* Nav links — ทุก role เห็น */}
       <nav aria-label="เมนูหลัก">
         <ul className="flex flex-col gap-1" role="list">
           {NAV_ITEMS.map((item) => (
@@ -172,6 +177,25 @@ function SidebarNav({ session, pathname }: SidebarNavProps) {
           ))}
         </ul>
       </nav>
+
+      {/* Admin-only nav — แสดงเฉพาะ OWNER/ADMIN */}
+      {isAdmin && (
+        <nav aria-label="ตั้งค่า" className="mt-4 pt-4 border-t border-border">
+          <p className="px-3 mb-1 text-xs font-semibold text-muted uppercase tracking-wide">
+            ตั้งค่า
+          </p>
+          <ul className="flex flex-col gap-1" role="list">
+            <li>
+              <NavLink
+                href="/settings/billing"
+                icon={<CreditCard size={18} />}
+                label="Billing"
+                isActive={pathname.startsWith("/settings/billing")}
+              />
+            </li>
+          </ul>
+        </nav>
+      )}
     </>
   );
 }

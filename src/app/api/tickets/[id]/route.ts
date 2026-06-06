@@ -62,9 +62,24 @@ export async function GET(
     const db = tenantPrisma(ctx.tenantId);
 
     // 2. โหลด ticket — tenantPrisma inject tenantId อัตโนมัติ กัน cross-tenant read
-    const ticket = await db.ticket.findFirst({
+    const rawTicket = await db.ticket.findFirst({
       where: { id },
-      include: {
+      select: {
+        id: true,
+        ticketNumber: true,
+        subject: true,
+        status: true,
+        priority: true,
+        createdAt: true,
+        updatedAt: true,
+        // SLA scalar fields — agent-side เท่านั้น
+        firstResponseDueAt: true,
+        resolutionDueAt: true,
+        firstRespondedAt: true,
+        resolvedAt: true,
+        firstResponseBreached: true,
+        resolutionBreached: true,
+        slaPausedAt: true,
         requesterContact: {
           select: { id: true, name: true, email: true, avatarUrl: true, phone: true },
         },
@@ -98,12 +113,53 @@ export async function GET(
       },
     });
 
-    if (!ticket) {
+    if (!rawTicket) {
       return NextResponse.json(
         { data: null, error: { code: "NOT_FOUND", message: "ไม่พบ ticket ที่ระบุ" } },
         { status: 404 }
       );
     }
+
+    // group SLA fields เป็น nested object + แปลง Date → ISO string
+    // sla = null เมื่อ ticket ไม่มี deadline (firstResponseDueAt และ resolutionDueAt เป็น null ทั้งคู่)
+    const hasSla =
+      rawTicket.firstResponseDueAt !== null ||
+      rawTicket.resolutionDueAt !== null;
+
+    const ticket = {
+      ...rawTicket,
+      createdAt: rawTicket.createdAt.toISOString(),
+      updatedAt: rawTicket.updatedAt.toISOString(),
+      // แยก SLA fields ออกจาก root ใส่ใน nested object แทน
+      firstResponseDueAt: undefined,
+      resolutionDueAt: undefined,
+      firstRespondedAt: undefined,
+      resolvedAt: undefined,
+      firstResponseBreached: undefined,
+      resolutionBreached: undefined,
+      slaPausedAt: undefined,
+      sla: hasSla
+        ? {
+            firstResponseDueAt: rawTicket.firstResponseDueAt
+              ? rawTicket.firstResponseDueAt.toISOString()
+              : null,
+            resolutionDueAt: rawTicket.resolutionDueAt
+              ? rawTicket.resolutionDueAt.toISOString()
+              : null,
+            firstRespondedAt: rawTicket.firstRespondedAt
+              ? rawTicket.firstRespondedAt.toISOString()
+              : null,
+            resolvedAt: rawTicket.resolvedAt
+              ? rawTicket.resolvedAt.toISOString()
+              : null,
+            firstResponseBreached: rawTicket.firstResponseBreached,
+            resolutionBreached: rawTicket.resolutionBreached,
+            slaPausedAt: rawTicket.slaPausedAt
+              ? rawTicket.slaPausedAt.toISOString()
+              : null,
+          }
+        : null,
+    };
 
     return NextResponse.json({ data: ticket, error: null }, { status: 200 });
   } catch (err) {
@@ -484,7 +540,48 @@ export async function PATCH(
     // (audit.log ภายในจัดการ error เอง ไม่ throw)
     void Promise.all(auditPromises);
 
-    return NextResponse.json({ data: updatedTicket, error: null }, { status: 200 });
+    // group SLA fields เป็น nested object (เหมือน GET) — frontend ต้องใช้ sla ที่ shift แล้ว
+    // หลัง pause/resume เพื่ออัปเดต badge ทันที ไม่ stale (กรณีไม่ทำ badge จะค้าง countdown เดิม)
+    const hasSlaResp =
+      updatedTicket.firstResponseDueAt !== null ||
+      updatedTicket.resolutionDueAt !== null;
+
+    const responseTicket = {
+      ...updatedTicket,
+      createdAt: updatedTicket.createdAt.toISOString(),
+      updatedAt: updatedTicket.updatedAt.toISOString(),
+      // แยก SLA scalar ออกจาก root ใส่ nested object แทน (ตรงกับ AgentTicketSummary)
+      firstResponseDueAt: undefined,
+      resolutionDueAt: undefined,
+      firstRespondedAt: undefined,
+      resolvedAt: undefined,
+      firstResponseBreached: undefined,
+      resolutionBreached: undefined,
+      slaPausedAt: undefined,
+      sla: hasSlaResp
+        ? {
+            firstResponseDueAt: updatedTicket.firstResponseDueAt
+              ? updatedTicket.firstResponseDueAt.toISOString()
+              : null,
+            resolutionDueAt: updatedTicket.resolutionDueAt
+              ? updatedTicket.resolutionDueAt.toISOString()
+              : null,
+            firstRespondedAt: updatedTicket.firstRespondedAt
+              ? updatedTicket.firstRespondedAt.toISOString()
+              : null,
+            resolvedAt: updatedTicket.resolvedAt
+              ? updatedTicket.resolvedAt.toISOString()
+              : null,
+            firstResponseBreached: updatedTicket.firstResponseBreached,
+            resolutionBreached: updatedTicket.resolutionBreached,
+            slaPausedAt: updatedTicket.slaPausedAt
+              ? updatedTicket.slaPausedAt.toISOString()
+              : null,
+          }
+        : null,
+    };
+
+    return NextResponse.json({ data: responseTicket, error: null }, { status: 200 });
   } catch (err) {
     console.error("[PATCH /api/tickets/:id] Unexpected error:", err instanceof Error ? err.message : String(err));
     const { error, status } = toAuthErrorResponse(err);

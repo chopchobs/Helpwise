@@ -113,13 +113,28 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (assigneeId) where.assigneeId = assigneeId;
 
     // 4. Query tickets พร้อม pagination + relations
-    const [tickets, total] = await Promise.all([
+    const [rawTickets, total] = await Promise.all([
       db.ticket.findMany({
         where,
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * limit,
         take: limit,
-        include: {
+        select: {
+          id: true,
+          ticketNumber: true,
+          subject: true,
+          status: true,
+          priority: true,
+          createdAt: true,
+          updatedAt: true,
+          // SLA scalar fields — agent-side เท่านั้น (portal route ไม่ select field เหล่านี้)
+          firstResponseDueAt: true,
+          resolutionDueAt: true,
+          firstRespondedAt: true,
+          resolvedAt: true,
+          firstResponseBreached: true,
+          resolutionBreached: true,
+          slaPausedAt: true,
           requesterContact: {
             select: { id: true, name: true, email: true, avatarUrl: true },
           },
@@ -137,6 +152,47 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       }),
       db.ticket.count({ where }),
     ]);
+
+    // แปลง Date → ISO string และ group SLA fields เป็น nested object
+    // sla = null เมื่อ ticket ไม่มี deadline (firstResponseDueAt และ resolutionDueAt เป็น null ทั้งคู่)
+    const tickets = rawTickets.map((t) => {
+      const hasSla =
+        t.firstResponseDueAt !== null || t.resolutionDueAt !== null;
+
+      return {
+        id: t.id,
+        ticketNumber: t.ticketNumber,
+        subject: t.subject,
+        status: t.status,
+        priority: t.priority,
+        createdAt: t.createdAt.toISOString(),
+        updatedAt: t.updatedAt.toISOString(),
+        requesterContact: t.requesterContact,
+        assignee: t.assignee,
+        _count: t._count,
+        sla: hasSla
+          ? {
+              firstResponseDueAt: t.firstResponseDueAt
+                ? t.firstResponseDueAt.toISOString()
+                : null,
+              resolutionDueAt: t.resolutionDueAt
+                ? t.resolutionDueAt.toISOString()
+                : null,
+              firstRespondedAt: t.firstRespondedAt
+                ? t.firstRespondedAt.toISOString()
+                : null,
+              resolvedAt: t.resolvedAt
+                ? t.resolvedAt.toISOString()
+                : null,
+              firstResponseBreached: t.firstResponseBreached,
+              resolutionBreached: t.resolutionBreached,
+              slaPausedAt: t.slaPausedAt
+                ? t.slaPausedAt.toISOString()
+                : null,
+            }
+          : null,
+      };
+    });
 
     return NextResponse.json(
       {

@@ -12,6 +12,7 @@ import Link from "next/link";
 import { Plus, RefreshCw, Inbox } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import PriorityBadge from "@/components/ui/PriorityBadge";
+import SlaBadge from "@/components/ui/SlaBadge";
 import FormAlert from "@/components/ui/FormAlert";
 import { formatDate } from "@/lib/ticket-ui";
 import type {
@@ -96,6 +97,10 @@ function TicketRow({ ticket }: TicketRowProps) {
       <td className="px-4 py-3 text-sm text-secondary">{assigneeName}</td>
       <td className="px-4 py-3 text-xs text-secondary whitespace-nowrap">
         {formatDate(ticket.updatedAt)}
+      </td>
+      {/* SLA badge compact สำหรับ list view */}
+      <td className="px-4 py-3">
+        <SlaBadge sla={ticket.sla} compact />
       </td>
     </tr>
   );
@@ -335,6 +340,9 @@ export default function AgentTicketListPage() {
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase tracking-wide">
                         อัปเดตล่าสุด
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase tracking-wide">
+                        SLA
                       </th>
                     </tr>
                   </thead>
