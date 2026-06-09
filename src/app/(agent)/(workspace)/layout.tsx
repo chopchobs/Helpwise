@@ -19,6 +19,7 @@ import {
   X,
   CreditCard,
   Timer,
+  Palette,
 } from "lucide-react";
 import type {
   MeResponse,
@@ -126,13 +127,14 @@ function SidebarNav({ session, pathname }: SidebarNavProps) {
         {session.tenant.logoUrl ? (
           // logoUrl เป็น URL ที่ tenant กำหนดเอง (ภายนอก) — ใช้ <img> ตรง ๆ
           // ไม่ผ่าน next/image optimizer เพื่อกัน SSRF ผ่าน image proxy
-          // (จะ validate เป็น HTTPS ตอน wire branding ในเฟส portal)
+          // ค่าผ่าน https-only validator (parseBranding) ใน agent/me แล้ว
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={session.tenant.logoUrl}
             alt={`${session.tenant.name} logo`}
             width={32}
             height={32}
+            referrerPolicy="no-referrer"
             className="rounded-md object-contain shrink-0 w-8 h-8"
           />
         ) : (
@@ -200,6 +202,14 @@ function SidebarNav({ session, pathname }: SidebarNavProps) {
                 icon={<Timer size={18} />}
                 label="SLA"
                 isActive={pathname.startsWith("/settings/sla")}
+              />
+            </li>
+            <li>
+              <NavLink
+                href="/settings/branding"
+                icon={<Palette size={18} />}
+                label="Branding"
+                isActive={pathname.startsWith("/settings/branding")}
               />
             </li>
           </ul>
@@ -360,7 +370,8 @@ export default function WorkspaceLayout({
                 aria-expanded={isUserMenuOpen}
                 aria-label="เมนูผู้ใช้"
               >
-                {/* Avatar — avatarUrl เป็น URL ภายนอก ใช้ <img> ตรง ๆ ไม่ผ่าน optimizer (กัน SSRF) */}
+                {/* Avatar — avatarUrl เป็น URL ภายนอก ใช้ <img> ตรง ๆ ไม่ผ่าน optimizer (กัน SSRF)
+                    referrerPolicy="no-referrer" กัน path/subdomain รั่วไป 3rd-party image host */}
                 {activeSession.user.avatarUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -368,6 +379,7 @@ export default function WorkspaceLayout({
                     alt={activeSession.user.name ?? activeSession.user.email}
                     width={28}
                     height={28}
+                    referrerPolicy="no-referrer"
                     className="rounded-full object-cover w-7 h-7"
                   />
                 ) : (
