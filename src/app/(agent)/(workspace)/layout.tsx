@@ -18,6 +18,7 @@ import {
   Menu,
   X,
   CreditCard,
+  Timer,
 } from "lucide-react";
 import type {
   MeResponse,
@@ -191,6 +192,14 @@ function SidebarNav({ session, pathname }: SidebarNavProps) {
                 icon={<CreditCard size={18} />}
                 label="Billing"
                 isActive={pathname.startsWith("/settings/billing")}
+              />
+            </li>
+            <li>
+              <NavLink
+                href="/settings/sla"
+                icon={<Timer size={18} />}
+                label="SLA"
+                isActive={pathname.startsWith("/settings/sla")}
               />
             </li>
           </ul>
