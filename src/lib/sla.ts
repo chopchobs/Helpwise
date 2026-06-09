@@ -123,11 +123,14 @@ export function parseBusinessHours(settings: unknown): BusinessHours | null {
   }
 
   const bhObj = bh as Record<string, unknown>;
-  const timezone = bhObj["timezone"];
+  const rawTimezone = bhObj["timezone"];
 
-  if (typeof timezone !== "string" || timezone.trim() === "") {
+  if (typeof rawTimezone !== "string" || rawTimezone.trim() === "") {
     return null;
   }
+
+  // trim ก่อน validate — กัน tz ที่มีช่องว่าง (copy-paste/JSON import) ถูก Intl reject
+  const timezone = rawTimezone.trim();
 
   // ตรวจว่า timezone ใช้งานได้จริงกับ Intl
   try {
@@ -163,7 +166,7 @@ export function parseBusinessHours(settings: unknown): BusinessHours | null {
     return null;
   }
 
-  return { timezone: timezone.trim(), days };
+  return { timezone, days };
 }
 
 // =============================================================================
