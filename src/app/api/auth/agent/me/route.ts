@@ -13,6 +13,7 @@
 import { NextResponse } from "next/server";
 import { requireAgent, toAuthErrorResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { parseBranding } from "@/lib/branding";
 import type { MemberRole } from "@prisma/client";
 
 // =============================================================================
@@ -44,40 +45,6 @@ interface AgentMeData {
   user: AgentMeUser;
   member: AgentMeMember;
   tenant: AgentMeTenant;
-}
-
-// =============================================================================
-// HELPERS
-// =============================================================================
-
-/**
- * อ่าน logoUrl + accentColor จาก tenant.settings (Json)
- * parse อย่างปลอดภัยด้วย type guard — settings อาจ shape ไม่ตรงในข้อมูลเก่า
- */
-function extractBranding(settings: unknown): {
-  logoUrl: string | null;
-  accentColor: string | null;
-} {
-  // guard: settings ต้องเป็น object
-  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
-    return { logoUrl: null, accentColor: null };
-  }
-
-  const raw = settings as Record<string, unknown>;
-  const branding = raw["branding"];
-
-  // guard: branding ต้องเป็น object ไม่ใช่ array หรือ null
-  if (typeof branding !== "object" || branding === null || Array.isArray(branding)) {
-    return { logoUrl: null, accentColor: null };
-  }
-
-  const b = branding as Record<string, unknown>;
-
-  // คืน string หรือ null — ไม่ cast ดิบ
-  const logoUrl = typeof b["logoUrl"] === "string" ? b["logoUrl"] : null;
-  const accentColor = typeof b["accentColor"] === "string" ? b["accentColor"] : null;
-
-  return { logoUrl, accentColor };
 }
 
 // =============================================================================
@@ -116,8 +83,8 @@ export async function GET(): Promise<NextResponse> {
       );
     }
 
-    // 3. Parse branding จาก settings Json อย่างปลอดภัย
-    const { logoUrl, accentColor } = extractBranding(tenant.settings);
+    // 3. Parse + validate branding จาก settings Json ผ่าน shared helper (https-only, hex-only)
+    const { logoUrl, accentColor } = parseBranding(tenant.settings);
 
     // 4. Compose response — เลือกเฉพาะ field ที่ nav shell ต้องการ
     //    ไม่ return passwordHash, isActive, createdAt หรือ field sensitive อื่น ๆ
