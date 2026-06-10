@@ -10,7 +10,14 @@ import {
   formatDuration,
   formatMinutes,
   formatMoney,
+  getStatusStyle,
+  getPriorityStyle,
+  formatDate,
+  formatDateFull,
+  getAuthorName,
+  isAgentMessage,
 } from "@/lib/ticket-ui";
+import type { TicketStatus, TicketPriority } from "@/types/ticket";
 
 // =============================================================================
 // B.1 — formatDuration
@@ -259,5 +266,256 @@ describe("formatMoney", () => {
     const result = formatMoney(50000, "thb"); // 500.00 บาท
     // ต้องมี .00 หรือ ,00 (ขึ้นอยู่กับ locale separator)
     expect(result).toMatch(/\.00|,00/);
+  });
+});
+
+// =============================================================================
+// B.5 — getStatusStyle
+// =============================================================================
+
+describe("getStatusStyle", () => {
+  const statuses: TicketStatus[] = [
+    "NEW",
+    "OPEN",
+    "PENDING",
+    "ON_HOLD",
+    "SOLVED",
+    "CLOSED",
+  ];
+
+  it.each(statuses)("returns a defined, populated style object for %s", (status) => {
+    const style = getStatusStyle(status);
+    expect(style).toBeDefined();
+    expect(typeof style.label).toBe("string");
+    expect(style.label.length).toBeGreaterThan(0);
+    expect(typeof style.bg).toBe("string");
+    expect(style.bg.length).toBeGreaterThan(0);
+    expect(typeof style.text).toBe("string");
+    expect(style.text.length).toBeGreaterThan(0);
+    expect(typeof style.border).toBe("string");
+    expect(style.border.length).toBeGreaterThan(0);
+  });
+
+  it("NEW and OPEN share the same primary-tint colors but have distinct labels", () => {
+    const newStyle = getStatusStyle("NEW");
+    const openStyle = getStatusStyle("OPEN");
+    expect(newStyle.bg).toBe(openStyle.bg);
+    expect(newStyle.text).toBe(openStyle.text);
+    expect(newStyle.border).toBe(openStyle.border);
+    expect(newStyle.label).toBe("ใหม่");
+    expect(openStyle.label).toBe("เปิด");
+    expect(newStyle).toEqual({
+      label: "ใหม่",
+      bg: "bg-primary-tint",
+      text: "text-primary-ink",
+      border: "border-primary-tint",
+    });
+  });
+
+  it("PENDING maps to warning (amber) style", () => {
+    expect(getStatusStyle("PENDING")).toEqual({
+      label: "รอลูกค้า",
+      bg: "bg-warning-tint",
+      text: "text-warning-ink",
+      border: "border-warning-tint",
+    });
+  });
+
+  it("ON_HOLD and CLOSED share the same neutral/stone colors but have distinct labels", () => {
+    const onHold = getStatusStyle("ON_HOLD");
+    const closed = getStatusStyle("CLOSED");
+    expect(onHold.bg).toBe(closed.bg);
+    expect(onHold.text).toBe(closed.text);
+    expect(onHold.border).toBe(closed.border);
+    expect(onHold).toEqual({
+      label: "พัก",
+      bg: "bg-stone",
+      text: "text-muted",
+      border: "border-border",
+    });
+    expect(closed.label).toBe("ปิด");
+  });
+
+  it("SOLVED maps to success (sage green) style", () => {
+    expect(getStatusStyle("SOLVED")).toEqual({
+      label: "แก้แล้ว",
+      bg: "bg-success-tint",
+      text: "text-success",
+      border: "border-success-tint",
+    });
+  });
+});
+
+// =============================================================================
+// B.6 — getPriorityStyle
+// =============================================================================
+
+describe("getPriorityStyle", () => {
+  const priorities: TicketPriority[] = ["LOW", "NORMAL", "HIGH", "URGENT"];
+
+  it.each(priorities)("returns a defined, populated style object for %s", (priority) => {
+    const style = getPriorityStyle(priority);
+    expect(style).toBeDefined();
+    expect(typeof style.label).toBe("string");
+    expect(style.label.length).toBeGreaterThan(0);
+    expect(typeof style.bg).toBe("string");
+    expect(style.bg.length).toBeGreaterThan(0);
+    expect(typeof style.text).toBe("string");
+    expect(style.text.length).toBeGreaterThan(0);
+    expect(typeof style.border).toBe("string");
+    expect(style.border.length).toBeGreaterThan(0);
+  });
+
+  it("LOW maps to neutral/stone style", () => {
+    expect(getPriorityStyle("LOW")).toEqual({
+      label: "ต่ำ",
+      bg: "bg-stone",
+      text: "text-muted",
+      border: "border-border",
+    });
+  });
+
+  it("NORMAL maps to primary-tint style", () => {
+    expect(getPriorityStyle("NORMAL")).toEqual({
+      label: "ปกติ",
+      bg: "bg-primary-tint",
+      text: "text-primary-ink",
+      border: "border-primary-tint",
+    });
+  });
+
+  it("HIGH maps to warning (amber) style", () => {
+    expect(getPriorityStyle("HIGH")).toEqual({
+      label: "สูง",
+      bg: "bg-warning-tint",
+      text: "text-warning-ink",
+      border: "border-warning-tint",
+    });
+  });
+
+  it("URGENT maps to danger (sienna) style", () => {
+    expect(getPriorityStyle("URGENT")).toEqual({
+      label: "เร่งด่วน",
+      bg: "bg-danger-tint",
+      text: "text-danger",
+      border: "border-danger-tint",
+    });
+  });
+
+  it("all 4 priorities have distinct label values", () => {
+    const labels = priorities.map((p) => getPriorityStyle(p).label);
+    expect(new Set(labels).size).toBe(4);
+  });
+});
+
+// =============================================================================
+// B.7 — formatDate / formatDateFull
+// =============================================================================
+
+describe("formatDate", () => {
+  const iso = "2025-06-09T10:30:00.000Z";
+
+  it("returns a non-empty string", () => {
+    const result = formatDate(iso);
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it("contains the 2-digit Buddhist year (68 for 2025) — th-TH locale", () => {
+    // toLocaleString("th-TH", { year: "2-digit" }) → พ.ศ. 2568 → "68"
+    const result = formatDate(iso);
+    expect(result).toMatch(/68/);
+  });
+
+  it("contains a colon-separated time component (HH:mm)", () => {
+    const result = formatDate(iso);
+    expect(result).toMatch(/\d{1,2}:\d{2}/);
+  });
+});
+
+describe("formatDateFull", () => {
+  const iso = "2025-06-09T10:30:00.000Z";
+
+  it("returns a non-empty string", () => {
+    const result = formatDateFull(iso);
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it("contains the full Buddhist year 2568", () => {
+    // toLocaleString("th-TH", { year: "numeric" }) → "2568"
+    const result = formatDateFull(iso);
+    expect(result).toMatch(/2568/);
+  });
+
+  it("contains a colon-separated time component (HH:mm)", () => {
+    const result = formatDateFull(iso);
+    expect(result).toMatch(/\d{1,2}:\d{2}/);
+  });
+
+  it("formatDateFull output is longer than formatDate (full month name vs short)", () => {
+    // long month name (เช่น "มิถุนายน") ยาวกว่า short ("มิ.ย.")
+    expect(formatDateFull(iso).length).toBeGreaterThan(formatDate(iso).length);
+  });
+});
+
+// =============================================================================
+// B.8 — getAuthorName / isAgentMessage
+// =============================================================================
+
+describe("getAuthorName", () => {
+  it("authorMember with a name → returns member's name", () => {
+    const member = { user: { name: "Agent Somchai" } };
+    expect(getAuthorName(member, null)).toBe("Agent Somchai");
+  });
+
+  it("authorMember.user.name is null, authorContact has name → returns contact's name", () => {
+    const member = { user: { name: null } };
+    const contact = { name: "Khun Customer" };
+    expect(getAuthorName(member, contact)).toBe("Khun Customer");
+  });
+
+  it("authorMember is null, authorContact has name → returns contact's name", () => {
+    const contact = { name: "Khun Customer" };
+    expect(getAuthorName(null, contact)).toBe("Khun Customer");
+  });
+
+  it("both authorMember and authorContact are null → fallback 'ไม่ระบุชื่อ'", () => {
+    expect(getAuthorName(null, null)).toBe("ไม่ระบุชื่อ");
+  });
+
+  it("authorMember present but user.name null, authorContact present but name null → fallback 'ไม่ระบุชื่อ'", () => {
+    const member = { user: { name: null } };
+    const contact = { name: null };
+    expect(getAuthorName(member, contact)).toBe("ไม่ระบุชื่อ");
+  });
+
+  it("authorMember.user.name takes precedence over authorContact.name when both present", () => {
+    const member = { user: { name: "Agent Somchai" } };
+    const contact = { name: "Khun Customer" };
+    expect(getAuthorName(member, contact)).toBe("Agent Somchai");
+  });
+
+  it("authorMember.user.name is empty string (falsy) → falls through to authorContact", () => {
+    // ใช้ truthiness check (?.user?.name) — empty string ถือเป็น falsy
+    const member = { user: { name: "" } };
+    const contact = { name: "Khun Customer" };
+    expect(getAuthorName(member, contact)).toBe("Khun Customer");
+  });
+});
+
+describe("isAgentMessage", () => {
+  it("authorMember non-null → true (agent message)", () => {
+    const member = { user: { name: "Agent Somchai" } };
+    expect(isAgentMessage(member)).toBe(true);
+  });
+
+  it("authorMember is null → false (contact message)", () => {
+    expect(isAgentMessage(null)).toBe(false);
+  });
+
+  it("authorMember present even with user.name null → still true (only null-check matters)", () => {
+    const member = { user: { name: null } };
+    expect(isAgentMessage(member)).toBe(true);
   });
 });
