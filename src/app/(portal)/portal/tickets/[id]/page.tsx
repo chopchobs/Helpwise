@@ -16,6 +16,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Send, RefreshCw, User } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import FormAlert from "@/components/ui/FormAlert";
+import CsatSurvey, { CsatThankYou } from "@/components/portal/CsatSurvey";
 import { formatDateFull, getAuthorName, isAgentMessage } from "@/lib/ticket-ui";
 import type {
   PortalTicketDetail,
@@ -23,6 +24,7 @@ import type {
   PortalPostMessageResponse,
   PortalTicketMessage,
 } from "@/types/ticket";
+import type { CsatResponseDTO } from "@/types/csat";
 
 // =============================================================================
 // SUB-COMPONENTS
@@ -263,6 +265,13 @@ export default function PortalTicketDetailPage() {
     );
   }
 
+  /** อัปเดต state หลังส่ง CSAT สำเร็จ → สลับไปแสดง thank-you card */
+  function handleCsatSubmitted(response: CsatResponseDTO) {
+    setTicket((prev) =>
+      prev ? { ...prev, csat: { eligible: false, response } } : prev
+    );
+  }
+
   // ─── Loading ───────────────────────────────────────────────────────────────
   if (isLoading) {
     return (
@@ -359,6 +368,22 @@ export default function PortalTicketDetailPage() {
           isSolved={ticket.status === "SOLVED"}
           onMessageSent={handleMessageSent}
         />
+
+        {/*
+          CSAT widget — 3 กรณี:
+          1. มี response แล้ว → thank-you card (read-only)
+          2. eligible (SOLVED/CLOSED + ยังไม่เคยส่ง) → form ให้คะแนน
+          3. ไม่ตรงทั้งสอง (ticket ยังเปิดอยู่ หรือ feature ปิด) → ไม่แสดงอะไรเลย
+        */}
+        {ticket.csat.response !== null ? (
+          <div className="mt-4">
+            <CsatThankYou response={ticket.csat.response} />
+          </div>
+        ) : ticket.csat.eligible ? (
+          <div className="mt-4">
+            <CsatSurvey ticketId={ticketId} onSubmitted={handleCsatSubmitted} />
+          </div>
+        ) : null}
       </div>
     </div>
   );

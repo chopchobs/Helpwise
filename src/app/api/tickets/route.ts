@@ -148,6 +148,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           // FIX-3: นับเฉพาะ PUBLIC messages ใน list view
           // กัน internal-note count รั่วผ่าน list API + ตรงกับ list view ที่ลูกค้าเห็น
           _count: { select: { messages: { where: { visibility: MessageVisibility.PUBLIC } } } },
+          // CSAT: agent เห็น rating ของแต่ละ ticket ใน list (one-to-one optional)
+          csat: {
+            select: {
+              rating: true,
+              comment: true,
+              createdAt: true,
+            },
+          },
         },
       }),
       db.ticket.count({ where }),
@@ -158,6 +166,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const tickets = rawTickets.map((t) => {
       const hasSla =
         t.firstResponseDueAt !== null || t.resolutionDueAt !== null;
+
+      // แปลง csat Date → ISO string; null ถ้ายังไม่มี response
+      const csatDTO = t.csat
+        ? {
+            rating: t.csat.rating,
+            comment: t.csat.comment,
+            createdAt: t.csat.createdAt.toISOString(),
+          }
+        : null;
 
       return {
         id: t.id,
@@ -191,6 +208,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
                 : null,
             }
           : null,
+        csat: csatDTO,
       };
     });
 

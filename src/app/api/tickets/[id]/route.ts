@@ -93,6 +93,14 @@ export async function GET(
         slaPolicy: {
           select: { id: true, name: true },
         },
+        // CSAT: agent เห็น rating ของ ticket นี้ (one-to-one optional)
+        csat: {
+          select: {
+            rating: true,
+            comment: true,
+            createdAt: true,
+          },
+        },
         // agent เห็นทุก visibility (PUBLIC + INTERNAL)
         messages: {
           orderBy: { createdAt: "asc" },
@@ -125,6 +133,15 @@ export async function GET(
     const hasSla =
       rawTicket.firstResponseDueAt !== null ||
       rawTicket.resolutionDueAt !== null;
+
+    // แปลง csat Date → ISO string; null ถ้ายังไม่มี response
+    const csatDTO = rawTicket.csat
+      ? {
+          rating: rawTicket.csat.rating,
+          comment: rawTicket.csat.comment,
+          createdAt: rawTicket.csat.createdAt.toISOString(),
+        }
+      : null;
 
     const ticket = {
       ...rawTicket,
@@ -159,6 +176,8 @@ export async function GET(
               : null,
           }
         : null,
+      // CSAT: agent เห็น rating + comment ได้ (csat Date แปลงเป็น ISO แล้ว)
+      csat: csatDTO,
     };
 
     return NextResponse.json({ data: ticket, error: null }, { status: 200 });
@@ -453,6 +472,14 @@ export async function PATCH(
             user: { select: { id: true, name: true, avatarUrl: true } },
           },
         },
+        // CSAT: include ใน PATCH response ด้วย เพื่อ consistency (list/detail/patch ต้อง match)
+        csat: {
+          select: {
+            rating: true,
+            comment: true,
+            createdAt: true,
+          },
+        },
       },
     });
 
@@ -546,6 +573,15 @@ export async function PATCH(
       updatedTicket.firstResponseDueAt !== null ||
       updatedTicket.resolutionDueAt !== null;
 
+    // แปลง csat Date → ISO string (PATCH response ต้อง match GET/list shape)
+    const patchCsatDTO = updatedTicket.csat
+      ? {
+          rating: updatedTicket.csat.rating,
+          comment: updatedTicket.csat.comment,
+          createdAt: updatedTicket.csat.createdAt.toISOString(),
+        }
+      : null;
+
     const responseTicket = {
       ...updatedTicket,
       createdAt: updatedTicket.createdAt.toISOString(),
@@ -579,6 +615,8 @@ export async function PATCH(
               : null,
           }
         : null,
+      // CSAT: include ใน PATCH response เหมือน GET — list/detail/patch ต้อง match
+      csat: patchCsatDTO,
     };
 
     return NextResponse.json({ data: responseTicket, error: null }, { status: 200 });

@@ -163,6 +163,7 @@ model Tenant {
   processedEmails ProcessedInboundEmail[]
   auditLogs       AuditLog[]
   attachments     Attachment[]
+  csatResponses   CsatResponse[]
 
   @@index([slug])
 }
@@ -231,10 +232,11 @@ model Contact {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tickets   Ticket[]
+  tickets       Ticket[]
   // messages ที่ contact ส่งเอง (portal reply)
-  messages  TicketMessage[] @relation("MessageAuthorContact")
-  auditLogs AuditLog[]      @relation("AuditContactActor")
+  messages      TicketMessage[] @relation("MessageAuthorContact")
+  auditLogs     AuditLog[]      @relation("AuditContactActor")
+  csatResponses CsatResponse[]
 
   // composite unique: email ซ้ำข้าม tenant ได้ แต่ในเดียวกันห้ามซ้ำ
   @@unique([tenantId, email])
@@ -324,6 +326,8 @@ model Ticket {
   messages    TicketMessage[]
   attachments Attachment[]
   auditLogs   AuditLog[]
+  // one-to-one optional: inverse ของ CsatResponse.ticketId @unique
+  csat        CsatResponse?
 
   // composite unique: ticketNumber unique ต่อ tenant
   @@unique([tenantId, ticketNumber])
@@ -521,4 +525,33 @@ model AuditLog {
   @@index([tenantId, ticketId]) // query audit log ของ ticket
   @@index([actorUserId])
   @@index([actorMemberId])
+}
+
+// CsatResponse — คำตอบ CSAT survey จาก Contact หลัง ticket ถูก SOLVED/CLOSED
+// 1 ticket = 1 CsatResponse (ticketId @unique) — submit-once, ไม่มี updatedAt
+// gate ตาม plan ผ่าน hasFeature("csat_survey") ที่ backend; model อยู่ที่นี่เสมอ
+// portal query ต้องกรอง requesterContactId = ctx.contactId ก่อน return score
+model CsatResponse {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // 1 ticket = 1 CSAT response (@unique บังคับ one-to-one)
+  ticketId String @unique
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  // ผู้ตอบ — Contact ของ tenant นั้น (requester ของ ticket)
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id])
+
+  // rating 1–5 (ตรวจสอบ range ด้วย Zod ที่ app layer; DB เก็บ Int)
+  rating  Int
+  // optional free-text comment จาก contact
+  comment String?
+
+  // immutable — submit-once, ไม่มี updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt]) // รองรับ aggregate summary (avg/count) ต่อ tenant เรียงตามเวลา
 }
