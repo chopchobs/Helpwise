@@ -13,6 +13,7 @@ import { RefreshCw, Inbox, Users, Clock } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import PriorityBadge from "@/components/ui/PriorityBadge";
 import FormAlert from "@/components/ui/FormAlert";
+import CsatSummaryCard from "@/components/dashboard/CsatSummaryCard";
 import { getStatusStyle, formatDate } from "@/lib/ticket-ui";
 import type {
   DashboardResponse,
@@ -315,6 +316,21 @@ export default function DashboardPage() {
           />
         </section>
       </div>
+
+      {/* ================================================================== */}
+      {/* Widget: CSAT Summary                                                */}
+      {/* ================================================================== */}
+      <section aria-labelledby="csat-summary-heading" className="mb-8">
+        <h2
+          id="csat-summary-heading"
+          className="text-sm font-semibold text-secondary uppercase tracking-wide mb-3"
+        >
+          ความพึงพอใจลูกค้า
+        </h2>
+        <div className="max-w-md">
+          <CsatSummaryCard />
+        </div>
+      </section>
 
       {/* ================================================================== */}
       {/* Widget 4: Recent Tickets                                            */}

@@ -3,6 +3,8 @@
  * ใช้ร่วมกันระหว่าง agent UI และ portal UI
  */
 
+import type { CsatResponseDTO, PortalCsatState } from "@/types/csat";
+
 // =============================================================================
 // ENUMS (string union เพื่อให้ใช้กับ Tailwind arbitrary values ง่าย)
 // =============================================================================
@@ -118,6 +120,11 @@ export interface AgentTicketSummary {
    * agent-side เท่านั้น ห้าม expose ผ่าน portal
    */
   sla: TicketSlaInfo | null;
+  /**
+   * CSAT response ของ ticket นี้ — null เมื่อยังไม่มี response
+   * agent เห็นคะแนนได้ แต่ portal จะเห็นผ่าน PortalCsatState แทน
+   */
+  csat: CsatResponseDTO | null;
 }
 
 /** Ticket detail ฝั่ง agent — มี messages array */
@@ -204,6 +211,8 @@ export interface PortalTicketDetail {
   updatedAt: string;
   assignee: PortalAssigneeInfo | null;
   messages: PortalTicketMessage[];
+  /** CSAT state สำหรับ portal widget — eligible = แสดง form, response = ยืนยันที่ส่งแล้ว */
+  csat: PortalCsatState;
 }
 
 /** Response shape: GET /api/portal/tickets */

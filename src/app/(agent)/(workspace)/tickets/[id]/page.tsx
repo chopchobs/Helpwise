@@ -14,6 +14,7 @@ import { ArrowLeft, Lock, Send, RefreshCw, User } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import PriorityBadge from "@/components/ui/PriorityBadge";
 import SlaBadge from "@/components/ui/SlaBadge";
+import CsatStars from "@/components/ui/CsatStars";
 import FormAlert from "@/components/ui/FormAlert";
 import {
   formatDateFull,
@@ -561,6 +562,19 @@ export default function AgentTicketDetailPage() {
               ผู้แจ้ง: <span className="text-foreground font-medium">{requesterName}</span>
             </span>
           </div>
+
+          {/* CSAT result — แสดงเฉพาะเมื่อลูกค้าให้คะแนนแล้ว */}
+          {ticket.csat && (
+            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border">
+              <span className="text-sm text-secondary">คะแนนความพึงพอใจ:</span>
+              <CsatStars rating={ticket.csat.rating} showValue />
+              {ticket.csat.comment && (
+                <span className="text-sm text-secondary italic truncate">
+                  “{ticket.csat.comment}”
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Controls: เปลี่ยน status + priority + assignee */}
           <div className="flex flex-wrap gap-3 mt-4 pt-4 border-t border-border">

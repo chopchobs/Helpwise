@@ -19,7 +19,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireContact, toAuthErrorResponse } from "@/lib/auth";
 import { tenantPrisma } from "@/lib/tenant";
-import { MessageVisibility } from "@prisma/client";
+import { hasFeature, FEATURE_KEYS } from "@/lib/features";
+import { MessageVisibility, TicketStatus } from "@prisma/client";
+import type { CsatResponseDTO, PortalCsatState } from "@/types/csat";
 
 // =============================================================================
 // GET /api/portal/tickets/:id
@@ -38,7 +40,10 @@ export async function GET(
     const { contact, ctx } = session;
     const db = tenantPrisma(ctx.tenantId);
 
-    // 2. OWN-RECORDS SCOPE: กรอง requesterContactId = session.contact.id
+    // 2. ตรวจ feature gate CSAT_SURVEY สำหรับคำนวณ eligibility (ไม่ block ถ้าปิด — แค่ eligible = false)
+    const csatEnabled = await hasFeature(ctx.tenantId, FEATURE_KEYS.CSAT_SURVEY, ctx.plan);
+
+    // 3. OWN-RECORDS SCOPE: กรอง requesterContactId = session.contact.id
     //    tenantPrisma inject tenantId (layer 1)
     //    requesterContactId filter (layer 2 — own-records)
     //    ถ้า ticket ไม่ใช่ของ contact นี้ → findFirst คืน null → 404
@@ -91,6 +96,15 @@ export async function GET(
             attachments: true,
           },
         },
+        // CSAT: โหลด response ที่มีอยู่ (one-to-one optional)
+        // tenant-scoped ผ่าน tenantPrisma; own-records scope ผ่าน ticket ownership ด้านบน
+        csat: {
+          select: {
+            rating: true,
+            comment: true,
+            createdAt: true,
+          },
+        },
       },
     });
 
@@ -103,7 +117,31 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({ data: ticket, error: null }, { status: 200 });
+    // คำนวณ PortalCsatState:
+    //   eligible = feature เปิด + ticket ถูกปิด + ยังไม่มี response
+    //   response = existing CsatResponseDTO หรือ null
+    const resolvedStatuses: TicketStatus[] = [TicketStatus.SOLVED, TicketStatus.CLOSED];
+    const isResolved = resolvedStatuses.includes(ticket.status);
+    const hasExistingResponse = ticket.csat !== null;
+
+    const csatResponse: CsatResponseDTO | null = ticket.csat
+      ? {
+          rating: ticket.csat.rating,
+          comment: ticket.csat.comment,
+          createdAt: ticket.csat.createdAt.toISOString(),
+        }
+      : null;
+
+    const csatState: PortalCsatState = {
+      // eligible เมื่อ: feature เปิด + ticket ถูกปิดแล้ว + ยังไม่เคยตอบ
+      eligible: csatEnabled && isResolved && !hasExistingResponse,
+      response: csatResponse,
+    };
+
+    // destructure ออก csat (Date object) แล้วใส่ csatState (DTO) แทน
+    const { csat: _rawCsat, ...ticketRest } = ticket;
+
+    return NextResponse.json({ data: { ...ticketRest, csat: csatState }, error: null }, { status: 200 });
   } catch (err) {
     console.error("[GET /api/portal/tickets/:id] Unexpected error:", err instanceof Error ? err.message : String(err));
     const { error, status } = toAuthErrorResponse(err);

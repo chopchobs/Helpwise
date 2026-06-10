@@ -13,6 +13,7 @@ import { Plus, RefreshCw, Inbox } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import PriorityBadge from "@/components/ui/PriorityBadge";
 import SlaBadge from "@/components/ui/SlaBadge";
+import CsatStars from "@/components/ui/CsatStars";
 import FormAlert from "@/components/ui/FormAlert";
 import { formatDate } from "@/lib/ticket-ui";
 import type {
@@ -101,6 +102,14 @@ function TicketRow({ ticket }: TicketRowProps) {
       {/* SLA badge compact สำหรับ list view */}
       <td className="px-4 py-3">
         <SlaBadge sla={ticket.sla} compact />
+      </td>
+      {/* CSAT — ดาว+ตัวเลข compact หรือ "—" ถ้ายังไม่มีคะแนน */}
+      <td className="px-4 py-3">
+        {ticket.csat ? (
+          <CsatStars rating={ticket.csat.rating} size="sm" showValue />
+        ) : (
+          <span className="text-sm text-muted">—</span>
+        )}
       </td>
     </tr>
   );
@@ -343,6 +352,9 @@ export default function AgentTicketListPage() {
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase tracking-wide">
                         SLA
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase tracking-wide">
+                        CSAT
                       </th>
                     </tr>
                   </thead>
