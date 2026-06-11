@@ -8,10 +8,10 @@
  *   - ทุกกรณีที่ fail (ไม่มี user / password ผิด / ไม่ใช่ member / deactivated)
  *     → return error เหมือนกัน "อีเมลหรือรหัสผ่านไม่ถูกต้อง" (กัน account/membership enumeration)
  *   - ภายใน log แยกได้สำหรับ security monitoring (log code แทน message)
+ *   - Rate limit ตาม IP (10 req/60s) กัน brute-force — ดู step 0
  *
- * TODO (Phase: Rate Limiting):
- *   - ใส่ rate limit บน endpoint นี้ (เช่น 10 req/IP/5 นาที) ก่อน production
- *   - พิจารณา account lockout หลังล้มเกิน N ครั้ง
+ * TODO (follow-up):
+ *   - พิจารณา account lockout หลังล้มเกิน N ครั้ง (ป้องกัน distributed brute-force)
  */
 
 import { NextResponse } from "next/server";
@@ -21,6 +21,7 @@ import { tenantPrisma, getTenantContext } from "@/lib/tenant";
 import { verifyPassword, DUMMY_HASH } from "@/lib/password";
 import { issueAgentToken, setAgentCookie, toAuthErrorResponse } from "@/lib/auth";
 import { audit } from "@/lib/audit";
+import { checkRateLimit, getClientIp, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 
 // =============================================================================
 // VALIDATION SCHEMA
@@ -42,6 +43,17 @@ const GENERIC_LOGIN_ERROR = "อีเมลหรือรหัสผ่าน
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
+    // 0. Rate limit ตาม IP — กัน brute-force password ก่อนทำงานอื่นใด
+    const ip = getClientIp(request);
+    const rl = await checkRateLimit({
+      key: rateLimitKey("agent-login", ip),
+      limit: 10,
+      windowSeconds: 60,
+    });
+    if (!rl.allowed) {
+      return rateLimitResponse(rl.retryAfterSeconds);
+    }
+
     // 1. ดึง tenant context จาก middleware-injected header (ห้ามรับจาก client)
     const ctx = await getTenantContext();
 

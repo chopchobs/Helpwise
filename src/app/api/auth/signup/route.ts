@@ -9,10 +9,10 @@
  *   - กรณี email ซ้ำ: ตรวจ password ตรงหรือไม่ก่อนผูก TenantMember ใหม่
  *     → ถ้าไม่ตรง: return generic error (ไม่เปิดเผยว่า email มีอยู่แล้ว)
  *   - slug: validate regex + reserved list + unique
+ *   - Rate limit ตาม IP (5 req/60s) กัน automated signup — ดู step 0
  *
- * TODO (Phase: Rate Limiting):
- *   - ใส่ rate limit บน endpoint นี้ (เช่น 5 req/IP/นาที) ก่อน production
- *   - พิจารณา CAPTCHA สำหรับป้องกัน automated signup
+ * TODO (follow-up):
+ *   - พิจารณา CAPTCHA สำหรับป้องกัน automated signup ที่ซับซ้อนขึ้น
  */
 
 import { NextResponse } from "next/server";
@@ -21,6 +21,7 @@ import { prisma } from "@/lib/prisma";
 import { hashPassword, verifyPassword, DUMMY_HASH } from "@/lib/password";
 import { audit } from "@/lib/audit";
 import { toAuthErrorResponse, AuthError } from "@/lib/auth";
+import { checkRateLimit, getClientIp, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 
 // =============================================================================
 // VALIDATION SCHEMA
@@ -54,6 +55,17 @@ const signupSchema = z.object({
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
+    // 0. Rate limit ตาม IP — กัน automated signup spam
+    const ip = getClientIp(request);
+    const rl = await checkRateLimit({
+      key: rateLimitKey("signup", ip),
+      limit: 5,
+      windowSeconds: 60,
+    });
+    if (!rl.allowed) {
+      return rateLimitResponse(rl.retryAfterSeconds);
+    }
+
     // 1. Parse + validate input
     let body: unknown;
     try {

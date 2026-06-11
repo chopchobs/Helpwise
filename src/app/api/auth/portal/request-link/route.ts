@@ -9,9 +9,8 @@
  *   - Magic-link token = opaque random 32 bytes (256 bit) — ไม่ใช่ JWT
  *   - เก็บ sha256(token) ลง Redis (ไม่เก็บ raw token) + TTL 15 นาที + one-time
  *   - ตัว token ดิบส่งใน URL เท่านั้น ไม่เก็บ raw ใน server
- *
- * TODO (Phase: Rate Limiting):
- *   - ใส่ rate limit: เช่น 3 req/email/15 นาที เพื่อกัน magic-link spam
+ *   - Rate limit 2 ชั้น: ตาม IP (กัน spam จาก source เดียว) + ตาม email
+ *     (กัน email-bomb ที่ attacker หมุน IP ยิงใส่เหยื่อคนเดียว)
  */
 
 import { NextResponse } from "next/server";
@@ -24,6 +23,7 @@ import { sendMagicLink } from "@/lib/email";
 import { toAuthErrorResponse } from "@/lib/auth";
 // LOW-1: import shared helpers แทนการ define ซ้ำ (กัน key drift ระหว่าง request-link และ verify)
 import { hashToken, magicLinkKey } from "@/lib/magic-link";
+import { checkRateLimit, getClientIp, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 
 // =============================================================================
 // CONSTANTS
@@ -46,6 +46,17 @@ const requestLinkSchema = z.object({
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
+    // 0. Rate limit ชั้นที่ 1 — ตาม IP — กัน spam จาก source เดียว
+    const ip = getClientIp(request);
+    const rl = await checkRateLimit({
+      key: rateLimitKey("portal-request-link", ip),
+      limit: 5,
+      windowSeconds: 60,
+    });
+    if (!rl.allowed) {
+      return rateLimitResponse(rl.retryAfterSeconds);
+    }
+
     // 1. ดึง tenant context (tenantId + plan) จาก middleware header
     const ctx = await getTenantContext();
 
@@ -65,6 +76,19 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const { email } = parsed.data;
+
+    // 2.5 Rate limit ชั้นที่ 2 — ตาม email (tenant-scoped) — กัน email-bomb ที่หมุน IP
+    //     เกิน limit → เงียบ ๆ ไม่ส่ง email แต่คืน sent:true (รักษา anti-enumeration
+    //     + ไม่ spam เหยื่อ). ใส่ tenantId ใน key เพื่อไม่ให้ traffic ของ tenant อื่น
+    //     มา throttle email เดียวกันข้าม tenant (Contact เป็น tenant-scoped)
+    const emailRl = await checkRateLimit({
+      key: rateLimitKey("portal-request-link-email", `${ctx.tenantId}:${email.toLowerCase()}`),
+      limit: 3,
+      windowSeconds: 15 * 60,
+    });
+    if (!emailRl.allowed) {
+      return NextResponse.json({ data: { sent: true }, error: null }, { status: 200 });
+    }
 
     // 3. ดึง slug ของ tenant เพื่อสร้าง magic-link URL
     //    slug อยู่ใน Tenant model — query จาก prisma โดยตรง (Tenant ไม่ใช่ tenant-scoped model ของ tenantPrisma)

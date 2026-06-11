@@ -29,6 +29,7 @@ import { audit } from "@/lib/audit";
 import { Prisma, TicketStatus } from "@prisma/client";
 import { CSAT_COMMENT_MAX_LENGTH } from "@/types/csat";
 import type { CsatResponseDTO } from "@/types/csat";
+import { checkRateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 
 // =============================================================================
 // VALIDATION SCHEMA
@@ -68,6 +69,16 @@ export async function POST(
     // 1. ตรวจ auth — requireContact แยกขาดจาก requireAgent
     const session = await requireContact();
     const { contact, ctx } = session;
+
+    // 1.5 Rate limit ตาม contactId — กัน spam submit ก่อน DB write
+    const rl = await checkRateLimit({
+      key: rateLimitKey("csat-submit", contact.id),
+      limit: 20,
+      windowSeconds: 60,
+    });
+    if (!rl.allowed) {
+      return rateLimitResponse(rl.retryAfterSeconds);
+    }
 
     // 2. Feature gate — csat_survey ต้องเปิด (pass ctx.plan กัน extra query)
     const featureEnabled = await hasFeature(ctx.tenantId, FEATURE_KEYS.CSAT_SURVEY, ctx.plan);
