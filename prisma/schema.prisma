@@ -164,6 +164,7 @@ model Tenant {
   auditLogs       AuditLog[]
   attachments     Attachment[]
   csatResponses   CsatResponse[]
+  apiKeys         ApiKey[]
 
   @@index([slug])
 }
@@ -193,6 +194,8 @@ model TenantMember {
   messages        TicketMessage[] @relation("MessageAuthorMember")
   // audit logs ที่ member นี้เป็น actor
   auditLogs       AuditLog[]      @relation("AuditMemberActor")
+  // API key ที่ member นี้เป็นผู้สร้าง
+  createdApiKeys  ApiKey[]        @relation("ApiKeyCreatedBy")
 
   // composite unique: 1 user ใน 1 tenant ได้ครั้งเดียว
   @@unique([tenantId, userId])
@@ -554,4 +557,36 @@ model CsatResponse {
 
   @@index([tenantId])
   @@index([tenantId, createdAt]) // รองรับ aggregate summary (avg/count) ต่อ tenant เรียงตามเวลา
+}
+
+// ApiKey — API access สำหรับ tenant (feature: api_access, gate ด้วย hasFeature, requiredPlan enterprise)
+// เก็บเฉพาะ hash ของ key (sha256 hex) — full key โชว์ครั้งเดียวตอนสร้าง
+model ApiKey {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // ชื่อที่ user ตั้งให้ key เพื่อแยกแยะการใช้งาน
+  name String
+
+  // ส่วนต้นของ key ที่โชว์ใน UI ได้ (ไม่ sensitive) เช่น hw_live_AbC1
+  keyPrefix String
+
+  // sha256 hex ของ full key — ใช้ lookup ตอน verify, unique กันชนกัน
+  keyHash String @unique
+
+  // อัปเดตตอนใช้ key เรียก API (nullable = ยังไม่เคยใช้)
+  lastUsedAt DateTime?
+
+  // soft-revoke: null = active, มีค่า = ถูก revoke แล้ว (คง audit trail)
+  revokedAt DateTime?
+
+  // member ผู้สร้าง key นี้ (nullable เผื่อ member ถูกลบออกจาก tenant ภายหลัง)
+  createdByMemberId String?
+  createdByMember   TenantMember? @relation("ApiKeyCreatedBy", fields: [createdByMemberId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
 }
