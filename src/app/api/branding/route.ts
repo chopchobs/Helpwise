@@ -36,6 +36,7 @@ import {
   validateLogoUrl,
   validateAccentColor,
 } from "@/lib/branding";
+import { checkRateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 
 // =============================================================================
 // ZOD SCHEMA — ใช้ validators จาก lib/branding เพื่อไม่ duplicate logic
@@ -139,6 +140,16 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const session = await requireAgent({ roles: ["OWNER", "ADMIN"] });
     const { ctx, member } = session;
     const tenantId = ctx.tenantId; // ห้ามรับ tenantId จาก client
+
+    // 1.5 Rate limit ตาม tenantId
+    const rl = await checkRateLimit({
+      key: rateLimitKey("branding-update", tenantId),
+      limit: 30,
+      windowSeconds: 60,
+    });
+    if (!rl.allowed) {
+      return rateLimitResponse(rl.retryAfterSeconds);
+    }
 
     // 2. Feature gate — custom_branding ต้องเปิด (ห้าม hardcode plan check)
     const brandingEnabled = await hasFeature(

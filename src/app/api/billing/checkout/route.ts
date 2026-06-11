@@ -25,6 +25,7 @@ import { prisma } from "@/lib/prisma";
 import { tenantPrisma } from "@/lib/tenant";
 import { requireAgent, toAuthErrorResponse } from "@/lib/auth";
 import { stripe } from "@/lib/stripe";
+import { checkRateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 
 // =============================================================================
 // REQUEST SCHEMA
@@ -52,6 +53,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const { ctx, member } = agentSession;
   const tenantId = ctx.tenantId; // tenantId มาจาก middleware context เท่านั้น
+
+  // ─── ขั้นที่ 1.5: rate limit ตาม tenantId ────────────────────────────────
+  const rl = await checkRateLimit({
+    key: rateLimitKey("billing-checkout", tenantId),
+    limit: 10,
+    windowSeconds: 60,
+  });
+  if (!rl.allowed) {
+    return rateLimitResponse(rl.retryAfterSeconds);
+  }
 
   // ─── ขั้นที่ 2: validate body ─────────────────────────────────────────────
   let body: z.infer<typeof CheckoutBodySchema>;
