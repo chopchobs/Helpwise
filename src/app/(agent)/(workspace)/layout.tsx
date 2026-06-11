@@ -20,6 +20,7 @@ import {
   CreditCard,
   Timer,
   Palette,
+  KeyRound,
 } from "lucide-react";
 import type {
   MeResponse,
@@ -210,6 +211,14 @@ function SidebarNav({ session, pathname }: SidebarNavProps) {
                 icon={<Palette size={18} />}
                 label="Branding"
                 isActive={pathname.startsWith("/settings/branding")}
+              />
+            </li>
+            <li>
+              <NavLink
+                href="/settings/api-keys"
+                icon={<KeyRound size={18} />}
+                label="API Keys"
+                isActive={pathname.startsWith("/settings/api-keys")}
               />
             </li>
           </ul>

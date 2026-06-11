@@ -76,7 +76,8 @@ export interface ContactSession {
 export class AuthError extends Error {
   constructor(
     message: string,
-    public readonly statusCode: 401 | 403 = 401
+    // 429 ใช้กับ pre-auth rate-limit (เช่น public API key guard) ที่ flow ผ่าน catch เดียวกัน
+    public readonly statusCode: 401 | 403 | 429 = 401
   ) {
     super(message);
     this.name = "AuthError";
@@ -93,12 +94,15 @@ export function toAuthErrorResponse(err: unknown): {
   status: number;
 } {
   if (err instanceof AuthError) {
+    const code =
+      err.statusCode === 403
+        ? "FORBIDDEN"
+        : err.statusCode === 429
+          ? "RATE_LIMITED"
+          : "UNAUTHORIZED";
     return {
       data: null,
-      error: {
-        code: err.statusCode === 403 ? "FORBIDDEN" : "UNAUTHORIZED",
-        message: err.message,
-      },
+      error: { code, message: err.message },
       status: err.statusCode,
     };
   }
