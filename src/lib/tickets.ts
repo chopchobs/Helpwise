@@ -7,9 +7,11 @@
  *   - ไม่ resolve tenant context เอง — caller รับผิดชอบส่ง scoped client ที่ถูกต้อง
  *   - กัน cross-tenant contamination และทำให้ test/reuse ง่ายขึ้น
  *
- * ⚠️ ticketNumber race condition:
- *   ใช้ interactive transaction + retry loop (max 3 ครั้ง) เมื่อชน P2002
- *   โดยอาศัย @@unique([tenantId, ticketNumber]) เป็น DB-level guard
+ * ⚠️ ticketNumber generation:
+ *   ใช้ atomic counter — `tx.tenant.update({ data: { ticketCounter: { increment: 1 } } })`
+ *   ภายใน interactive transaction เดียวกับการสร้าง ticket (atomic, ไม่ต้อง retry)
+ *   row lock บน Tenant row serialize การสร้าง ticket พร้อมกันของ tenant เดียวกัน
+ *   @@unique([tenantId, ticketNumber]) ยังคงอยู่เป็น DB-level safety net
  *
  *   หมายเหตุเรื่อง tenantPrisma ภายใน transaction:
  *   tenantPrisma extension ทำงานผ่าน $extends callback — เมื่อ pass tx (transaction client)
@@ -18,7 +20,7 @@
  *   เพื่อความปลอดภัย (ไม่ต้องเดาว่า extension ทำงานหรือเปล่า)
  */
 
-import { Prisma, TicketStatus, TicketPriority, MessageVisibility } from "@prisma/client";
+import { TicketStatus, TicketPriority, MessageVisibility } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { TenantScopedPrisma } from "@/lib/tenant";
 import { hasFeature, FEATURE_KEYS } from "@/lib/features";
@@ -81,10 +83,10 @@ export interface CreateMessageInput {
  * สร้าง Ticket พร้อม ticketNumber ที่ unique ต่อ tenant แบบ atomic
  *
  * กลยุทธ์:
- *   - ใช้ prisma.$transaction() interactive transaction เพื่อ atomic read-then-create
- *   - หา max(ticketNumber) ของ tenant + 1 ภายใน transaction เดียว
- *   - อาศัย @@unique([tenantId, ticketNumber]) เป็น DB-level guard สุดท้าย
- *   - retry สูงสุด 3 ครั้งเมื่อชน P2002 (unique constraint violation จาก race)
+ *   - ใช้ prisma.$transaction() interactive transaction
+ *   - atomic increment `Tenant.ticketCounter` ภายใน tx เดียวกับ ticket.create
+ *     (row lock บน Tenant row serialize การสร้าง ticket ของ tenant เดียวกัน — ไม่มี race, ไม่ต้อง retry)
+ *   - @@unique([tenantId, ticketNumber]) ยังอยู่เป็น DB-level safety net
  *
  * เหตุผลที่ไม่ใช้ tenantPrisma ภายใน tx:
  *   Prisma interactive transaction ส่ง tx client ที่ไม่มี $extends — extension ไม่ทำงาน
@@ -164,97 +166,68 @@ export async function createTicketWithNumber(
     };
   }
 
-  // MAX_RETRIES สูงขึ้น + jitter backoff เพื่อทน burst contention บน tenant เดียว
-  // (smoke test: create พร้อมกันหลายอันแล้วชน @@unique([tenantId, ticketNumber]))
-  // วิธี max+1 แย่ง lock กันโดยธรรมชาติ — retry พร้อม jitter ช่วยให้ collide แล้วกระจายตัว
-  const MAX_RETRIES = 10;
+  // ใช้ prisma (ไม่ใช่ db) สำหรับ interactive transaction เพราะ tx client ไม่มี extension
+  // แต่ inject tenantId เองทุกที่เพื่อ guarantee tenant isolation
+  const result = await prisma.$transaction(async (tx) => {
+    // atomic increment ticketCounter ของ tenant นี้ — row lock บน Tenant row
+    // serialize การสร้าง ticket พร้อมกันของ tenant เดียวกัน → ได้เลข unique โดยไม่ต้อง retry
+    const counter = await tx.tenant.update({
+      where: { id: tenantId },
+      data: { ticketCounter: { increment: 1 } },
+      select: { ticketCounter: true },
+    });
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      // ใช้ prisma (ไม่ใช่ db) สำหรับ interactive transaction เพราะ tx client ไม่มี extension
-      // แต่ inject tenantId เองทุกที่เพื่อ guarantee tenant isolation
-      const result = await prisma.$transaction(async (tx) => {
-        // หา ticketNumber สูงสุดของ tenant นี้ ภายใน transaction เดียวกัน
-        // ใส่ tenantId ใน where อย่างชัดเจน (tx ไม่มี extension)
-        const maxResult = await tx.ticket.aggregate({
-          where: { tenantId },
-          _max: { ticketNumber: true },
-        });
+    const nextTicketNumber = counter.ticketCounter;
 
-        const nextTicketNumber = (maxResult._max.ticketNumber ?? 0) + 1;
+    // สร้าง ticket — ใส่ tenantId ใน data อย่างชัดเจน
+    // assigneeId ที่ส่งมาถูก verify จาก verifyAssigneeMembership แล้วที่ caller
+    // tx ไม่มี extension — ใส่ tenantId ใน data เองเพื่อ guarantee tenant scope
+    // slaData ถูก precompute ก่อน tx — inject ตรงนี้เพื่อ atomic (ไม่มี post-create update)
+    const ticket = await tx.ticket.create({
+      data: {
+        tenantId,
+        ticketNumber: nextTicketNumber,
+        subject,
+        requesterContactId,
+        assigneeId: assigneeId ?? null,
+        priority: priority ?? TicketPriority.NORMAL,
+        channel: channel ?? "portal",
+        status: TicketStatus.NEW,
+        // เก็บ Message-ID ของ inbound email ที่สร้าง ticket นี้ (ถ้ามี)
+        emailMessageId: emailMessageId ?? null,
+        // SLA deadlines — set เฉพาะเมื่อ feature เปิดอยู่ (slaData ไม่ว่างเปล่า)
+        ...slaData,
+      },
+    });
 
-        // สร้าง ticket — ใส่ tenantId ใน data อย่างชัดเจน
-        // assigneeId ที่ส่งมาถูก verify จาก verifyAssigneeMembership แล้วที่ caller
-        // tx ไม่มี extension — ใส่ tenantId ใน data เองเพื่อ guarantee tenant scope
-        // slaData ถูก precompute ก่อน tx — inject ตรงนี้เพื่อ atomic (ไม่มี post-create update)
-        const ticket = await tx.ticket.create({
-          data: {
-            tenantId,
-            ticketNumber: nextTicketNumber,
-            subject,
-            requesterContactId,
-            assigneeId: assigneeId ?? null,
-            priority: priority ?? TicketPriority.NORMAL,
-            channel: channel ?? "portal",
-            status: TicketStatus.NEW,
-            // เก็บ Message-ID ของ inbound email ที่สร้าง ticket นี้ (ถ้ามี)
-            emailMessageId: emailMessageId ?? null,
-            // SLA deadlines — set เฉพาะเมื่อ feature เปิดอยู่ (slaData ไม่ว่างเปล่า)
-            ...slaData,
-          },
-        });
-
-        // สร้าง firstMessage ถ้ามี
-        if (firstMessage) {
-          // ตรวจ exactly one author (app layer constraint)
-          if (!firstMessage.authorMemberId && !firstMessage.authorContactId) {
-            throw new Error("firstMessage ต้องมี authorMemberId หรือ authorContactId");
-          }
-
-          await tx.ticketMessage.create({
-            data: {
-              tenantId,
-              ticketId: ticket.id,
-              body: firstMessage.body,
-              visibility: firstMessage.visibility ?? MessageVisibility.PUBLIC,
-              authorMemberId: firstMessage.authorMemberId ?? null,
-              authorContactId: firstMessage.authorContactId ?? null,
-              // threading fields สำหรับ inbound email (ถ้ามี)
-              emailMessageId: firstMessage.emailMessageId ?? null,
-              emailInReplyTo: firstMessage.emailInReplyTo ?? null,
-              emailReferences: firstMessage.emailReferences ?? null,
-              emailSentAt: firstMessage.emailSentAt ?? null,
-            },
-          });
-        }
-
-        return ticket;
-      });
-
-      return result;
-    } catch (err) {
-      // P2002 = unique constraint violation — ticketNumber ชนจาก race condition
-      if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === "P2002" &&
-        attempt < MAX_RETRIES - 1
-      ) {
-        console.warn(
-          `[tickets] ticketNumber race detected (attempt ${attempt + 1}/${MAX_RETRIES}), retrying...`,
-          { tenantId }
-        );
-        // jitter backoff: หน่วงสุ่ม (เพิ่มตาม attempt) เพื่อกระจาย retry ที่ชนกัน
-        // transaction abort แล้ว number จะถูก recalculate ใน round ถัดไป
-        const backoffMs = Math.floor(Math.random() * 25) + attempt * 15;
-        await new Promise((resolve) => setTimeout(resolve, backoffMs));
-        continue;
+    // สร้าง firstMessage ถ้ามี
+    if (firstMessage) {
+      // ตรวจ exactly one author (app layer constraint)
+      if (!firstMessage.authorMemberId && !firstMessage.authorContactId) {
+        throw new Error("firstMessage ต้องมี authorMemberId หรือ authorContactId");
       }
-      throw err;
-    }
-  }
 
-  // ถ้าถึงตรงนี้หมายความว่า retry ครบ MAX_RETRIES แต่ TypeScript ต้องการ return
-  throw new Error(`[tickets] Failed to generate unique ticketNumber after ${MAX_RETRIES} attempts`);
+      await tx.ticketMessage.create({
+        data: {
+          tenantId,
+          ticketId: ticket.id,
+          body: firstMessage.body,
+          visibility: firstMessage.visibility ?? MessageVisibility.PUBLIC,
+          authorMemberId: firstMessage.authorMemberId ?? null,
+          authorContactId: firstMessage.authorContactId ?? null,
+          // threading fields สำหรับ inbound email (ถ้ามี)
+          emailMessageId: firstMessage.emailMessageId ?? null,
+          emailInReplyTo: firstMessage.emailInReplyTo ?? null,
+          emailReferences: firstMessage.emailReferences ?? null,
+          emailSentAt: firstMessage.emailSentAt ?? null,
+        },
+      });
+    }
+
+    return ticket;
+  });
+
+  return result;
 }
 
 // =============================================================================
