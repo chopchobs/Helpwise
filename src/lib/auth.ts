@@ -293,47 +293,6 @@ export async function requireContact(): Promise<ContactSession> {
   return { contact, ctx };
 }
 
-// =============================================================================
-// TOKEN ISSUANCE STUBS (TODO: Phase Auth)
-// =============================================================================
-
-/**
- * TODO (Phase: Auth — Agent Login):
- * ออก JWT สำหรับ agent หลังจาก verify email + password / OAuth
- *
- * ตัวอย่าง implementation:
- * ```ts
- * export async function issueAgentToken(userId: string): Promise<string> {
- *   return new SignJWT({ type: "agent" } satisfies Omit<AgentTokenPayload, "sub">)
- *     .setProtectedHeader({ alg: "HS256" })
- *     .setSubject(userId)
- *     .setIssuedAt()
- *     .setExpirationTime(TOKEN_EXPIRY)
- *     .sign(getJwtSecret());
- * }
- * ```
- * ต้อง set ลง httpOnly cookie ชื่อ AGENT_COOKIE_NAME ด้วย SameSite=Strict, Secure
- * ต้อง implement refresh token rotation + revocation list
- */
-
-/**
- * TODO (Phase: Auth — Contact Magic-Link):
- * ออก JWT สำหรับ contact หลังจาก verify magic-link token จาก email
- *
- * ตัวอย่าง implementation:
- * ```ts
- * export async function issueContactToken(contactId: string, tenantId: string): Promise<string> {
- *   return new SignJWT({ type: "contact", tenantId } satisfies Omit<ContactTokenPayload, "sub">)
- *     .setProtectedHeader({ alg: "HS256" })
- *     .setSubject(contactId)
- *     .setIssuedAt()
- *     .setExpirationTime(TOKEN_EXPIRY)
- *     .sign(getJwtSecret());
- * }
- * ```
- * magic-link token ต้อง expire เร็ว (15 นาที) + ใช้ได้ครั้งเดียว (store ใน Redis + delete หลัง verify)
- */
-
 // Export constants สำหรับ auth route handlers
 export { AGENT_COOKIE_NAME, CONTACT_COOKIE_NAME, TOKEN_EXPIRY };
 
