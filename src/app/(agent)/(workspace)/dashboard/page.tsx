@@ -226,7 +226,8 @@ export default function DashboardPage() {
   }, [router]);
 
   useEffect(() => {
-    void fetchDashboard();
+    // deferred ผ่าน microtask — กัน setState synchronous ใน effect body
+    queueMicrotask(() => void fetchDashboard());
   }, [fetchDashboard]);
 
   return (

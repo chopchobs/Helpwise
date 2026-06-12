@@ -595,7 +595,7 @@ function DeleteConfirmDialog({ policy, onConfirm, onCancel, isDeleting, deleteEr
                 ลบ SLA Policy
               </h2>
               <p id="delete-dialog-desc" className="text-sm text-secondary mt-1">
-                ต้องการลบ <strong className="text-foreground">"{policy.name}"</strong> ใช่ไหม?
+                ต้องการลบ <strong className="text-foreground">&quot;{policy.name}&quot;</strong> ใช่ไหม?
                 {typeof policy.ticketCount === "number" && policy.ticketCount > 0 && (
                   <span className="block mt-1 text-warning-ink">
                     มี {policy.ticketCount.toLocaleString("th-TH")} ticket ที่ผูกกับ policy นี้อยู่
@@ -804,7 +804,8 @@ export default function SlaSettingsPage() {
   }, []);
 
   useEffect(() => {
-    void fetchPolicies();
+    // deferred ผ่าน microtask — กัน setState synchronous ใน effect body
+    queueMicrotask(() => void fetchPolicies());
   }, [fetchPolicies]);
 
   // ─── handlers ──────────────────────────────────────────────────────────────

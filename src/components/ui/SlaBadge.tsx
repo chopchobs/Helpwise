@@ -131,6 +131,8 @@ export default function SlaBadge({ sla, compact = false, className }: SlaBadgePr
 
   // mount แล้วค่อยตั้ง now + tick ทุก 30 วินาที
   useEffect(() => {
+    // ตั้งเวลาฝั่ง client หลัง mount — กัน hydration mismatch กับ SSR (ตั้งใจ sync setState)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNow(new Date());
 
     const interval = setInterval(() => {
