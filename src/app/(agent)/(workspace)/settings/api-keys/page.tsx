@@ -311,7 +311,7 @@ function RevokeConfirmDialog({ apiKey, onConfirm, onCancel, isRevoking, revokeEr
                 เพิกถอน API Key
               </h2>
               <p id="revoke-dialog-desc" className="text-sm text-secondary mt-1">
-                ต้องการเพิกถอน <strong className="text-foreground">"{apiKey.name}"</strong> ใช่ไหม?
+                ต้องการเพิกถอน <strong className="text-foreground">&quot;{apiKey.name}&quot;</strong> ใช่ไหม?
                 ระบบที่ใช้ key นี้อยู่จะไม่สามารถเรียก API ได้อีก — ดำเนินการนี้ย้อนกลับไม่ได้
               </p>
             </div>
@@ -502,7 +502,8 @@ export default function ApiKeysSettingsPage() {
   }, []);
 
   useEffect(() => {
-    void fetchApiKeys();
+    // deferred ผ่าน microtask — กัน setState synchronous ใน effect body
+    queueMicrotask(() => void fetchApiKeys());
   }, [fetchApiKeys]);
 
   // ─── handlers ──────────────────────────────────────────────────────────────

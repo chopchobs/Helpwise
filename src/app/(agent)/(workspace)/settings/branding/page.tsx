@@ -7,7 +7,7 @@
  * ถ้า role อื่น 403 → แสดง forbidden state
  */
 
-import { useState, useEffect, useCallback, useId, useRef } from "react";
+import { useState, useEffect, useCallback, useId } from "react";
 import {
   Palette,
   ShieldAlert,
@@ -145,11 +145,13 @@ interface LogoFieldProps {
 function LogoField({ id, value, onChange, onClear, error, disabled }: LogoFieldProps) {
   // สถานะ image โหลดไม่ได้ — ใช้ onError handler กัน broken image
   const [imgError, setImgError] = useState(false);
-
-  // reset imgError เมื่อ value เปลี่ยน
-  useEffect(() => {
+  // เก็บค่า value ที่เคยเช็คล่าสุด เพื่อ reset imgError เมื่อ value เปลี่ยน
+  // (adjust state during render แทน useEffect — หลีกเลี่ยง cascading render)
+  const [lastCheckedValue, setLastCheckedValue] = useState(value);
+  if (value !== lastCheckedValue) {
+    setLastCheckedValue(value);
     setImgError(false);
-  }, [value]);
+  }
 
   const hasValue = value.trim().length > 0;
   // แสดง preview เฉพาะเมื่อมีค่า, ไม่มี validation error, และ image ยังโหลดได้
@@ -262,8 +264,11 @@ function ColorField({
 
   // จำค่า hex ล่าสุดที่ valid — กัน color picker กระโดดไปสี fallback ตอน user พิมพ์ค้างกลางคัน
   // (#000000 = neutral default ตอนยังไม่เคยมีค่า ไม่ใช่ brand token จาก design system)
-  const lastValidHexRef = useRef("#000000");
-  if (isValidHex) lastValidHexRef.current = value;
+  // adjust state during render แทน useEffect — หลีกเลี่ยง cascading render
+  const [lastValidHex, setLastValidHex] = useState("#000000");
+  if (isValidHex && value !== lastValidHex) {
+    setLastValidHex(value);
+  }
 
   // sync จาก color picker → hex text input
   function handlePickerChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -312,7 +317,7 @@ function ColorField({
         <input
           id={pickerId}
           type="color"
-          value={isValidHex ? value : lastValidHexRef.current}
+          value={isValidHex ? value : lastValidHex}
           onChange={handlePickerChange}
           disabled={disabled}
           aria-label="เลือกสีจาก color picker"
@@ -475,7 +480,8 @@ export default function BrandingSettingsPage() {
   }, []);
 
   useEffect(() => {
-    void fetchBranding();
+    // deferred ผ่าน microtask — กัน setState synchronous ใน effect body
+    queueMicrotask(() => void fetchBranding());
   }, [fetchBranding]);
 
   // ─── handlers ──────────────────────────────────────────────────────────────

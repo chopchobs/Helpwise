@@ -273,12 +273,13 @@ export default function WorkspaceLayout({
   }, [router]);
 
   useEffect(() => {
-    void verifySession();
+    // deferred ผ่าน microtask — กัน setState synchronous ใน effect body
+    queueMicrotask(() => void verifySession());
   }, [verifySession]);
 
   // ปิด mobile menu เมื่อเปลี่ยน route
   useEffect(() => {
-    setIsMobileMenuOpen(false);
+    queueMicrotask(() => setIsMobileMenuOpen(false));
   }, [pathname]);
 
   const handleLogout = useCallback(async () => {
