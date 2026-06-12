@@ -187,10 +187,23 @@ Security headers are configured centrally in `next.config.ts` and applied to all
 
 Notes:
 
-- The CSP currently includes `script-src 'self' 'unsafe-inline'` (plus `'unsafe-eval'`
-  in development for HMR). The `'unsafe-inline'` is required for Next.js's inline
-  hydration script and is **not yet nonce-based** — switching to a nonce-based CSP is a
-  known follow-up.
+- The CSP includes `script-src 'self' 'unsafe-inline'` (plus `'unsafe-eval'` in
+  development for HMR). The `'unsafe-inline'` is required for Next.js's inline hydration
+  scripts.
+- **Known limitation — nonce-based CSP is not feasible with the current architecture.**
+  A nonce-based CSP (`script-src 'nonce-…' 'strict-dynamic'`) was implemented and tested,
+  but Next.js's automatic nonce propagation does **not** work when the nonce/CSP is set
+  from `src/proxy.ts` (the Next.js 16.2 Node-runtime proxy this project uses for tenant
+  resolution, instead of `middleware.ts`). Verified empirically: the per-request CSP
+  header carried a valid nonce, but Next emitted statically-rendered pages whose
+  `<script>` tags had **no** `nonce` attribute (0 of 17 on `/login`) — under
+  `'strict-dynamic'` every script is then blocked and the app breaks at runtime (the
+  production build still succeeds, so this is not caught by `next build`). Removing
+  `'unsafe-inline'` for scripts therefore requires either forcing app-wide dynamic
+  rendering (losing static optimization, and still unverified through `proxy.ts`) or a
+  separate Edge `middleware.ts` layer for CSP — both deferred. The remaining CSP
+  directives (`object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'self'`,
+  `form-action 'self'`) still meaningfully reduce attack surface.
 - `img-src` allows `https:`/`data:`/`blob:` because the customer portal renders
   tenant-supplied logos/branding from arbitrary external hosts.
 - HSTS is only sent when `NODE_ENV=production`, so local development over HTTP is not
