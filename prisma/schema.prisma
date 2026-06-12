@@ -151,6 +151,8 @@ model Tenant {
   // Json เก็บ business hours + portal branding
   settings  Json     @default("{}")
   isActive  Boolean  @default(true)
+  // atomic counter สำหรับ ticketNumber ต่อ tenant — increment ใน tx (UPDATE ... ticketCounter = ticketCounter + 1 RETURNING)
+  ticketCounter Int  @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
