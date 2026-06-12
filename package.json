@@ -16,7 +16,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "smoke:stripe": "tsx --env-file=.env scripts/stripe-smoke.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
