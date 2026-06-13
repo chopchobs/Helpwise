@@ -167,6 +167,7 @@ model Tenant {
   attachments     Attachment[]
   csatResponses   CsatResponse[]
   apiKeys         ApiKey[]
+  cannedResponses CannedResponse[]
 
   @@index([slug])
 }
@@ -198,6 +199,8 @@ model TenantMember {
   auditLogs       AuditLog[]      @relation("AuditMemberActor")
   // API key ที่ member นี้เป็นผู้สร้าง
   createdApiKeys  ApiKey[]        @relation("ApiKeyCreatedBy")
+  // canned response ที่ member นี้เป็นผู้สร้าง
+  createdCannedResponses CannedResponse[] @relation("CannedResponseCreatedBy")
 
   // composite unique: 1 user ใน 1 tenant ได้ครั้งเดียว
   @@unique([tenantId, userId])
@@ -593,6 +596,28 @@ model ApiKey {
   // member ผู้สร้าง key นี้ (nullable เผื่อ member ถูกลบออกจาก tenant ภายหลัง)
   createdByMemberId String?
   createdByMember   TenantMember? @relation("ApiKeyCreatedBy", fields: [createdByMemberId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+// CannedResponse — ข้อความตอบสำเร็จรูป tenant-scoped สำหรับ agent (Phase 23, v1 ไม่มี placeholder)
+model CannedResponse {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // ชื่อ template ที่ agent เห็นในรายการ
+  title String
+
+  // เนื้อหา plain text ที่แทรกลง reply
+  body String
+
+  // member ผู้สร้าง template นี้ (nullable เผื่อ member ถูกลบออกจาก tenant ภายหลัง)
+  createdByMemberId String?
+  createdByMember   TenantMember? @relation("CannedResponseCreatedBy", fields: [createdByMemberId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
