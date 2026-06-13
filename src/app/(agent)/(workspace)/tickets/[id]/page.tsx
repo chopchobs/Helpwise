@@ -8,7 +8,7 @@
  * Rendering: client fetch เพื่อให้ session cookie + tenant subdomain header ทำงานถูกต้อง
  */
 
-import { useState, useEffect, useCallback, useTransition } from "react";
+import { useState, useEffect, useCallback, useRef, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -19,6 +19,8 @@ import {
   User,
   GitMerge,
   AlertTriangle,
+  MessageSquareText,
+  X,
 } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import PriorityBadge from "@/components/ui/PriorityBadge";
@@ -45,6 +47,10 @@ import type {
   MeResponse,
   MemberRole,
 } from "@/types/ticket";
+import type {
+  CannedResponseDTO,
+  CannedResponseListResponse,
+} from "@/types/canned-response";
 
 // =============================================================================
 // CONSTANTS
@@ -153,6 +159,110 @@ function MessageBubble({ message }: MessageBubbleProps) {
 }
 
 // =============================================================================
+// CANNED RESPONSE PICKER
+// =============================================================================
+
+interface CannedResponsePickerProps {
+  onSelect: (body: string) => void;
+  onClose: () => void;
+}
+
+/**
+ * CannedResponsePicker — dropdown แสดงรายการข้อความสำเร็จรูปให้เลือกแทรกลง reply box
+ * fetch เมื่อเปิด picker (ไม่ fetch on mount ของ ReplyBox)
+ */
+function CannedResponsePicker({ onSelect, onClose }: CannedResponsePickerProps) {
+  const [items, setItems] = useState<CannedResponseDTO[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/canned-responses", { credentials: "include" });
+        const json = (await res.json()) as CannedResponseListResponse;
+
+        if (isCancelled) return;
+
+        if (!res.ok || json.error || !json.data) {
+          const msg = typeof json.error === "object" ? json.error?.message : json.error;
+          setLoadError(msg ?? "โหลดข้อความสำเร็จรูปไม่สำเร็จ");
+          return;
+        }
+
+        setItems(json.data.cannedResponses);
+      } catch {
+        if (!isCancelled) setLoadError("ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่");
+      }
+    })();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  return (
+    <div
+      role="menu"
+      aria-label="เลือกข้อความสำเร็จรูป"
+      className="absolute bottom-full left-0 mb-2 w-72 max-h-72 overflow-y-auto rounded-xl border border-border bg-surface shadow-lg z-10 flex flex-col"
+    >
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+        <span className="text-xs font-semibold text-secondary">ข้อความสำเร็จรูป</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="ปิด"
+          className="p-1 rounded-md text-muted hover:bg-stone hover:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          <X size={14} aria-hidden="true" />
+        </button>
+      </div>
+
+      {items === null && !loadError && (
+        <div className="px-3 py-4 text-sm text-secondary text-center" aria-busy="true">
+          กำลังโหลด...
+        </div>
+      )}
+
+      {loadError && (
+        <div className="px-3 py-4 text-sm text-danger text-center">{loadError}</div>
+      )}
+
+      {items !== null && items.length === 0 && (
+        <div className="px-3 py-4 flex flex-col items-center gap-2 text-center">
+          <p className="text-sm text-secondary">ยังไม่มีข้อความสำเร็จรูป</p>
+          <Link
+            href="/settings/canned-responses"
+            className="text-xs text-primary-ink hover:underline focus:outline-none focus:underline"
+          >
+            ไปสร้างที่ตั้งค่า
+          </Link>
+        </div>
+      )}
+
+      {items !== null && items.length > 0 && (
+        <ul role="none" className="flex flex-col p-1">
+          {items.map((item) => (
+            <li key={item.id} role="none">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => onSelect(item.body)}
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-stone focus:outline-none focus:ring-2 focus:ring-primary transition-colors"
+              >
+                <p className="text-sm font-medium text-foreground truncate">{item.title}</p>
+                <p className="text-xs text-secondary truncate">{item.body}</p>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
 // REPLY BOX
 // =============================================================================
 
@@ -171,6 +281,15 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
   const [visibility, setVisibility] = useState<MessageVisibility>("PUBLIC");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  /** แทรกเนื้อหา canned response ลง textarea — ต่อท้ายด้วย newline ถ้ามีข้อความอยู่แล้ว */
+  function handleSelectCannedResponse(cannedBody: string) {
+    setBody((prev) => (prev.trim() ? `${prev}\n${cannedBody}` : cannedBody));
+    setIsPickerOpen(false);
+    textareaRef.current?.focus();
+  }
 
   async function handleSend() {
     // กัน double-submit เมื่อ request กำลัง in-flight (เช่น Ctrl+Enter ยิงซ้ำ)
@@ -268,6 +387,7 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
 
       {/* Textarea */}
       <textarea
+        ref={textareaRef}
         value={body}
         onChange={(e) => setBody(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -295,7 +415,33 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
         </div>
       )}
 
-      <div className="flex justify-end mt-3">
+      <div className="flex justify-between items-center mt-3">
+        {/* ปุ่มเปิด canned response picker */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setIsPickerOpen((open) => !open)}
+            aria-label="แทรกข้อความสำเร็จรูป"
+            aria-haspopup="menu"
+            aria-expanded={isPickerOpen}
+            className={[
+              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
+              "focus:outline-none focus:ring-2 focus:ring-primary",
+              "border-border text-secondary hover:bg-stone hover:text-foreground bg-surface",
+            ].join(" ")}
+          >
+            <MessageSquareText size={14} aria-hidden="true" />
+            ข้อความสำเร็จรูป
+          </button>
+
+          {isPickerOpen && (
+            <CannedResponsePicker
+              onSelect={handleSelectCannedResponse}
+              onClose={() => setIsPickerOpen(false)}
+            />
+          )}
+        </div>
+
         <button
           type="button"
           onClick={() => void handleSend()}

@@ -21,6 +21,7 @@ import {
   Timer,
   Palette,
   KeyRound,
+  MessageSquareText,
 } from "lucide-react";
 import type {
   MeResponse,
@@ -179,6 +180,20 @@ function SidebarNav({ session, pathname }: SidebarNavProps) {
               />
             </li>
           ))}
+        </ul>
+      </nav>
+
+      {/* ทุก role เห็น — canned responses (VIEWER อ่านได้, AGENT+ จัดการได้) */}
+      <nav aria-label="เครื่องมือ" className="mt-4 pt-4 border-t border-border">
+        <ul className="flex flex-col gap-1" role="list">
+          <li>
+            <NavLink
+              href="/settings/canned-responses"
+              icon={<MessageSquareText size={18} />}
+              label="ข้อความสำเร็จรูป"
+              isActive={pathname.startsWith("/settings/canned-responses")}
+            />
+          </li>
         </ul>
       </nav>
 
