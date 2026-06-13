@@ -137,6 +137,7 @@ export async function POST(
         subject: true,
         ticketNumber: true,
         emailMessageId: true, // Message-ID ของ inbound email แรก
+        mergedIntoId: true,
         requesterContact: {
           select: { id: true, email: true, name: true },
         },
@@ -147,6 +148,14 @@ export async function POST(
       return NextResponse.json(
         { data: null, error: { code: "NOT_FOUND", message: "ไม่พบ ticket ที่ระบุ" } },
         { status: 404 }
+      );
+    }
+
+    // ticket ที่ถูก merge แล้วเป็น read-only — ห้ามตอบกลับเพิ่ม
+    if (ticket.mergedIntoId !== null) {
+      return NextResponse.json(
+        { data: null, error: { code: "TICKET_MERGED", message: "ticket นี้ถูกรวมไปแล้ว ไม่สามารถตอบกลับได้" } },
+        { status: 409 }
       );
     }
 

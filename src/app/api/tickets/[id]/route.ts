@@ -93,6 +93,15 @@ export async function GET(
         slaPolicy: {
           select: { id: true, name: true },
         },
+        // Ticket Merge: target ที่ ticket นี้ถูกรวมเข้า (null = ยังไม่ถูก merge)
+        mergedInto: {
+          select: { id: true, ticketNumber: true },
+        },
+        // Ticket Merge: source tickets ที่ถูกรวมเข้า ticket นี้
+        mergedFrom: {
+          select: { id: true, ticketNumber: true },
+          orderBy: { ticketNumber: "asc" },
+        },
         // CSAT: agent เห็น rating ของ ticket นี้ (one-to-one optional)
         csat: {
           select: {

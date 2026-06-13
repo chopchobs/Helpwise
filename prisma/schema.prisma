@@ -322,6 +322,12 @@ model Ticket {
   // email threading — Message-ID ของ email แรกที่สร้าง ticket นี้
   emailMessageId String?
 
+  // === Ticket Merge ===
+  // source ticket ที่ถูก merge เข้า target — mergedIntoId ชี้ target ticket (null = ยังไม่ถูก merge)
+  mergedIntoId String?
+  mergedInto   Ticket?  @relation("TicketMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom   Ticket[] @relation("TicketMerge")
+
   // metadata สำหรับ custom fields / integration data
   metadata Json @default("{}")
 
@@ -341,6 +347,7 @@ model Ticket {
   @@index([tenantId, assigneeId]) // query ticket ของ agent คนนั้นใน tenant
   @@index([tenantId, requesterContactId]) // query ticket ของ contact ใน tenant (portal)
   @@index([tenantId, priority, status]) // composite สำหรับ SLA dashboard
+  @@index([tenantId, mergedIntoId]) // query ticket ที่ถูก merge เข้า target นี้
   @@index([firstResponseDueAt]) // BullMQ SLA checker
   @@index([resolutionDueAt]) // BullMQ SLA checker
 }
