@@ -130,6 +130,10 @@ export interface AgentTicketSummary {
 /** Ticket detail ฝั่ง agent — มี messages array */
 export interface AgentTicketDetail extends AgentTicketSummary {
   messages: AgentTicketMessage[];
+  /** ticket ปลายทางที่ ticket นี้ถูกรวมเข้า — null = ยังไม่ถูก merge */
+  mergedInto: { id: string; ticketNumber: number } | null;
+  /** source tickets ที่ถูกรวมเข้า ticket นี้ */
+  mergedFrom: { id: string; ticketNumber: number }[];
 }
 
 /** Response shape: GET /api/tickets */
@@ -162,6 +166,20 @@ export interface AgentPatchTicketResponse {
 /** Response shape: POST /api/tickets/:id/messages */
 export interface AgentPostMessageResponse {
   data: AgentTicketMessage | null;
+  error: ApiError | null;
+}
+
+/** Response shape: POST /api/tickets/:id/merge */
+export interface AgentMergeTicketResponse {
+  data: {
+    source: {
+      id: string;
+      ticketNumber: number;
+      status: TicketStatus;
+      mergedInto: { id: string; ticketNumber: number };
+    };
+    target: { id: string; ticketNumber: number };
+  } | null;
   error: ApiError | null;
 }
 

@@ -89,6 +89,7 @@ export async function POST(
       select: {
         id: true,
         status: true,
+        mergedIntoId: true,
       },
     });
 
@@ -97,6 +98,14 @@ export async function POST(
       return NextResponse.json(
         { data: null, error: { code: "NOT_FOUND", message: "ไม่พบ ticket ที่ระบุ" } },
         { status: 404 }
+      );
+    }
+
+    // ticket ที่ถูก merge แล้วเป็น read-only — ห้ามตอบกลับเพิ่ม
+    if (ticket.mergedIntoId !== null) {
+      return NextResponse.json(
+        { data: null, error: { code: "TICKET_MERGED", message: "ticket นี้ถูกรวมไปแล้ว ไม่สามารถตอบกลับได้" } },
+        { status: 409 }
       );
     }
 

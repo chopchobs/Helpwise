@@ -10,7 +10,16 @@
 
 import { useState, useEffect, useCallback, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Lock, Send, RefreshCw, User } from "lucide-react";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  Lock,
+  Send,
+  RefreshCw,
+  User,
+  GitMerge,
+  AlertTriangle,
+} from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import PriorityBadge from "@/components/ui/PriorityBadge";
 import SlaBadge from "@/components/ui/SlaBadge";
@@ -26,12 +35,15 @@ import type {
   AgentTicketDetailResponse,
   AgentPatchTicketResponse,
   AgentPostMessageResponse,
+  AgentMergeTicketResponse,
   AgentTicketMessage,
   TicketStatus,
   TicketPriority,
   MessageVisibility,
   MemberListItem,
   MembersResponse,
+  MeResponse,
+  MemberRole,
 } from "@/types/ticket";
 
 // =============================================================================
@@ -310,6 +322,148 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
 }
 
 // =============================================================================
+// MERGED BANNER — แสดงเมื่อ ticket นี้ถูก merge เข้า ticket อื่นแล้ว (read-only)
+// =============================================================================
+
+interface MergedBannerProps {
+  mergedInto: { id: string; ticketNumber: number };
+}
+
+function MergedBanner({ mergedInto }: MergedBannerProps) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-warning-tint bg-warning-tint px-4 py-3 mb-4">
+      <GitMerge size={18} className="text-warning-ink shrink-0" aria-hidden="true" />
+      <p className="text-sm text-warning-ink">
+        Ticket นี้ถูกรวมเข้า{" "}
+        <Link
+          href={`/tickets/${mergedInto.id}`}
+          className="font-semibold underline hover:no-underline"
+        >
+          #{mergedInto.ticketNumber}
+        </Link>{" "}
+        และถูกปิดแล้ว (read-only)
+      </p>
+    </div>
+  );
+}
+
+// =============================================================================
+// MERGE DIALOG — modal ยืนยันการรวม ticket
+// =============================================================================
+
+interface MergeDialogProps {
+  onConfirm: (targetTicketNumber: number) => void;
+  onCancel: () => void;
+  isMerging: boolean;
+  mergeError: string | null;
+}
+
+function MergeDialog({ onConfirm, onCancel, isMerging, mergeError }: MergeDialogProps) {
+  const [targetInput, setTargetInput] = useState("");
+
+  function handleConfirm() {
+    const targetTicketNumber = Number(targetInput);
+    if (!targetInput || Number.isNaN(targetTicketNumber)) return;
+    onConfirm(targetTicketNumber);
+  }
+
+  const isValid = targetInput.trim() !== "" && !Number.isNaN(Number(targetInput));
+
+  return (
+    <>
+      {/* backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-foreground/30"
+        aria-hidden="true"
+        onClick={() => !isMerging && onCancel()}
+      />
+      {/* dialog */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="merge-dialog-title"
+        aria-describedby="merge-dialog-desc"
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      >
+        <div className="bg-surface rounded-xl border border-border shadow-lg p-6 max-w-sm w-full flex flex-col gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-full bg-warning-tint flex items-center justify-center shrink-0">
+              <GitMerge size={20} className="text-warning-ink" aria-hidden="true" />
+            </div>
+            <div>
+              <h2 id="merge-dialog-title" className="text-base font-bold text-foreground">
+                รวม Ticket
+              </h2>
+              <p id="merge-dialog-desc" className="text-sm text-secondary mt-1">
+                ระบุหมายเลข ticket ปลายทางที่ต้องการรวมเข้า
+              </p>
+            </div>
+          </div>
+
+          {/* คำเตือนผลกระทบของการ merge */}
+          <div className="rounded-lg border border-warning-tint bg-warning-tint px-3 py-2 flex items-start gap-2">
+            <AlertTriangle size={14} className="text-warning-ink shrink-0 mt-0.5" aria-hidden="true" />
+            <ul className="text-xs text-warning-ink list-disc pl-4 space-y-0.5">
+              <li>ข้อความทั้งหมดจะถูกย้ายไป ticket ปลายทาง</li>
+              <li>ticket นี้จะถูกปิดและรวมเข้าปลายทาง</li>
+              <li>merge ได้เฉพาะ ticket ของลูกค้าคนเดียวกัน</li>
+            </ul>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label htmlFor="merge-target" className="text-xs font-medium text-secondary">
+              หมายเลข Ticket ปลายทาง
+            </label>
+            <input
+              id="merge-target"
+              type="number"
+              min={1}
+              value={targetInput}
+              onChange={(e) => setTargetInput(e.target.value)}
+              placeholder="เช่น 1024"
+              disabled={isMerging}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
+            />
+          </div>
+
+          {mergeError && <FormAlert variant="error" message={mergeError} />}
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleConfirm}
+              disabled={isMerging || !isValid}
+              className={[
+                "inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors",
+                "focus:outline-none focus:ring-2 focus:ring-warning focus:ring-offset-2",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
+                "bg-warning-strong hover:bg-warning-strong-hover",
+              ].join(" ")}
+            >
+              {isMerging && <RefreshCw size={14} className="animate-spin" aria-hidden="true" />}
+              {isMerging ? "กำลังรวม..." : "ยืนยันรวม Ticket"}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={isMerging}
+              className={[
+                "px-4 py-2 rounded-lg text-sm font-semibold border transition-colors",
+                "border-border text-secondary hover:bg-stone hover:text-foreground bg-surface",
+                "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
+              ].join(" ")}
+            >
+              ยกเลิก
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// =============================================================================
 // MAIN COMPONENT
 // =============================================================================
 
@@ -327,6 +481,11 @@ export default function AgentTicketDetailPage() {
   const [isPatchingAssignee, setIsPatchingAssignee] = useState(false);
   // รายชื่อ members สำหรับ assignee dropdown
   const [members, setMembers] = useState<MemberListItem[]>([]);
+  // role ของ user ปัจจุบัน — ใช้ gate ปุ่ม Merge (เฉพาะ OWNER/ADMIN)
+  const [memberRole, setMemberRole] = useState<MemberRole | null>(null);
+  const [isMergeDialogOpen, setIsMergeDialogOpen] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   const fetchTicket = useCallback(async () => {
@@ -379,6 +538,22 @@ export default function AgentTicketDetailPage() {
       }
     }
     void loadMembers();
+  }, []);
+
+  // โหลด session เพื่อรู้ role ปัจจุบัน — ใช้ gate ปุ่ม Merge
+  useEffect(() => {
+    async function loadSession() {
+      try {
+        const res = await fetch("/api/auth/agent/me", { credentials: "include" });
+        const json = (await res.json()) as MeResponse;
+        if (res.ok && json.data) {
+          setMemberRole(json.data.member.role);
+        }
+      } catch {
+        // ไม่ block UI — ปุ่ม Merge จะถูกซ่อนถ้าโหลด role ไม่สำเร็จ
+      }
+    }
+    void loadSession();
   }, []);
 
   async function handleStatusChange(status: TicketStatus) {
@@ -486,6 +661,62 @@ export default function AgentTicketDetailPage() {
     }
   }
 
+  // แปลง error code จาก merge API เป็นข้อความภาษาไทยที่เข้าใจง่าย
+  function getMergeErrorMessage(code: string | undefined, fallback: string): string {
+    switch (code) {
+      case "CANNOT_MERGE_SELF":
+        return "รวมเข้าตัวเองไม่ได้";
+      case "CANNOT_MERGE_DIFFERENT_REQUESTER":
+        return "ลูกค้าผู้แจ้งคนละคน รวมไม่ได้";
+      case "TARGET_NOT_FOUND":
+        return "ไม่พบ ticket ปลายทาง";
+      case "NOT_FOUND":
+        return "ไม่พบ ticket นี้";
+      case "ALREADY_MERGED":
+        return "ticket นี้ถูกรวมไปแล้ว";
+      case "TARGET_ALREADY_MERGED":
+        return "ticket ปลายทางถูกรวมไปที่อื่นแล้ว รวมไม่ได้";
+      case "VALIDATION_ERROR":
+        return "หมายเลข ticket ปลายทางไม่ถูกต้อง";
+      case "FORBIDDEN":
+        return "คุณไม่มีสิทธิ์รวม ticket นี้";
+      default:
+        return fallback;
+    }
+  }
+
+  async function handleMergeConfirm(targetTicketNumber: number) {
+    if (isMerging) return;
+    setIsMerging(true);
+    setMergeError(null);
+
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/merge`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetTicketNumber }),
+      });
+
+      const json = (await res.json()) as AgentMergeTicketResponse;
+
+      if (!res.ok || json.error || !json.data) {
+        setMergeError(
+          getMergeErrorMessage(json.error?.code, json.error?.message ?? "รวม ticket ไม่สำเร็จ")
+        );
+        return;
+      }
+
+      // สำเร็จ → ปิด dialog แล้ว navigate ไป target ticket
+      setIsMergeDialogOpen(false);
+      router.push(`/tickets/${json.data.target.id}`);
+    } catch {
+      setMergeError("ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่");
+    } finally {
+      setIsMerging(false);
+    }
+  }
+
   function handleMessageSent(msg: AgentTicketMessage) {
     setTicket((prev) =>
       prev ? { ...prev, messages: [...prev.messages, msg] } : prev
@@ -527,6 +758,10 @@ export default function AgentTicketDetailPage() {
     ticket.requesterContact?.email ??
     "ไม่ระบุ";
 
+  // เฉพาะ OWNER/ADMIN และ ticket ยังไม่ถูก merge เท่านั้นที่เห็นปุ่ม Merge
+  const canMerge =
+    (memberRole === "OWNER" || memberRole === "ADMIN") && ticket.mergedInto === null;
+
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -541,16 +776,33 @@ export default function AgentTicketDetailPage() {
           กลับไป Ticket List
         </button>
 
+        {/* Banner: ticket นี้ถูก merge เข้า ticket อื่นแล้ว */}
+        {ticket.mergedInto !== null && <MergedBanner mergedInto={ticket.mergedInto} />}
+
         {/* Ticket header */}
         <div className="bg-surface rounded-xl border border-border p-6 mb-4 shadow-sm">
-          <div className="flex flex-wrap items-start gap-3 mb-3">
-            <span className="text-sm font-semibold text-secondary">
-              #{ticket.ticketNumber}
-            </span>
-            <StatusBadge status={ticket.status} />
-            <PriorityBadge priority={ticket.priority} />
-            {/* SLA badge เด่นใกล้ status — แสดง deadline label เต็ม */}
-            <SlaBadge sla={ticket.sla} />
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm font-semibold text-secondary">
+                #{ticket.ticketNumber}
+              </span>
+              <StatusBadge status={ticket.status} />
+              <PriorityBadge priority={ticket.priority} />
+              {/* SLA badge เด่นใกล้ status — แสดง deadline label เต็ม */}
+              <SlaBadge sla={ticket.sla} />
+            </div>
+
+            {/* ปุ่มรวม ticket — เฉพาะ OWNER/ADMIN และยังไม่ถูก merge */}
+            {canMerge && (
+              <button
+                type="button"
+                onClick={() => setIsMergeDialogOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border text-secondary hover:bg-stone hover:text-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <GitMerge size={14} aria-hidden="true" />
+                รวม Ticket
+              </button>
+            )}
           </div>
 
           <h1 className="text-xl font-bold text-foreground leading-snug mb-4">
@@ -562,6 +814,21 @@ export default function AgentTicketDetailPage() {
               ผู้แจ้ง: <span className="text-foreground font-medium">{requesterName}</span>
             </span>
           </div>
+
+          {/* Indicator: ticket นี้เป็นปลายทางของ ticket อื่นที่ merge เข้ามา */}
+          {ticket.mergedFrom.length > 0 && (
+            <p className="text-xs text-muted mt-2">
+              รวมจาก:{" "}
+              {ticket.mergedFrom.map((source, idx) => (
+                <span key={source.id}>
+                  {idx > 0 && ", "}
+                  <Link href={`/tickets/${source.id}`} className="text-primary-ink hover:underline">
+                    #{source.ticketNumber}
+                  </Link>
+                </span>
+              ))}
+            </p>
+          )}
 
           {/* CSAT result — แสดงเฉพาะเมื่อลูกค้าให้คะแนนแล้ว */}
           {ticket.csat && (
@@ -670,9 +937,21 @@ export default function AgentTicketDetailPage() {
           </div>
         </div>
 
-        {/* Reply box */}
-        <ReplyBox ticketId={ticketId} onMessageSent={handleMessageSent} />
+        {/* Reply box — ซ่อนเมื่อ ticket ถูก merge แล้ว (read-only) */}
+        {ticket.mergedInto === null && (
+          <ReplyBox ticketId={ticketId} onMessageSent={handleMessageSent} />
+        )}
       </div>
+
+      {/* Merge dialog */}
+      {isMergeDialogOpen && (
+        <MergeDialog
+          onConfirm={(targetTicketNumber) => void handleMergeConfirm(targetTicketNumber)}
+          onCancel={() => { setMergeError(null); setIsMergeDialogOpen(false); }}
+          isMerging={isMerging}
+          mergeError={mergeError}
+        />
+      )}
     </div>
   );
 }
