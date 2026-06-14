@@ -94,6 +94,12 @@ const FEATURE_FLAGS = [
     defaultEnabled: false,
     requiredPlan: "enterprise" as string | null,
   },
+  {
+    key: "analytics",
+    description: "Reporting and analytics dashboard with KPIs, trends, and breakdowns",
+    defaultEnabled: false,
+    requiredPlan: "pro" as string | null,
+  },
 ] as const;
 
 async function main(): Promise<void> {

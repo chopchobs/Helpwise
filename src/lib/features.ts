@@ -132,6 +132,7 @@ export const FEATURE_KEYS = {
   API_ACCESS: "api_access",
   CUSTOM_BRANDING: "custom_branding",
   MULTIPLE_SLA_POLICIES: "multiple_sla_policies",
+  ANALYTICS: "analytics",
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];

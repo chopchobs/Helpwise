@@ -12,6 +12,7 @@ import Link from "next/link";
 import {
   LayoutDashboard,
   Inbox,
+  BarChart3,
   Plus,
   LogOut,
   ChevronDown,
@@ -105,6 +106,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", icon: <LayoutDashboard size={18} />, label: "Dashboard" },
   { href: "/tickets", icon: <Inbox size={18} />, label: "Tickets" },
+  { href: "/reports", icon: <BarChart3 size={18} />, label: "รายงาน" },
 ];
 
 interface SidebarNavProps {
