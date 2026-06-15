@@ -124,6 +124,17 @@ export async function GET(
             authorContact: {
               select: { id: true, name: true, email: true, avatarUrl: true },
             },
+            // attachment metadata (ทุก visibility — agent เห็น INTERNAL ได้)
+            // ห้าม return storageUrl/path — client เรียก download endpoint ด้วย id
+            attachments: {
+              select: {
+                id: true,
+                fileName: true,
+                fileSize: true,
+                mimeType: true,
+                createdAt: true,
+              },
+            },
           },
         },
         _count: { select: { messages: true, attachments: true } },

@@ -16,14 +16,18 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Send, RefreshCw, User } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import FormAlert from "@/components/ui/FormAlert";
+import AttachmentPicker from "@/components/ui/AttachmentPicker";
+import AttachmentList from "@/components/ui/AttachmentList";
 import CsatSurvey, { CsatThankYou } from "@/components/portal/CsatSurvey";
 import { formatDateFull, getAuthorName, isAgentMessage } from "@/lib/ticket-ui";
+import { uploadAttachment } from "@/lib/attachment-upload";
 import type {
   PortalTicketDetail,
   PortalTicketDetailResponse,
   PortalPostMessageResponse,
   PortalTicketMessage,
 } from "@/types/ticket";
+import type { MessageAttachmentInput } from "@/types/attachment";
 import type { CsatResponseDTO } from "@/types/csat";
 
 // =============================================================================
@@ -59,6 +63,7 @@ function PortalMessageBubble({ message }: PortalMessageBubbleProps) {
           <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
             {message.body}
           </p>
+          <AttachmentList attachments={message.attachments} downloadEndpointBase="/api/portal/attachments" />
         </div>
         <time className="text-xs text-secondary ml-9" dateTime={message.createdAt}>
           {formatDateFull(message.createdAt)}
@@ -74,6 +79,7 @@ function PortalMessageBubble({ message }: PortalMessageBubbleProps) {
         <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
           {message.body}
         </p>
+        <AttachmentList attachments={message.attachments} downloadEndpointBase="/api/portal/attachments" />
       </div>
       <time className="text-xs text-secondary" dateTime={message.createdAt}>
         {formatDateFull(message.createdAt)}
@@ -102,6 +108,8 @@ function PortalReplyBox({ ticketId, isClosed, isSolved, onMessageSent }: PortalR
   const [body, setBody] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
 
   async function handleSend() {
     // กัน double-submit เมื่อ request กำลัง in-flight (เช่น Ctrl+Enter ยิงซ้ำ)
@@ -113,12 +121,34 @@ function PortalReplyBox({ ticketId, isClosed, isSolved, onMessageSent }: PortalR
     setError(null);
 
     try {
+      // ─── upload ไฟล์แนบทั้งหมดก่อน (sign → PUT) ────────────────────────────
+      let attachments: MessageAttachmentInput[] = [];
+      if (pendingFiles.length > 0) {
+        setIsUploading(true);
+        const results = await Promise.all(
+          pendingFiles.map((file) =>
+            uploadAttachment(file, `/api/portal/tickets/${ticketId}/attachments/sign`)
+          )
+        );
+        setIsUploading(false);
+
+        const failed = results.filter((r) => r.errorMessage);
+        if (failed.length > 0) {
+          setError(failed.map((r) => r.errorMessage).join(" / "));
+          return;
+        }
+
+        attachments = results
+          .map((r) => r.attachment)
+          .filter((a): a is MessageAttachmentInput => a !== null);
+      }
+
       const res = await fetch(`/api/portal/tickets/${ticketId}/messages`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        // ส่งเฉพาะ body — ไม่มี visibility (backend บังคับ PUBLIC เสมอ)
-        body: JSON.stringify({ body: trimmed }),
+        // ส่งเฉพาะ body + attachments — ไม่มี visibility (backend บังคับ PUBLIC เสมอ)
+        body: JSON.stringify({ body: trimmed, attachments }),
       });
 
       const json = (await res.json()) as PortalPostMessageResponse;
@@ -137,14 +167,17 @@ function PortalReplyBox({ ticketId, isClosed, isSolved, onMessageSent }: PortalR
           createdAt: json.data.createdAt,
           authorMember: null,
           authorContact: json.data.authorContact,
+          attachments: json.data.attachments ?? [],
         };
         onMessageSent(newMsg);
         setBody("");
+        setPendingFiles([]);
       }
     } catch {
       setError("ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่");
     } finally {
       setIsSubmitting(false);
+      setIsUploading(false);
     }
   }
 
@@ -184,6 +217,16 @@ function PortalReplyBox({ ticketId, isClosed, isSolved, onMessageSent }: PortalR
         className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground resize-none placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors hover:border-primary"
       />
 
+      {/* file picker + chips */}
+      <div className="mt-2">
+        <AttachmentPicker
+          files={pendingFiles}
+          onFilesChange={setPendingFiles}
+          onValidationError={setError}
+          isDisabled={isSubmitting}
+        />
+      </div>
+
       {error && (
         <div className="mt-2">
           <FormAlert variant="error" message={error} />
@@ -202,7 +245,7 @@ function PortalReplyBox({ ticketId, isClosed, isSolved, onMessageSent }: PortalR
           ) : (
             <Send size={14} aria-hidden="true" />
           )}
-          {isSubmitting ? "กำลังส่ง..." : "ส่งข้อความ"}
+          {isSubmitting ? (isUploading ? "กำลังอัปโหลด..." : "กำลังส่ง...") : "ส่งข้อความ"}
         </button>
       </div>
     </div>

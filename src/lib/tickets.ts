@@ -25,6 +25,12 @@ import { prisma } from "@/lib/prisma";
 import type { TenantScopedPrisma } from "@/lib/tenant";
 import { hasFeature, FEATURE_KEYS } from "@/lib/features";
 import { parseBusinessHours, computeDeadlines } from "@/lib/sla";
+import {
+  getObjectInfo,
+  isAllowedMimeType,
+  MAX_FILE_BYTES,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+} from "@/lib/storage";
 
 // =============================================================================
 // TYPES
@@ -60,6 +66,19 @@ export interface CreateTicketInput {
   };
 }
 
+/**
+ * attachment ที่ client อ้างถึงตอน create message
+ * - path = object path ที่ client upload ไปแล้ว (ผ่าน signed upload URL)
+ * - fileName มาจาก client ได้ (เป็น display name) แต่ fileSize/mimeType จะถูก
+ *   overwrite ด้วยค่า authoritative จาก storage (ห้ามเชื่อ client)
+ */
+export interface MessageAttachmentInput {
+  path: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+}
+
 export interface CreateMessageInput {
   tenantId: string;
   ticketId: string;
@@ -73,6 +92,8 @@ export interface CreateMessageInput {
   emailInReplyTo?: string;
   emailReferences?: string;
   emailSentAt?: Date;
+  /** attachment ที่แนบมากับ message (optional) — verify + atomic create พร้อม message */
+  attachments?: MessageAttachmentInput[];
 }
 
 // =============================================================================
@@ -303,6 +324,7 @@ export async function createTicketMessage(
     emailInReplyTo,
     emailReferences,
     emailSentAt,
+    attachments,
   } = input;
 
   // app layer constraint: exactly one author ต้องไม่ null
@@ -313,8 +335,74 @@ export async function createTicketMessage(
     throw new Error("TicketMessage มี author ได้แค่คนเดียว (member หรือ contact ไม่ใช่ทั้งคู่)");
   }
 
+  // ==========================================================================
+  // ATTACHMENTS: verify ก่อน create (security-critical)
+  //   1. จำกัดจำนวน ≤ MAX_ATTACHMENTS_PER_MESSAGE
+  //   2. path ต้องขึ้นต้นด้วย `{tenantId}/{ticketId}/` — กัน inject path ของ
+  //      tenant/ticket อื่น (cross-tenant / cross-ticket attachment)
+  //   3. getObjectInfo ยืนยันไฟล์มีจริงใน storage + ดึง size/mimeType ที่ authoritative
+  //      (ห้ามเชื่อค่าจาก client — client ปลอม size/mime ได้)
+  //   4. re-validate allowlist + size cap ด้วยค่า authoritative
+  // ==========================================================================
+  let verifiedAttachments: {
+    tenantId: string;
+    ticketId: string;
+    fileName: string;
+    fileSize: number;
+    mimeType: string;
+    storageUrl: string;
+  }[] = [];
+
+  if (attachments && attachments.length > 0) {
+    if (attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+      throw new Error(
+        `แนบไฟล์ได้สูงสุด ${MAX_ATTACHMENTS_PER_MESSAGE} ไฟล์ต่อข้อความ`
+      );
+    }
+
+    // path prefix ที่อนุญาต — ต้องเป็นของ tenant + ticket นี้เท่านั้น
+    const requiredPrefix = `${tenantId}/${ticketId}/`;
+
+    verifiedAttachments = await Promise.all(
+      attachments.map(async (att) => {
+        // path verification: กัน client อ้าง path ของ tenant/ticket อื่น
+        if (!att.path.startsWith(requiredPrefix)) {
+          throw new Error("attachment path ไม่ถูกต้อง (ไม่ตรง tenant/ticket)");
+        }
+
+        // ยืนยันไฟล์มีจริง + ดึง size/mime ที่ authoritative จาก storage
+        const info = await getObjectInfo(att.path);
+        if (!info) {
+          throw new Error("ไม่พบไฟล์ที่ upload (attachment ยังไม่ถูก upload)");
+        }
+
+        // re-validate ด้วยค่า authoritative (ไม่ใช่ค่าจาก client)
+        if (!isAllowedMimeType(info.mimeType)) {
+          throw new Error("ชนิดไฟล์ไม่รองรับ");
+        }
+        if (info.size > MAX_FILE_BYTES) {
+          throw new Error("ไฟล์มีขนาดใหญ่เกินกำหนด");
+        }
+
+        return {
+          tenantId,
+          ticketId,
+          // fileName เป็น display name จาก client (sanitized แล้วใน path) — ใช้แสดงผลเท่านั้น
+          fileName: att.fileName,
+          // ใช้ size/mime จาก storage (authoritative) ไม่ใช่จาก client
+          fileSize: info.size,
+          mimeType: info.mimeType,
+          // เก็บ object path (bucket private — gen signed URL ตอน download)
+          storageUrl: att.path,
+        };
+      })
+    );
+  }
+
   // tenantPrisma inject tenantId อัตโนมัติใน create แต่ TypeScript Prisma input type
   // ยังต้องการ tenantId อยู่ — ส่งตรง ๆ เพื่อ type safety (extension จะ overwrite ด้วยค่าที่ถูกต้อง)
+  // nested attachments.create: extension ไม่ inject tenantId ใน nested write
+  // จึงใส่ tenantId + ticketId scalar เองทุก row (atomic กับ message)
   const message = await db.ticketMessage.create({
     data: {
       tenantId,
@@ -328,6 +416,10 @@ export async function createTicketMessage(
       emailInReplyTo: emailInReplyTo ?? null,
       emailReferences: emailReferences ?? null,
       emailSentAt: emailSentAt ?? null,
+      // atomic: สร้าง Attachment rows พร้อม message (nested write)
+      ...(verifiedAttachments.length > 0
+        ? { attachments: { create: verifiedAttachments } }
+        : {}),
     },
     include: {
       authorMember: {
@@ -335,6 +427,16 @@ export async function createTicketMessage(
       },
       authorContact: {
         select: { id: true, name: true, email: true, avatarUrl: true },
+      },
+      // attachment metadata — ห้าม return storageUrl/path (client เรียก download endpoint ด้วย id)
+      attachments: {
+        select: {
+          id: true,
+          fileName: true,
+          fileSize: true,
+          mimeType: true,
+          createdAt: true,
+        },
       },
     },
   });
