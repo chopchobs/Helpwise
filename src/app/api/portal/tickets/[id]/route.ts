@@ -88,14 +88,23 @@ export async function GET(
                 user: { select: { name: true, avatarUrl: true } },
               },
             },
+            // INTERNAL NOTE ISOLATION: message ถูกกรอง visibility=PUBLIC ที่ where ด้านบนแล้ว
+            // → attachments ที่ได้จึงเป็นของ PUBLIC message เท่านั้น (INTERNAL ไม่หลุด)
+            // ห้าม return storageUrl/path — client เรียก download endpoint (portal) ด้วย id
+            attachments: {
+              select: {
+                id: true,
+                fileName: true,
+                fileSize: true,
+                mimeType: true,
+                createdAt: true,
+              },
+            },
           },
         },
-        _count: {
-          select: {
-            // นับเฉพาะ PUBLIC — contact ไม่ควรรู้ว่ามี INTERNAL note กี่อัน
-            attachments: true,
-          },
-        },
+        // ❌ ไม่ select _count.attachments — Prisma นับ attachment ทุก message (รวม INTERNAL)
+        //    ไม่กรอง visibility ได้ → existence leak ของ internal attachment ฝั่ง contact
+        //    ถ้าต้องการ count ให้ derive จาก messages[].attachments ที่กรอง PUBLIC แล้ว
         // CSAT: โหลด response ที่มีอยู่ (one-to-one optional)
         // tenant-scoped ผ่าน tenantPrisma; own-records scope ผ่าน ticket ownership ด้านบน
         csat: {

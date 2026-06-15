@@ -27,11 +27,15 @@ import PriorityBadge from "@/components/ui/PriorityBadge";
 import SlaBadge from "@/components/ui/SlaBadge";
 import CsatStars from "@/components/ui/CsatStars";
 import FormAlert from "@/components/ui/FormAlert";
+import AttachmentPicker from "@/components/ui/AttachmentPicker";
+import AttachmentList from "@/components/ui/AttachmentList";
+import { uploadAttachment } from "@/lib/attachment-upload";
 import {
   formatDateFull,
   getAuthorName,
   isAgentMessage,
 } from "@/lib/ticket-ui";
+import type { MessageAttachmentInput } from "@/types/attachment";
 import type {
   AgentTicketDetail,
   AgentTicketDetailResponse,
@@ -104,6 +108,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
         <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
           {message.body}
         </p>
+        <AttachmentList attachments={message.attachments} downloadEndpointBase="/api/attachments" />
         <div className="flex items-center gap-2 mt-1">
           <span className="text-xs text-secondary">โดย {authorName}</span>
           <span className="text-xs text-secondary">·</span>
@@ -126,6 +131,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
         <div className="max-w-[80%] bg-primary-strong text-white rounded-2xl rounded-tr-md px-4 py-3 shadow-sm">
           <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.body}</p>
         </div>
+        <AttachmentList attachments={message.attachments} downloadEndpointBase="/api/attachments" />
         <div className="flex items-center gap-2">
           <span className="text-xs text-secondary">{authorName}</span>
           <span className="text-xs text-secondary">·</span>
@@ -150,6 +156,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
         <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
           {message.body}
         </p>
+        <AttachmentList attachments={message.attachments} downloadEndpointBase="/api/attachments" />
       </div>
       <time className="text-xs text-secondary ml-8" dateTime={message.createdAt}>
         {formatDateFull(message.createdAt)}
@@ -282,6 +289,8 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   /** แทรกเนื้อหา canned response ลง textarea — ต่อท้ายด้วย newline ถ้ามีข้อความอยู่แล้ว */
@@ -301,11 +310,33 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
     setError(null);
 
     try {
+      // ─── upload ไฟล์แนบทั้งหมดก่อน (sign → PUT) ────────────────────────────
+      let attachments: MessageAttachmentInput[] = [];
+      if (pendingFiles.length > 0) {
+        setIsUploading(true);
+        const results = await Promise.all(
+          pendingFiles.map((file) =>
+            uploadAttachment(file, `/api/tickets/${ticketId}/attachments/sign`)
+          )
+        );
+        setIsUploading(false);
+
+        const failed = results.filter((r) => r.errorMessage);
+        if (failed.length > 0) {
+          setError(failed.map((r) => r.errorMessage).join(" / "));
+          return;
+        }
+
+        attachments = results
+          .map((r) => r.attachment)
+          .filter((a): a is MessageAttachmentInput => a !== null);
+      }
+
       const res = await fetch(`/api/tickets/${ticketId}/messages`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: trimmed, visibility }),
+        body: JSON.stringify({ body: trimmed, visibility, attachments }),
       });
 
       const json = (await res.json()) as AgentPostMessageResponse;
@@ -318,11 +349,13 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
       if (json.data) {
         onMessageSent(json.data);
         setBody("");
+        setPendingFiles([]);
       }
     } catch {
       setError("ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่");
     } finally {
       setIsSubmitting(false);
+      setIsUploading(false);
     }
   }
 
@@ -409,6 +442,16 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
         ].join(" ")}
       />
 
+      {/* file picker + chips */}
+      <div className="mt-2">
+        <AttachmentPicker
+          files={pendingFiles}
+          onFilesChange={setPendingFiles}
+          onValidationError={setError}
+          isDisabled={isSubmitting}
+        />
+      </div>
+
       {error && (
         <div className="mt-2">
           <FormAlert variant="error" message={error} />
@@ -460,7 +503,13 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
           ) : (
             <Send size={14} aria-hidden="true" />
           )}
-          {isSubmitting ? "กำลังส่ง..." : isInternal ? "บันทึก Note" : "ส่งข้อความ"}
+          {isSubmitting
+            ? isUploading
+              ? "กำลังอัปโหลด..."
+              : "กำลังส่ง..."
+            : isInternal
+              ? "บันทึก Note"
+              : "ส่งข้อความ"}
         </button>
       </div>
     </div>

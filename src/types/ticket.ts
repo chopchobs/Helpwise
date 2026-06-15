@@ -4,6 +4,7 @@
  */
 
 import type { CsatResponseDTO, PortalCsatState } from "@/types/csat";
+import type { AttachmentDTO } from "@/types/attachment";
 
 // =============================================================================
 // ENUMS (string union เพื่อให้ใช้กับ Tailwind arbitrary values ง่าย)
@@ -84,6 +85,8 @@ export interface AgentTicketMessage {
   createdAt: string;
   authorMember: AgentAuthor | null;
   authorContact: ContactAuthor | null;
+  /** ไฟล์แนบของ message นี้ (agent เห็นได้ทุก visibility) */
+  attachments: AttachmentDTO[];
 }
 
 /**
@@ -196,6 +199,8 @@ export interface PortalTicketMessage {
   createdAt: string;
   authorMember: AgentAuthor | null;
   authorContact: ContactAuthor | null;
+  /** ไฟล์แนบของ message นี้ (portal เห็นเฉพาะ attachment ของ PUBLIC message) */
+  attachments: AttachmentDTO[];
 }
 
 /** Assignee ที่ portal เห็นได้ (ชื่อ + avatar เท่านั้น) */
@@ -262,6 +267,7 @@ export interface PortalPostMessageResponse {
     body: string;
     createdAt: string;
     authorContact: ContactAuthor | null;
+    attachments: AttachmentDTO[];
   } | null;
   error: ApiError | null;
 }

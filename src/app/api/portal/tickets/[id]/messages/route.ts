@@ -28,10 +28,21 @@ import { createTicketMessage } from "@/lib/tickets";
 // VALIDATION SCHEMA
 // =============================================================================
 
+// attachment ที่ contact อ้างถึง (upload แล้วผ่าน signed URL)
+// fileSize/mimeType เป็น hint — backend re-verify ด้วยค่า authoritative จาก storage
+const portalAttachmentInputSchema = z.object({
+  path: z.string().min(1),
+  fileName: z.string().min(1).max(255),
+  mimeType: z.string().min(1),
+  fileSize: z.number().int().positive(),
+});
+
 const createPortalMessageSchema = z.object({
   body: z.string().min(1, "body ห้ามว่าง").max(50000, "body ยาวเกิน 50,000 ตัวอักษร"),
   // ห้ามรับ visibility จาก body — บังคับ PUBLIC เสมอ (INTERNAL NOTE ISOLATION)
   // ไม่มี field visibility ใน schema เลย เพื่อป้องกัน bypass
+  // attachments แนบได้ — visibility ของ message ยังบังคับ PUBLIC เสมอ
+  attachments: z.array(portalAttachmentInputSchema).max(10).optional(),
 });
 
 // =============================================================================
@@ -76,7 +87,7 @@ export async function POST(
       );
     }
 
-    const { body: messageBody } = parsed.data;
+    const { body: messageBody, attachments } = parsed.data;
 
     // 3. OWN-RECORDS SCOPE: ดึง ticket + verify ownership ก่อนทำอะไรทั้งนั้น
     //    tenantPrisma inject tenantId (layer 1)
@@ -118,6 +129,8 @@ export async function POST(
       body: messageBody,
       visibility: MessageVisibility.PUBLIC, // INTERNAL NOTE ISOLATION: hardcode PUBLIC เสมอ
       authorContactId: contact.id,          // OWN-RECORDS: ใช้ contact.id จาก session เสมอ
+      // attachments verify (path prefix ของ ticket นี้ + authoritative size/mime) ใน createTicketMessage
+      attachments,
     });
 
     // 5. Reopen ticket ถ้า contact reply มา (business logic)
@@ -162,6 +175,14 @@ export async function POST(
             name: contact.name ?? null,
             avatarUrl: contact.avatarUrl ?? null,
           },
+          // attachment metadata (ไม่ return storageUrl/path) — client เรียก download endpoint ด้วย id
+          attachments: message.attachments.map((a) => ({
+            id: a.id,
+            fileName: a.fileName,
+            fileSize: a.fileSize,
+            mimeType: a.mimeType,
+            createdAt: a.createdAt,
+          })),
         },
         error: null,
       },

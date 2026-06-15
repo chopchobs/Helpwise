@@ -33,10 +33,21 @@ import { sendEmail } from "@/lib/email";
 // VALIDATION SCHEMA
 // =============================================================================
 
+// attachment ที่ client อ้างถึง (upload แล้วผ่าน signed URL)
+// fileSize/mimeType ที่ส่งมาเป็น hint — backend re-verify ด้วยค่า authoritative จาก storage
+const attachmentInputSchema = z.object({
+  path: z.string().min(1),
+  fileName: z.string().min(1).max(255),
+  mimeType: z.string().min(1),
+  fileSize: z.number().int().positive(),
+});
+
 const createMessageSchema = z.object({
   body: z.string().min(1, "body ห้ามว่าง").max(50000, "body ยาวเกิน 50,000 ตัวอักษร"),
   // agent สามารถเลือก visibility ได้ (PUBLIC หรือ INTERNAL)
   visibility: z.enum(["PUBLIC", "INTERNAL"]).default("PUBLIC"),
+  // attachment ที่แนบ (optional) — verify ตอน createTicketMessage
+  attachments: z.array(attachmentInputSchema).max(10).optional(),
 });
 
 // =============================================================================
@@ -124,7 +135,7 @@ export async function POST(
       );
     }
 
-    const { body: messageBody, visibility } = parsed.data;
+    const { body: messageBody, visibility, attachments } = parsed.data;
 
     // 3. ดึง ticket ปัจจุบัน — tenantPrisma inject tenantId อัตโนมัติ
     // ดึง fields สำหรับ business logic + outbound email threading
@@ -215,6 +226,8 @@ export async function POST(
       emailInReplyTo: outboundInReplyTo,
       emailReferences: outboundReferences,
       // emailSentAt = null ก่อนส่ง — set หลังส่งสำเร็จ
+      // attachments verify (path prefix + authoritative size/mime) ใน createTicketMessage
+      attachments,
     });
 
     // 6. ตรวจสอบและ update ticket state ตาม business logic
