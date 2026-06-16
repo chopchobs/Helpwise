@@ -23,6 +23,7 @@ import {
   Palette,
   KeyRound,
   MessageSquareText,
+  Tags,
 } from "lucide-react";
 import type {
   MeResponse,
@@ -206,6 +207,14 @@ function SidebarNav({ session, pathname }: SidebarNavProps) {
             ตั้งค่า
           </p>
           <ul className="flex flex-col gap-1" role="list">
+            <li>
+              <NavLink
+                href="/settings/tags"
+                icon={<Tags size={18} />}
+                label="Tags"
+                isActive={pathname.startsWith("/settings/tags")}
+              />
+            </li>
             <li>
               <NavLink
                 href="/settings/billing"

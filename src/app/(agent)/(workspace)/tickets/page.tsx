@@ -14,6 +14,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import PriorityBadge from "@/components/ui/PriorityBadge";
 import SlaBadge from "@/components/ui/SlaBadge";
 import CsatStars from "@/components/ui/CsatStars";
+import TagChip from "@/components/ui/TagChip";
 import FormAlert from "@/components/ui/FormAlert";
 import { formatDate } from "@/lib/ticket-ui";
 import type {
@@ -22,6 +23,7 @@ import type {
   TicketStatus,
   TicketPriority,
 } from "@/types/ticket";
+import type { TagDTO, TagListResponse } from "@/types/tag";
 
 // =============================================================================
 // TYPES
@@ -30,6 +32,8 @@ import type {
 interface FilterState {
   status: TicketStatus | "";
   priority: TicketPriority | "";
+  // filter ตาม tag (match-any) — array ของ tagId ที่เลือก
+  tagIds: string[];
   page: number;
 }
 
@@ -87,6 +91,14 @@ function TicketRow({ ticket }: TicketRowProps) {
         >
           {ticket.subject}
         </Link>
+        {/* tag chips (agent-only) — แสดงใต้หัวข้อถ้ามี */}
+        {ticket.tags.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {ticket.tags.map((tag) => (
+              <TagChip key={tag.id} tag={tag} />
+            ))}
+          </div>
+        )}
       </td>
       <td className="px-4 py-3">
         <StatusBadge status={ticket.status} />
@@ -165,9 +177,13 @@ export default function AgentTicketListPage() {
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
+  // tag catalog ของ tenant — โหลดครั้งเดียวสำหรับ filter chips
+  const [tagCatalog, setTagCatalog] = useState<TagDTO[]>([]);
+
   const [filters, setFilters] = useState<FilterState>({
     status: "",
     priority: "",
+    tagIds: [],
     page: 1,
   });
 
@@ -179,6 +195,8 @@ export default function AgentTicketListPage() {
       const params = new URLSearchParams();
       if (f.status) params.set("status", f.status);
       if (f.priority) params.set("priority", f.priority);
+      // tag filter (match-any) — append หลายค่า
+      for (const tagId of f.tagIds) params.append("tagId", tagId);
       params.set("page", String(f.page));
       params.set("limit", String(LIMIT));
 
@@ -215,12 +233,39 @@ export default function AgentTicketListPage() {
     startTransition(() => { void fetchTickets(filters); });
   }, [filters, fetchTickets]);
 
+  // โหลด tag catalog ครั้งเดียวตอน mount (สำหรับ filter chips)
+  // wrap queueMicrotask กัน setState synchronous ใน effect (react-hooks/set-state-in-effect)
+  useEffect(() => {
+    queueMicrotask(() => {
+      void (async () => {
+        try {
+          const res = await fetch("/api/tags", { credentials: "include" });
+          const json = (await res.json()) as TagListResponse;
+          if (res.ok && json.data) setTagCatalog(json.data.tags);
+        } catch {
+          // ไม่ critical — filter chips แค่ไม่แสดง ถ้าโหลดไม่ได้
+        }
+      })();
+    });
+  }, []);
+
   function handleStatusChange(value: TicketStatus | "") {
     setFilters((prev) => ({ ...prev, status: value, page: 1 }));
   }
 
   function handlePriorityChange(value: TicketPriority | "") {
     setFilters((prev) => ({ ...prev, priority: value, page: 1 }));
+  }
+
+  // toggle tagId ใน filter (เลือก/ยกเลิก) — reset page เป็น 1
+  function handleTagToggle(tagId: string) {
+    setFilters((prev) => ({
+      ...prev,
+      tagIds: prev.tagIds.includes(tagId)
+        ? prev.tagIds.filter((id) => id !== tagId)
+        : [...prev.tagIds, tagId],
+      page: 1,
+    }));
   }
 
   function handlePageChange(page: number) {
@@ -301,6 +346,41 @@ export default function AgentTicketListPage() {
             </select>
           </div>
         </div>
+
+        {/* Tag filter — toggle chips (match-any) แสดงเฉพาะถ้ามี tag ใน catalog */}
+        {tagCatalog.length > 0 && (
+          <div className="mb-4">
+            <span className="text-xs font-medium text-secondary">กรองตาม Tag</span>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {tagCatalog.map((tag) => {
+                const isSelected = filters.tagIds.includes(tag.id);
+                return (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    onClick={() => handleTagToggle(tag.id)}
+                    aria-pressed={isSelected}
+                    className={[
+                      "rounded-full transition-shadow focus:outline-none focus:ring-2 focus:ring-primary",
+                      isSelected ? "ring-2 ring-primary ring-offset-1" : "opacity-70 hover:opacity-100",
+                    ].join(" ")}
+                  >
+                    <TagChip tag={tag} />
+                  </button>
+                );
+              })}
+              {filters.tagIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFilters((prev) => ({ ...prev, tagIds: [], page: 1 }))}
+                  className="ml-1 text-xs text-primary-ink hover:underline focus:outline-none focus:underline"
+                >
+                  ล้าง
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Error state */}
         {error && (

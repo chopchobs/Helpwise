@@ -21,6 +21,8 @@ import {
   AlertTriangle,
   MessageSquareText,
   X,
+  Tag,
+  Plus,
 } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import PriorityBadge from "@/components/ui/PriorityBadge";
@@ -29,6 +31,7 @@ import CsatStars from "@/components/ui/CsatStars";
 import FormAlert from "@/components/ui/FormAlert";
 import AttachmentPicker from "@/components/ui/AttachmentPicker";
 import AttachmentList from "@/components/ui/AttachmentList";
+import TagChip from "@/components/ui/TagChip";
 import { uploadAttachment } from "@/lib/attachment-upload";
 import {
   formatDateFull,
@@ -55,6 +58,12 @@ import type {
   CannedResponseDTO,
   CannedResponseListResponse,
 } from "@/types/canned-response";
+import type {
+  TagDTO,
+  TagListResponse,
+  TicketTagAddResponse,
+  TicketTagRemoveResponse,
+} from "@/types/tag";
 
 // =============================================================================
 // CONSTANTS
@@ -659,6 +668,165 @@ function MergeDialog({ onConfirm, onCancel, isMerging, mergeError }: MergeDialog
 }
 
 // =============================================================================
+// TAG SECTION — แสดง + จัดการ tag ของ ticket (agent-only)
+//   - chips ปัจจุบัน + ปุ่มถอด (X) เมื่อ canEdit
+//   - picker popover: โหลด catalog (GET /api/tags) แล้ว apply (POST) tag ที่ยังไม่ติด
+// =============================================================================
+
+interface TagSectionProps {
+  ticketId: string;
+  initialTags: TagDTO[];
+  canEdit: boolean;
+}
+
+function TagSection({ ticketId, initialTags, canEdit }: TagSectionProps) {
+  const [tags, setTags] = useState<TagDTO[]>(initialTags);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [catalog, setCatalog] = useState<TagDTO[] | null>(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busyTagId, setBusyTagId] = useState<string | null>(null);
+
+  // โหลด catalog เมื่อเปิด picker ครั้งแรก (user action — ไม่ใช่ on-mount)
+  async function openPicker() {
+    setIsPickerOpen(true);
+    if (catalog !== null) return;
+    try {
+      const res = await fetch("/api/tags", { credentials: "include" });
+      const json = (await res.json()) as TagListResponse;
+      if (res.ok && json.data) setCatalog(json.data.tags);
+      else setCatalogError(json.error?.message ?? "โหลด tag ไม่สำเร็จ");
+    } catch {
+      setCatalogError("ไม่สามารถเชื่อมต่อได้");
+    }
+  }
+
+  async function applyTag(tag: TagDTO) {
+    if (busyTagId) return;
+    setBusyTagId(tag.id);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/tags`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tagId: tag.id }),
+      });
+      const json = (await res.json()) as TicketTagAddResponse;
+      if (res.ok && !json.error && json.data) {
+        // capture ก่อนเข้า setState (TypeScript narrow ไม่ทะลุ closure)
+        const addedTag = json.data.tag;
+        // idempotent — กันเพิ่มซ้ำใน local state
+        setTags((prev) => (prev.some((t) => t.id === addedTag.id) ? prev : [...prev, addedTag]));
+      } else {
+        setActionError(json.error?.message ?? "เพิ่ม tag ไม่สำเร็จ");
+      }
+    } catch {
+      setActionError("เพิ่ม tag ไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setBusyTagId(null);
+    }
+  }
+
+  async function removeTag(tagId: string) {
+    if (busyTagId) return;
+    setBusyTagId(tagId);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/tags/${tagId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const json = (await res.json()) as TicketTagRemoveResponse;
+      // ตรวจ res.ok + ไม่มี error (DELETE idempotent คืน data เสมอเมื่อสำเร็จ)
+      if (res.ok && !json.error) {
+        setTags((prev) => prev.filter((t) => t.id !== tagId));
+      } else {
+        setActionError(json.error?.message ?? "ถอด tag ไม่สำเร็จ");
+      }
+    } catch {
+      setActionError("ถอด tag ไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setBusyTagId(null);
+    }
+  }
+
+  // tag ใน catalog ที่ยังไม่ถูกติดบน ticket นี้
+  const available = (catalog ?? []).filter((c) => !tags.some((t) => t.id === c.id));
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mt-4 pt-4 border-t border-border">
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-secondary mr-1">
+        <Tag size={13} aria-hidden="true" />
+        Tags:
+      </span>
+
+      {tags.length === 0 && <span className="text-xs text-muted">ยังไม่มี tag</span>}
+
+      {tags.map((tag) => (
+        <TagChip
+          key={tag.id}
+          tag={tag}
+          onRemove={canEdit ? removeTag : undefined}
+          isRemoving={busyTagId === tag.id}
+        />
+      ))}
+
+      {canEdit && (
+        <div className="relative inline-block">
+          <button
+            type="button"
+            onClick={() => (isPickerOpen ? setIsPickerOpen(false) : void openPicker())}
+            aria-haspopup="menu"
+            aria-expanded={isPickerOpen}
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-secondary hover:bg-stone hover:text-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <Plus size={12} aria-hidden="true" />
+            เพิ่ม tag
+          </button>
+
+          {isPickerOpen && (
+            <>
+              {/* backdrop ปิด popover */}
+              <div className="fixed inset-0 z-10" aria-hidden="true" onClick={() => setIsPickerOpen(false)} />
+              <div className="absolute left-0 z-20 mt-1 w-56 rounded-xl border border-border bg-surface shadow-lg py-1 max-h-64 overflow-y-auto" role="menu">
+                {catalogError ? (
+                  <p className="px-3 py-2 text-xs text-danger">{catalogError}</p>
+                ) : catalog === null ? (
+                  <p className="px-3 py-2 text-xs text-secondary">กำลังโหลด...</p>
+                ) : available.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-muted">ไม่มี tag ให้เพิ่ม</p>
+                ) : (
+                  available.map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      role="menuitem"
+                      disabled={busyTagId === tag.id}
+                      onClick={() => void applyTag(tag)}
+                      className="w-full flex items-center px-3 py-1.5 hover:bg-stone focus:outline-none focus:bg-stone disabled:opacity-50 transition-colors"
+                    >
+                      <TagChip tag={tag} />
+                    </button>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* error ของ apply/remove — แสดง inline ไม่ block ทั้งหน้า */}
+      {actionError && (
+        <span className="w-full text-xs text-danger mt-1" role="alert">
+          {actionError}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
 // MAIN COMPONENT
 // =============================================================================
 
@@ -1105,6 +1273,16 @@ export default function AgentTicketDetailPage() {
               <FormAlert variant="error" message={patchError} />
             </div>
           )}
+
+          {/* Tags (agent-only) — แก้ไขได้ถ้า role ไม่ใช่ VIEWER และ ticket ยังไม่ถูก merge */}
+          <TagSection
+            ticketId={ticketId}
+            initialTags={ticket.tags}
+            canEdit={
+              (memberRole === "OWNER" || memberRole === "ADMIN" || memberRole === "AGENT") &&
+              ticket.mergedInto === null
+            }
+          />
         </div>
 
         {/* Message thread */}

@@ -110,6 +110,14 @@ export async function GET(
             createdAt: true,
           },
         },
+        // TAGS (agent-only): ห้าม include ใน portal route เด็ดขาด
+        ticketTags: {
+          select: {
+            tag: {
+              select: { id: true, name: true, color: true },
+            },
+          },
+        },
         // agent เห็นทุก visibility (PUBLIC + INTERNAL)
         messages: {
           orderBy: { createdAt: "asc" },
@@ -163,6 +171,13 @@ export async function GET(
         }
       : null;
 
+    // map ticketTags → tags: TagDTO[] (agent-only — ห้ามส่งใน portal response)
+    const tagsDTO = rawTicket.ticketTags.map((tt) => ({
+      id: tt.tag.id,
+      name: tt.tag.name,
+      color: tt.tag.color,
+    }));
+
     const ticket = {
       ...rawTicket,
       createdAt: rawTicket.createdAt.toISOString(),
@@ -175,6 +190,8 @@ export async function GET(
       firstResponseBreached: undefined,
       resolutionBreached: undefined,
       slaPausedAt: undefined,
+      // แทนที่ ticketTags ดิบด้วย tags DTO shape ที่ flatten แล้ว
+      ticketTags: undefined,
       sla: hasSla
         ? {
             firstResponseDueAt: rawTicket.firstResponseDueAt
@@ -198,6 +215,8 @@ export async function GET(
         : null,
       // CSAT: agent เห็น rating + comment ได้ (csat Date แปลงเป็น ISO แล้ว)
       csat: csatDTO,
+      // tags: agent-only — ห้ามส่งใน portal response
+      tags: tagsDTO,
     };
 
     return NextResponse.json({ data: ticket, error: null }, { status: 200 });
