@@ -31,6 +31,18 @@ const listQuerySchema = z.object({
   status: z.nativeEnum(TicketStatus).optional(),
   priority: z.nativeEnum(TicketPriority).optional(),
   assigneeId: z.string().optional(),
+  // tagId รองรับหลายค่า (match-any) — ส่งได้เป็น ?tagId=x&tagId=y หรือ ?tagId=x,y
+  tagId: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((v) => {
+      if (!v) return undefined;
+      // รองรับทั้ง ?tagId=a,b (comma-separated) และ ?tagId=a&tagId=b (multi-value)
+      // flatMap split comma ทุก element — กันเคส array ที่ element มี comma (เช่น ["a,b"])
+      const arr = Array.isArray(v) ? v : [v];
+      const filtered = arr.flatMap((s) => s.split(",")).map((s) => s.trim()).filter(Boolean);
+      return filtered.length > 0 ? filtered : undefined;
+    }),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -79,10 +91,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     // 2. Parse query string
     const { searchParams } = request.nextUrl;
+    // tagId รองรับ multi-value: ?tagId=a&tagId=b หรือ ?tagId=a,b
+    const rawTagIds = searchParams.getAll("tagId");
+    const tagIdParam = rawTagIds.length > 0 ? rawTagIds : (searchParams.get("tagId") ?? undefined);
+
     const queryParsed = listQuerySchema.safeParse({
       status: searchParams.get("status") ?? undefined,
       priority: searchParams.get("priority") ?? undefined,
       assigneeId: searchParams.get("assigneeId") ?? undefined,
+      tagId: tagIdParam,
       page: searchParams.get("page") ?? 1,
       limit: searchParams.get("limit") ?? 20,
     });
@@ -100,7 +117,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const { status, priority, assigneeId, page, limit } = queryParsed.data;
+    const { status, priority, assigneeId, tagId, page, limit } = queryParsed.data;
 
     // 3. สร้าง where clause — tenantPrisma inject tenantId อัตโนมัติ
     const db = tenantPrisma(ctx.tenantId);
@@ -111,6 +128,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (status) where.status = status;
     if (priority) where.priority = priority;
     if (assigneeId) where.assigneeId = assigneeId;
+    // filter by tag — match-any: ticket ที่มี tag ใดใดใน list (tenantPrisma scope กัน cross-tenant)
+    if (tagId && tagId.length > 0) {
+      where.ticketTags = { some: { tagId: { in: tagId } } };
+    }
 
     // 4. Query tickets พร้อม pagination + relations
     const [rawTickets, total] = await Promise.all([
@@ -156,6 +177,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
               createdAt: true,
             },
           },
+          // TAGS (agent-only): ห้าม include ใน portal route เด็ดขาด
+          ticketTags: {
+            select: {
+              tag: {
+                select: { id: true, name: true, color: true },
+              },
+            },
+          },
         },
       }),
       db.ticket.count({ where }),
@@ -175,6 +204,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             createdAt: t.csat.createdAt.toISOString(),
           }
         : null;
+
+      // map ticketTags → tags: TagDTO[] (agent-only)
+      const tags = t.ticketTags.map((tt) => ({
+        id: tt.tag.id,
+        name: tt.tag.name,
+        color: tt.tag.color,
+      }));
 
       return {
         id: t.id,
@@ -209,6 +245,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             }
           : null,
         csat: csatDTO,
+        // tags: agent-only — ห้ามส่งใน portal response
+        tags,
       };
     });
 

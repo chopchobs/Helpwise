@@ -69,6 +69,16 @@ enum SubscriptionStatus {
   UNPAID
 }
 
+// สีของ tag — preset palette (map ไป semantic token ฝั่ง frontend, ไม่เก็บ hex)
+enum TagColor {
+  GRAY
+  TERRACOTTA
+  SAGE
+  AMBER
+  SIENNA
+  SAND
+}
+
 // =============================================================================
 // GLOBAL MODELS (ไม่ใช่ tenant-scoped — ไม่มี tenantId)
 // =============================================================================
@@ -168,6 +178,8 @@ model Tenant {
   csatResponses   CsatResponse[]
   apiKeys         ApiKey[]
   cannedResponses CannedResponse[]
+  tags            Tag[]
+  ticketTags      TicketTag[]
 
   @@index([slug])
 }
@@ -342,6 +354,7 @@ model Ticket {
   auditLogs   AuditLog[]
   // one-to-one optional: inverse ของ CsatResponse.ticketId @unique
   csat        CsatResponse?
+  ticketTags  TicketTag[]
 
   // composite unique: ticketNumber unique ต่อ tenant
   @@unique([tenantId, ticketNumber])
@@ -601,6 +614,41 @@ model ApiKey {
   updatedAt DateTime @updatedAt
 
   @@index([tenantId])
+}
+
+// Tag — label จัดหมวด ticket ภายใน (agent-only, ไม่โชว์ portal)
+// catalog ต่อ tenant — name unique ต่อ tenant
+model Tag {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  color     TagColor @default(GRAY)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ticketTags TicketTag[]
+
+  @@unique([tenantId, name]) // tag name ห้ามซ้ำใน tenant เดียวกัน
+  @@index([tenantId])
+}
+
+// TicketTag — explicit join (ticket m-n tag) พร้อม tenantId เพื่อ tenant-scope/RLS
+// ใช้ explicit model แทน implicit many-to-many เพื่อให้ join table มี tenantId
+model TicketTag {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([ticketId, tagId]) // กัน tag ซ้ำบน ticket เดียว
+  @@index([tenantId])
+  @@index([ticketId])
+  @@index([tagId])
 }
 
 // CannedResponse — ข้อความตอบสำเร็จรูป tenant-scoped สำหรับ agent (Phase 23, v1 ไม่มี placeholder)

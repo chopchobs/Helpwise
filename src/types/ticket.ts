@@ -5,6 +5,8 @@
 
 import type { CsatResponseDTO, PortalCsatState } from "@/types/csat";
 import type { AttachmentDTO } from "@/types/attachment";
+// TagDTO เป็น agent-only — ห้าม import ใช้ในส่วน portal types
+import type { TagDTO } from "@/types/tag";
 
 // =============================================================================
 // ENUMS (string union เพื่อให้ใช้กับ Tailwind arbitrary values ง่าย)
@@ -128,6 +130,11 @@ export interface AgentTicketSummary {
    * agent เห็นคะแนนได้ แต่ portal จะเห็นผ่าน PortalCsatState แทน
    */
   csat: CsatResponseDTO | null;
+  /**
+   * Tags ที่ติด ticket นี้ — agent-only เท่านั้น
+   * ห้าม expose ผ่าน portal (label ชื่อ 'VIP'/'refund-risk' ฯลฯ คือข้อมูลภายใน)
+   */
+  tags: TagDTO[];
 }
 
 /** Ticket detail ฝั่ง agent — มี messages array */
