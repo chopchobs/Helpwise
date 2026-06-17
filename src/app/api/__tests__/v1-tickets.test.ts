@@ -59,6 +59,8 @@ const {
 vi.mock("@/lib/tenant", () => ({
   getTenantContext: (...args: unknown[]) => getTenantContextMock(...args),
   tenantPrisma: () => fakeDb,
+  // Phase 27 RLS: route เรียก setTenantGuc ใน tx — mock เป็น no-op (พฤติกรรมเดียวกับ RLS ปิด)
+  setTenantGuc: vi.fn(async () => {}),
 }));
 
 vi.mock("@/lib/features", () => ({
@@ -300,6 +302,8 @@ describe("POST /api/v1/tickets", () => {
   it("requesterEmail (ไม่มี contactId) → upsert contact ผ่าน $transaction แล้วสร้าง ticket", async () => {
     prismaTransactionMock.mockImplementation(async (cb: (tx: unknown) => unknown) => {
       const tx = {
+        // Phase 27 RLS: route ตั้ง tenant GUC ผ่าน tx.$executeRaw ก่อน upsert
+        $executeRaw: vi.fn().mockResolvedValue(1),
         contact: {
           findFirst: vi.fn().mockResolvedValue(null),
           upsert: vi.fn().mockResolvedValue({ id: "contact-new", name: null, email: "new@b.com" }),

@@ -24,7 +24,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAgent, toAuthErrorResponse } from "@/lib/auth";
-import { tenantPrisma } from "@/lib/tenant";
+import { tenantPrisma, setTenantGuc } from "@/lib/tenant";
 import { audit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { MessageVisibility, TicketStatus } from "@prisma/client";
@@ -166,6 +166,8 @@ export async function POST(
     // ⚠️ ใน $transaction ใช้ base prisma (tenantPrisma ไม่ compose กับ $transaction)
     // ต้องใส่ tenantId เองทุก where/data
     await prisma.$transaction(async (tx) => {
+      // Phase 27 RLS: ตั้ง tenant GUC ใน tx นี้ (Ticket/TicketMessage/Attachment ถูก FORCE RLS)
+      await setTenantGuc(tx, ctx.tenantId);
       // 6.1 re-parent messages → target
       await tx.ticketMessage.updateMany({
         where: { tenantId: ctx.tenantId, ticketId: source.id },

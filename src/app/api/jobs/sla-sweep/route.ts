@@ -40,6 +40,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { setRlsBypass } from "@/lib/tenant";
 import { TicketStatus } from "@prisma/client";
 
 // =============================================================================
@@ -139,47 +140,60 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     //
     // หมายเหตุ: ใช้ prisma โดยตรง (ไม่ใช่ tenantPrisma) — intentional cross-tenant system job
     // ใช้ index บน firstResponseDueAt สำหรับ performance
-    const firstResponseResult = await prisma.ticket.updateMany({
-      where: {
-        firstResponseBreached: false,
-        firstRespondedAt: null,
-        firstResponseDueAt: { not: null, lt: now },
-        // exclude terminal statuses
-        status: {
-          notIn: [TicketStatus.PENDING, TicketStatus.SOLVED, TicketStatus.CLOSED],
-        },
-        // exclude tickets ที่กำลัง pause อยู่ (รวมถึง PENDING ที่ slaPausedAt ถูก set)
-        slaPausedAt: null,
-      },
-      data: {
-        firstResponseBreached: true,
-      },
-    });
+    //
+    // Phase 27 RLS: Ticket ถูก FORCE RLS — job นี้ต้องทำงาน cross-tenant โดยเจตนา
+    // จึงเปิด app.rls_bypass แบบ transaction-local (ไม่ใช่ session-level เพราะ
+    // runtime ต่อผ่าน pgbouncer transaction-pooling) ครอบทั้ง 2 updateMany ใน tx เดียว
+    const { firstResponseResult, resolutionResult } = await prisma.$transaction(
+      async (tx) => {
+        // system job ทำงาน cross-tenant โดยเจตนา — เปิด rls_bypass แบบ transaction-local เท่านั้น
+        await setRlsBypass(tx);
 
-    // 3. Flag resolution breaches
-    //
-    // Exclude:
-    //   - status SOLVED/CLOSED: resolve แล้ว
-    //   - slaPausedAt != null: กำลัง pause อยู่
-    //     (เมื่อ status = PENDING → slaPausedAt ถูก set ที่ PATCH route → ถูก exclude ด้วย slaPausedAt: null)
-    //
-    // ใช้ index บน resolutionDueAt
-    const resolutionResult = await prisma.ticket.updateMany({
-      where: {
-        resolutionBreached: false,
-        resolvedAt: null,
-        resolutionDueAt: { not: null, lt: now },
-        // exclude terminal statuses
-        status: {
-          notIn: [TicketStatus.SOLVED, TicketStatus.CLOSED],
-        },
-        // exclude tickets ที่กำลัง pause อยู่
-        slaPausedAt: null,
-      },
-      data: {
-        resolutionBreached: true,
-      },
-    });
+        const firstResponseResult = await tx.ticket.updateMany({
+          where: {
+            firstResponseBreached: false,
+            firstRespondedAt: null,
+            firstResponseDueAt: { not: null, lt: now },
+            // exclude terminal statuses
+            status: {
+              notIn: [TicketStatus.PENDING, TicketStatus.SOLVED, TicketStatus.CLOSED],
+            },
+            // exclude tickets ที่กำลัง pause อยู่ (รวมถึง PENDING ที่ slaPausedAt ถูก set)
+            slaPausedAt: null,
+          },
+          data: {
+            firstResponseBreached: true,
+          },
+        });
+
+        // 3. Flag resolution breaches
+        //
+        // Exclude:
+        //   - status SOLVED/CLOSED: resolve แล้ว
+        //   - slaPausedAt != null: กำลัง pause อยู่
+        //     (เมื่อ status = PENDING → slaPausedAt ถูก set ที่ PATCH route → ถูก exclude ด้วย slaPausedAt: null)
+        //
+        // ใช้ index บน resolutionDueAt
+        const resolutionResult = await tx.ticket.updateMany({
+          where: {
+            resolutionBreached: false,
+            resolvedAt: null,
+            resolutionDueAt: { not: null, lt: now },
+            // exclude terminal statuses
+            status: {
+              notIn: [TicketStatus.SOLVED, TicketStatus.CLOSED],
+            },
+            // exclude tickets ที่กำลัง pause อยู่
+            slaPausedAt: null,
+          },
+          data: {
+            resolutionBreached: true,
+          },
+        });
+
+        return { firstResponseResult, resolutionResult };
+      }
+    );
 
     const firstResponseBreached = firstResponseResult.count;
     const resolutionBreached = resolutionResult.count;

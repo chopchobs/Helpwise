@@ -33,6 +33,8 @@ const {
   };
 
   const txMock = {
+    // Phase 27 RLS: merge route ตั้ง tenant GUC ผ่าน tx.$executeRaw ก่อน mutate
+    $executeRaw: vi.fn().mockResolvedValue(1),
     ticketMessage: { updateMany: vi.fn(), create: vi.fn() },
     attachment: { updateMany: vi.fn() },
     ticket: { update: vi.fn() },
@@ -60,6 +62,8 @@ vi.mock("@/lib/auth", async () => {
 
 vi.mock("@/lib/tenant", () => ({
   tenantPrisma: () => fakeDb,
+  // Phase 27 RLS: merge route เรียก setTenantGuc ใน tx — mock เป็น no-op
+  setTenantGuc: vi.fn(async () => {}),
 }));
 
 vi.mock("@/lib/prisma", () => ({
