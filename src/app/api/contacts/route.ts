@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAgent, toAuthErrorResponse } from "@/lib/auth";
-import { tenantPrisma } from "@/lib/tenant";
+import { tenantPrisma, setTenantGuc } from "@/lib/tenant";
 import { audit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 
@@ -145,6 +145,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     //    กัน race condition ที่ request 2 อันส่ง email เดิมพร้อมกัน — isNew และ name-update logic จะถูกต้องเสมอ
     //    tx ไม่มี extension → ต้องใส่ tenantId เองใน where/create/update ทุกจุด
     const { contact, isNew } = await prisma.$transaction(async (tx) => {
+      // Phase 27 RLS: ตั้ง tenant GUC ใน tx นี้ (Contact ถูก FORCE RLS) — base prisma ไม่ผ่าน tenantPrisma
+      await setTenantGuc(tx, ctx.tenantId);
       // อ่าน contact ปัจจุบัน ภายใน transaction เดียวกับ upsert
       const existing = await tx.contact.findFirst({
         where: { tenantId: ctx.tenantId, email },

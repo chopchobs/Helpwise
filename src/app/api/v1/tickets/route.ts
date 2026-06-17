@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { toAuthErrorResponse } from "@/lib/auth";
 import { requireApiKey } from "@/lib/api-auth";
-import { tenantPrisma } from "@/lib/tenant";
+import { tenantPrisma, setTenantGuc } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/lib/audit";
 import { checkRateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
@@ -230,6 +230,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     } else {
       // upsert contact by email ภายใน transaction (base prisma + scalar tenantId)
       const upserted = await prisma.$transaction(async (tx) => {
+        // Phase 27 RLS: ตั้ง tenant GUC ใน tx นี้ (Contact ถูก FORCE RLS) — base prisma ไม่ผ่าน tenantPrisma
+        await setTenantGuc(tx, ctx.tenantId);
         const existingContact = await tx.contact.findFirst({
           where: { tenantId: ctx.tenantId, email: requesterEmail! },
           select: { id: true, name: true },

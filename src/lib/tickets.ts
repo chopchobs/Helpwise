@@ -22,7 +22,7 @@
 
 import { TicketStatus, TicketPriority, MessageVisibility } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import type { TenantScopedPrisma } from "@/lib/tenant";
+import { setTenantGuc, type TenantScopedPrisma } from "@/lib/tenant";
 import { hasFeature, FEATURE_KEYS } from "@/lib/features";
 import { parseBusinessHours, computeDeadlines } from "@/lib/sla";
 import {
@@ -190,6 +190,11 @@ export async function createTicketWithNumber(
   // ใช้ prisma (ไม่ใช่ db) สำหรับ interactive transaction เพราะ tx client ไม่มี extension
   // แต่ inject tenantId เองทุกที่เพื่อ guarantee tenant isolation
   const result = await prisma.$transaction(async (tx) => {
+    // Phase 27 RLS: Ticket/TicketMessage ถูก FORCE RLS — ต้องตั้ง tenant GUC แบบ
+    // transaction-local (pgbouncer-safe) ก่อน query ใด ๆ ใน tx นี้ ไม่งั้น RLS policy
+    // จะ block การ insert/update ของ tx เอง
+    await setTenantGuc(tx, tenantId);
+
     // atomic increment ticketCounter ของ tenant นี้ — row lock บน Tenant row
     // serialize การสร้าง ticket พร้อมกันของ tenant เดียวกัน → ได้เลข unique โดยไม่ต้อง retry
     const counter = await tx.tenant.update({
