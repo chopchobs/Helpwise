@@ -40,20 +40,32 @@ export interface SendEmailJob {
 /** path ของ worker route ที่ QStash จะยิง POST เข้ามา */
 const SEND_EMAIL_WORKER_PATH = "/api/jobs/send-email";
 
+/** path ของ SLA sweep job ที่ QStash schedule จะยิง POST เข้ามา (Slice 3) */
+export const SLA_SWEEP_WORKER_PATH = "/api/jobs/sla-sweep";
+
 /**
- * base URL ที่ QStash ใช้ยิงเข้า worker route
- * ต้องเป็น origin ที่ public reachable จริง (QStash ยิงจากภายนอก) — ไม่ใช่ {slug} template
- * ดึงจาก QSTASH_TARGET_BASE_URL (เช่น https://acme.helpwise.com)
+ * สร้าง target URL เต็มสำหรับ job route ที่ระบุ
+ * base = QSTASH_TARGET_BASE_URL (origin ที่ public reachable จริง — QStash ยิงจากภายนอก)
+ * ⚠️ sign-side (ตอน publish/schedule) กับ verify-side ต้องใช้ค่าเดียวกันเสมอ —
+ *    request.url หลัง Vercel proxy + custom subdomain จะเพี้ยน → SignatureError
  */
-export function getWorkerTargetUrl(): string {
+export function getJobTargetUrl(path: string): string {
   const base = process.env.QSTASH_TARGET_BASE_URL;
   if (!base) {
     throw new Error(
-      "[queue] QSTASH_TARGET_BASE_URL is not set — cannot publish job to QStash"
+      "[queue] QSTASH_TARGET_BASE_URL is not set — cannot resolve job target URL"
     );
   }
   // ตัด trailing slash กัน double-slash ใน URL
-  return `${base.replace(/\/+$/, "")}${SEND_EMAIL_WORKER_PATH}`;
+  return `${base.replace(/\/+$/, "")}${path}`;
+}
+
+/**
+ * base URL ที่ QStash ใช้ยิงเข้า send-email worker route
+ * (คงไว้ backward-compatible — producer/verify เดิมเรียกตัวนี้)
+ */
+export function getWorkerTargetUrl(): string {
+  return getJobTargetUrl(SEND_EMAIL_WORKER_PATH);
 }
 
 // =============================================================================
@@ -119,9 +131,14 @@ export interface QStashVerifyResult {
  *
  * เมื่อมี signing key: ใช้ Receiver.verify (current → next สำหรับ key rotation)
  * signature อ่านจาก header `upstash-signature`
+ *
+ * @param targetUrl URL ที่ QStash sign ตอน publish/schedule — default = send-email worker
+ *                  worker อื่น (เช่น sla-sweep) ส่ง getJobTargetUrl(<path>) ของตัวเองเข้ามา
+ *                  (resolve แบบ lazy เฉพาะตอนมี signing key — กัน throw ใน dev/no-key path)
  */
 export async function verifyQStashSignature(
-  request: SignedRequest
+  request: SignedRequest,
+  targetUrl?: string
 ): Promise<QStashVerifyResult> {
   // อ่าน body ครั้งเดียว — ต้องใช้ทั้ง verify และ parse payload
   const rawBody = await request.text();
@@ -151,16 +168,18 @@ export async function verifyQStashSignature(
   const receiver = new Receiver({ currentSigningKey, nextSigningKey });
   try {
     // verify เทียบ signature กับ raw body — throw/false = invalid
-    // ⚠️ ใช้ getWorkerTargetUrl() ไม่ใช่ request.url:
-    //    QStash sign ด้วย target URL ตอน publish (= QSTASH_TARGET_BASE_URL + path) แต่
+    // ⚠️ ใช้ pinned target URL ไม่ใช่ request.url:
+    //    QStash sign ด้วย target URL ตอน publish/schedule (= QSTASH_TARGET_BASE_URL + path) แต่
     //    request.url หลัง Vercel proxy + custom subdomain {slug}.helpwise.com จะไม่ตรง
     //    (host/scheme/query เพี้ยน) → SignatureError ทุก job. pin ให้ sign-side กับ
     //    verify-side อ่านค่าเดียวกันจาก env เสมอ
-    //    (มาถึงตรงนี้ได้ต่อเมื่อมี signing key — ถ้ามี key แต่ไม่มี base url = misconfig จริง → throw)
+    //    resolve แบบ lazy ที่นี่ (หลังเช็ค signing key แล้ว) — caller ที่ไม่ส่ง targetUrl
+    //    ใช้ send-email default; sla-sweep ส่ง getJobTargetUrl(SLA_SWEEP_WORKER_PATH) เอง
+    //    (ถ้ามี key แต่ไม่มี base url = misconfig จริง → throw)
     const valid = await receiver.verify({
       signature,
       body: rawBody,
-      url: getWorkerTargetUrl(),
+      url: targetUrl ?? getWorkerTargetUrl(),
     });
     return { valid, rawBody };
   } catch {

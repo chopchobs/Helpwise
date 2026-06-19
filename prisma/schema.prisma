@@ -80,9 +80,11 @@ enum TagColor {
 }
 
 // NotificationType — ชนิดของ in-app notification (agent-audience)
-// Slice 2 ใช้ค่าเดียว: TICKET_ASSIGNED (SLA types เพิ่มทีหลังใน Slice 3)
+// Slice 3 เพิ่ม SLA types: ใกล้ครบกำหนด (warning) + เกินกำหนด (breach)
 enum NotificationType {
   TICKET_ASSIGNED
+  SLA_NEAR_BREACH
+  SLA_BREACH
 }
 
 // =============================================================================
@@ -339,6 +341,9 @@ model Ticket {
   // breach flags — set โดย BullMQ job เมื่อเกิน deadline
   firstResponseBreached Boolean   @default(false)
   resolutionBreached    Boolean   @default(false)
+  // near-breach notified แล้ว (กันยิงซ้ำ) — idempotency ของ near-breach warning
+  firstResponseNearBreachNotified Boolean @default(false)
+  resolutionNearBreachNotified    Boolean @default(false)
   // === SLA Pause/Resume (เมื่อ status = PENDING) ===
   slaPausedAt           DateTime? // เวลาที่ pause SLA timer ล่าสุด
   slaPausedDurationMin  Int       @default(0) // รวมเวลาที่ pause ทั้งหมด (นาที)
