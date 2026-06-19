@@ -41,6 +41,7 @@
 | 25 | File attachments via Supabase Storage | `phase-25/file-attachments` | ✅ done | ✅ |
 | 26 | Tags/labels for ticket triage | `phase-26/tags-labels` | ✅ done | ✅ |
 | 27 | PostgreSQL Row Level Security (defense-in-depth) | `phase-27/rls-hardening` | ✅ done | ✅ |
+| 28 | Async queue (QStash) + notifications — outbound email queue, in-app assign notify, SLA near-breach/breach notify | `phase-28/async-queue-notifications` | ✅ done | ✅ |
 
 > *Phase 20 = decision เชิงลบ (บันทึกว่า nonce CSP ใช้กับ `proxy.ts` ไม่ได้ — คง `unsafe-inline`) ไม่ใช่ feature ใหม่
 > **Chore branches** (merged, ไม่ใช่ phase): `chore/db-init-seed`, `fix/proxy-host-header`, `chore/theme-warm-palette`
@@ -54,12 +55,14 @@
 - กฎหลักทั้งหมด → อ้าง `CLAUDE.md`: Multi-tenancy Rules · Identity & Audiences · Ticketing / Internal-note isolation · SLA · Inbound/Outbound Email · Subscription & Billing (money เก็บเป็น `Int`) · Feature Flag · Audit Log · **Agent Ownership Map**
 - Memory (`.claude/projects/.../memory/MEMORY.md`): Prisma 7 + Supabase datasource · tenant resolution อยู่ที่ `src/proxy.ts` (ไม่ใช่ `middleware.ts`) · tenantPrisma ไม่ใช้ใน `$transaction` · iCloud stray duplicate files
 - **RLS kill-switch `RLS_ENABLED` default = `false`** (verified: `.env.example:17`, `src/lib/tenant.ts:51`) — RLS code merged แล้วแต่ **ยังไม่ activate** จนกว่าจะ migrate production
+- **Queue = Upstash QStash** (ไม่ใช่ BullMQ — serverless fit): outbound email + sla-sweep ผ่าน QStash signature (worker route verify fail-closed บน prod, tenantId จาก verified source → `tenantPrisma`). sla-sweep เลิกใช้ `SLA_SWEEP_SECRET` แล้ว. Notification = agent-audience (TenantMember recipient, FORCE RLS). deferred hardening → memory `phase28-deferred-hardening`
 
 ## Definition of Done
 → อ้าง DoD 8 ข้อใน `CLAUDE.md` § Definition of Done — เป็นเกณฑ์ **block** ของ `code-review` / `qa-testing` / `security`
 
 ## ⚠️ ค้าง / ต้องสังเกต
-1. **ไม่มี Phase ค้าง** — merge ครบทุก branch
+1. **ไม่มี Phase ค้าง** — merge ครบทุก branch (Phase 28 merge เข้า main local แล้ว, Dev push เอง)
 2. **RLS ยังไม่ activate** (`RLS_ENABLED=false`) — เปิดพร้อม migrate production เท่านั้น
 3. **Stray duplicate files (iCloud)** — เป็นปัญหาเป็นระยะ ทำ build พัง; ลบทีละไฟล์ (`rm <file>` ไม่ใช่ `rm -rf`) เมื่อพบ
-4. นี่คือ plan/handoff ครั้งแรกของ project — ก่อนหน้านี้ไม่มี `project-plan.md`
+4. **Phase 28 deploy ค้าง (Dev ทำทีหลัง):** apply migration `20260619000000_add_notification` + `20260619010000_add_sla_notification` · provision QStash env (`QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`, `QSTASH_TARGET_BASE_URL`) · ตั้ง QStash cron schedule ยิง `/api/jobs/sla-sweep` · ลบ env `SLA_SWEEP_SECRET` ที่เลิกใช้
+5. นี่คือ plan/handoff ครั้งแรกของ project — ก่อนหน้านี้ไม่มี `project-plan.md`

@@ -39,7 +39,7 @@
 - **Billing: Stripe** (Subscriptions + Webhooks)
 - **Cache / Tenant lookup: Redis** (Upstash)
 - **Email: Postmark/SendGrid** (outbound + inbound parse webhook)
-- **Queue: Redis (BullMQ)** — งาน async: ส่ง email, ตรวจ SLA breach, ประมวลผล inbound
+- **Queue: Upstash QStash** — งาน async: ส่ง email, ตรวจ SLA breach, ประมวลผล inbound
 
 ---
 

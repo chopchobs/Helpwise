@@ -31,6 +31,7 @@ import type {
   SessionMember,
   SessionTenant,
 } from "@/types/ticket";
+import NotificationBell from "./_components/NotificationBell";
 
 // =============================================================================
 // TYPES
@@ -389,8 +390,11 @@ export default function WorkspaceLayout({
           {/* spacer สำหรับ desktop */}
           <div className="hidden md:block" />
 
-          {/* ขวา: plan badge + user menu */}
+          {/* ขวา: notification bell + plan badge + user menu */}
           <div className="flex items-center gap-3">
+            {/* Notification bell (agent-audience) */}
+            <NotificationBell />
+
             {/* Plan badge */}
             <span className="hidden sm:inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border border-border text-secondary bg-stone uppercase tracking-wide">
               {activeSession.tenant.plan}

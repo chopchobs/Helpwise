@@ -12,7 +12,8 @@
  *   ใช้สำหรับ agent reply outbound เพื่อ thread email กลับ client mail client
  *
  * TODO:
- *   - เพิ่ม email queue ผ่าน BullMQ เพื่อ retry เมื่อ provider ล่ม
+ *   - outbound agent-reply ส่งผ่าน QStash queue แล้ว (worker /api/jobs/send-email) — retry ได้
+ *     ส่วน outbound อื่น (เช่น magic-link) ยังส่ง inline
  *   - ปิด magic-link URL logging ใน production
  *   - เพิ่ม HTML template engine (เช่น react-email)
  *   - Postmark case ปัจจุบันเป็น scaffold — ต้อง wire จริงก่อน production

@@ -20,6 +20,8 @@ import { tenantPrisma } from "@/lib/tenant";
 import { audit } from "@/lib/audit";
 import { Prisma, TicketPriority, TicketStatus } from "@prisma/client";
 import { verifyAssigneeMembership } from "@/lib/tickets";
+import { createNotification } from "@/lib/notifications";
+import { NotificationType } from "@prisma/client";
 import { hasFeature, FEATURE_KEYS } from "@/lib/features";
 import {
   parseBusinessHours,
@@ -570,6 +572,17 @@ export async function PATCH(
           ticketId: id,
         })
       );
+
+      // แจ้งเตือนผู้ถูก assign — เฉพาะ reassign ไปยัง member (assigneeId !== null,
+      // null = unassign ไม่ notify) และ skip self-assign (agent ไม่ต้อง notify ตัวเอง
+      // เพื่อลด noise — behavior มาตรฐาน help desk). assigneeId verify แล้วว่าเป็น member ของ tenant นี้
+      if (assigneeId !== null && assigneeId !== member.id) {
+        void createNotification(db, {
+          memberId: assigneeId,
+          type: NotificationType.TICKET_ASSIGNED,
+          ticketId: id,
+        });
+      }
     }
 
     // SLA pause/resume audit — log action สำคัญ (ไม่ log deadline timestamp เพื่อ privacy)

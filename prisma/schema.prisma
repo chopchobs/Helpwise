@@ -79,6 +79,14 @@ enum TagColor {
   SAND
 }
 
+// NotificationType — ชนิดของ in-app notification (agent-audience)
+// Slice 3 เพิ่ม SLA types: ใกล้ครบกำหนด (warning) + เกินกำหนด (breach)
+enum NotificationType {
+  TICKET_ASSIGNED
+  SLA_NEAR_BREACH
+  SLA_BREACH
+}
+
 // =============================================================================
 // GLOBAL MODELS (ไม่ใช่ tenant-scoped — ไม่มี tenantId)
 // =============================================================================
@@ -180,6 +188,7 @@ model Tenant {
   cannedResponses CannedResponse[]
   tags            Tag[]
   ticketTags      TicketTag[]
+  notifications   Notification[]
 
   @@index([slug])
 }
@@ -213,6 +222,8 @@ model TenantMember {
   createdApiKeys  ApiKey[]        @relation("ApiKeyCreatedBy")
   // canned response ที่ member นี้เป็นผู้สร้าง
   createdCannedResponses CannedResponse[] @relation("CannedResponseCreatedBy")
+  // notification ที่ member นี้เป็น recipient (scope การมองเห็น)
+  notifications          Notification[]   @relation("NotificationRecipient")
 
   // composite unique: 1 user ใน 1 tenant ได้ครั้งเดียว
   @@unique([tenantId, userId])
@@ -330,6 +341,9 @@ model Ticket {
   // breach flags — set โดย BullMQ job เมื่อเกิน deadline
   firstResponseBreached Boolean   @default(false)
   resolutionBreached    Boolean   @default(false)
+  // near-breach notified แล้ว (กันยิงซ้ำ) — idempotency ของ near-breach warning
+  firstResponseNearBreachNotified Boolean @default(false)
+  resolutionNearBreachNotified    Boolean @default(false)
   // === SLA Pause/Resume (เมื่อ status = PENDING) ===
   slaPausedAt           DateTime? // เวลาที่ pause SLA timer ล่าสุด
   slaPausedDurationMin  Int       @default(0) // รวมเวลาที่ pause ทั้งหมด (นาที)
@@ -353,8 +367,9 @@ model Ticket {
   attachments Attachment[]
   auditLogs   AuditLog[]
   // one-to-one optional: inverse ของ CsatResponse.ticketId @unique
-  csat        CsatResponse?
-  ticketTags  TicketTag[]
+  csat          CsatResponse?
+  ticketTags    TicketTag[]
+  notifications Notification[]
 
   // composite unique: ticketNumber unique ต่อ tenant
   @@unique([tenantId, ticketNumber])
@@ -671,4 +686,26 @@ model CannedResponse {
   updatedAt DateTime @updatedAt
 
   @@index([tenantId])
+}
+
+// Notification — in-app notification สำหรับ agent (agent-audience เท่านั้น)
+// recipient คือ TenantMember (agent) — scope การมองเห็นด้วย memberId
+// ห้ามหลุดฝั่ง portal/contact
+model Notification {
+  id        String           @id @default(cuid())
+  tenantId  String
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // recipient (agent) — scope การมองเห็น: member เห็นเฉพาะ notification ของตัวเอง
+  memberId  String
+  recipient TenantMember     @relation("NotificationRecipient", fields: [memberId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  // ticket ที่เกี่ยว (optional) — ลบ ticket แล้วลบ notification ด้วย
+  ticketId  String?
+  ticket    Ticket?          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  // null = ยังไม่อ่าน
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([tenantId, memberId]) // query notification ของ recipient ใน tenant
+  @@index([tenantId, memberId, readAt]) // query unread (readAt IS NULL)
 }
