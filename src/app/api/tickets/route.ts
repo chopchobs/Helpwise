@@ -21,6 +21,8 @@ import {
   verifyAssigneeMembership,
   verifyContactBelongsToTenant,
 } from "@/lib/tickets";
+import { createNotification } from "@/lib/notifications";
+import { NotificationType } from "@prisma/client";
 
 // =============================================================================
 // VALIDATION SCHEMAS
@@ -475,6 +477,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         after: { assigneeId },
         ticketId: ticket.id,
       });
+
+      // แจ้งเตือนผู้ถูก assign — skip ถ้า self-assign (agent ไม่ต้อง notify ตัวเอง,
+      // เป็น behavior มาตรฐาน help desk เพื่อลด noise). assigneeId verify แล้วว่าเป็น member ของ tenant นี้
+      if (assigneeId !== member.id) {
+        void createNotification(db, {
+          memberId: assigneeId,
+          type: NotificationType.TICKET_ASSIGNED,
+          ticketId: ticket.id,
+        });
+      }
     }
 
     return NextResponse.json({ data: ticketWithRelations, error: null }, { status: 201 });
