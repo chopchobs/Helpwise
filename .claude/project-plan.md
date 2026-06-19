@@ -47,7 +47,7 @@
 > **Chore branches** (merged, ไม่ใช่ phase): `chore/db-init-seed`, `fix/proxy-host-header`, `chore/theme-warm-palette`
 
 ## Git State (สำหรับ verify รอบหน้า)
-- main HEAD: `25acc353de89374c9aa95f8268d601c3558fa45f`
+- main HEAD (Phase 28 merge): `915a4b355501b2990b228411e64ecc99eac57a94` — **ยังไม่ push** (Dev push เอง)
 - ทุก phase-branch + chore-branch merge เข้า main แล้ว — ไม่มี branch ค้าง (local/remote = `main` เท่านั้น)
 - วิธี verify รอบหน้า: `git log --merges --oneline main`
 
