@@ -13,9 +13,9 @@
  * Outbound Email (visibility=PUBLIC เท่านั้น):
  *   - fetch requesterContact + ticket details สำหรับ threading
  *   - generate Message-ID สำหรับ reply
- *   - เก็บ threading fields บน TicketMessage ก่อน send
- *   - send email ผ่าน sendEmail() — ถ้า send ล้ม log แต่ไม่ fail request
- *     (emailSentAt จะเป็น null ไว้สำหรับ retry ในอนาคต ผ่าน BullMQ)
+ *   - เก็บ threading fields บน TicketMessage (emailSentAt = null) ก่อน enqueue
+ *   - enqueue job ไป QStash → worker /api/jobs/send-email ส่งจริง + retry ได้เมื่อ provider ล่ม
+ *     (worker re-check visibility + idempotent guard ผ่าน emailSentAt)
  *
  * Audience: requireAgent() — เฉพาะ agent ของ tenant นี้เท่านั้น
  */
@@ -27,7 +27,7 @@ import { tenantPrisma } from "@/lib/tenant";
 import { audit } from "@/lib/audit";
 import { MessageVisibility, Prisma, TicketStatus } from "@prisma/client";
 import { createTicketMessage } from "@/lib/tickets";
-import { sendEmail } from "@/lib/email";
+import { publishSendEmailJob } from "@/lib/queue";
 
 // =============================================================================
 // VALIDATION SCHEMA
@@ -63,19 +63,6 @@ function generateOutboundMessageId(ticketId: string, slug: string, rootDomain: s
   const ts = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 8);
   return `${ticketId}-${ts}-${rand}@${slug}.${rootDomain}`;
-}
-
-/**
- * escape HTML special chars กัน HTML injection ในกล่องเมลลูกค้า
- * agent อาจพิมพ์ '<', '>', '&', quote — ต้อง escape ก่อน interpolate เข้า outbound HTML
- */
-function escapeHtml(input: string): string {
-  return input
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 /**
@@ -269,46 +256,24 @@ export async function POST(
       });
     }
 
-    // 7. ส่ง outbound email เฉพาะ PUBLIC message ที่มี email ของ requester
-    // INTERNAL note ห้ามส่ง email เด็ดขาด (กฎ CLAUDE.md verbatim)
-    // ส่ง AFTER persist message — ถ้าส่งล้ม message ยังอยู่ใน DB (ไม่สูญหาย)
+    // 7. enqueue outbound email เฉพาะ PUBLIC message ที่มี email ของ requester
+    // INTERNAL note ห้ามส่ง email เด็ดขาด (กฎ CLAUDE.md verbatim) — worker re-check อีกชั้น
+    // enqueue AFTER persist message — worker จะดึง message จาก DB ด้วย tenant scope แล้วส่งจริง
+    // tenantId มาจาก ctx (middleware-verified) ไม่ใช่จาก client
     if (visibility === "PUBLIC" && ticket.requesterContact?.email && outboundMessageId) {
-      const contactEmail = ticket.requesterContact.email;
-      // สร้าง subject ที่มี ticket number prefix (กัน duplicate ถ้า subject มีอยู่แล้ว)
-      const replySubjectPrefix = `[#${ticket.ticketNumber}]`;
-      const emailSubject = ticket.subject.startsWith(replySubjectPrefix)
-        ? ticket.subject
-        : `${replySubjectPrefix} ${ticket.subject}`;
-
       try {
-        await sendEmail({
-          to: contactEmail,
-          subject: emailSubject,
-          html: `<p>${escapeHtml(messageBody).replace(/\n/g, "<br>")}</p>`,
-          text: messageBody,
-          headers: {
-            messageId: outboundMessageId,
-            inReplyTo: outboundInReplyTo,
-            references: outboundReferences,
-          },
+        await publishSendEmailJob({
+          tenantId: ctx.tenantId,
+          messageId: message.id,
         });
-
-        // update emailSentAt หลังส่งสำเร็จ
-        // ใช้ raw prisma เพราะ tenantPrisma strip updatedAt fields บาง operation
-        // แต่ inject tenantId เองเพื่อ tenant safety
-        await db.ticketMessage.update({
-          where: { id: message.id },
-          data: { emailSentAt: new Date() },
-        });
-      } catch (sendErr) {
-        // ส่ง email ล้ม — log แต่ไม่ fail request
-        // emailSentAt ยัง null → สามารถ retry ผ่าน BullMQ ในอนาคต
-        console.error("[POST /api/tickets/:id/messages] sendEmail failed:", {
+      } catch (enqueueErr) {
+        // enqueue ล้ม — log แต่ไม่ fail request
+        // emailSentAt ยัง null → re-enqueue/retry ได้ในอนาคต, message บันทึกแล้วไม่สูญ
+        console.error("[POST /api/tickets/:id/messages] publishSendEmailJob failed:", {
           ticketId,
           messageId: message.id,
-          error: sendErr instanceof Error ? sendErr.message : String(sendErr),
+          error: enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr),
         });
-        // ไม่ return error — message บันทึกแล้ว ลูกค้าอาจไม่ได้รับ email แต่ agent action ไม่สูญ
       }
     }
 
