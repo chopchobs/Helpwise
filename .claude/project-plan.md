@@ -49,7 +49,7 @@
 > **Chore branches** (merged, ไม่ใช่ phase): `chore/db-init-seed`, `fix/proxy-host-header`, `chore/theme-warm-palette`
 
 ## Git State (สำหรับ verify รอบหน้า)
-- main HEAD (Phase 30 merge): `30166cf` (`Merge branch 'phase-30/portfolio-demo'`) — **ยังไม่ push** (Dev push เอง). Phase 30 (landing + demo seed + demo-login + AI fail-closed) merge `--no-ff` เข้า main local แล้ว, tsc clean, security gate PASS (no High/Critical). ⚠️ acme tenant ยังมี dev/smoke junk #1-18 (cleanup script เตรียมไว้ รอ Dev confirm) — ดู memory `seed-demo-idempotency-acme-cruft`
+- main HEAD (Phase 30 merge): `30166cf` (`Merge branch 'phase-30/portfolio-demo'`) — **ยังไม่ push** (Dev push เอง). Phase 30 (landing + demo seed + demo-login + AI fail-closed) merge `--no-ff` เข้า main local แล้ว, tsc clean, security gate PASS (no High/Critical). acme dev/smoke junk #1-18 cleanup เสร็จแล้ว (tx commit: ลบ 18 ticket + 5 orphan contact, audit คงครบ) — acme = demo ล้วน 7 ticket. ดู memory `seed-demo-idempotency-acme-cruft`
 - Phase 29 merge: `66882f6` (`Merge branch 'phase-29/ai-assist'`) — Phase 29 (3 slice AI-assist) merge `--no-ff` เข้า main local แล้ว, tsc clean, 545 tests pass
 - Phase 28 merge: `915a4b3` — **ยังไม่ push** (Dev push เอง)
 - ทุก phase-branch + chore-branch merge เข้า main แล้ว — ไม่มี branch ค้าง (local/remote = `main` เท่านั้น)
