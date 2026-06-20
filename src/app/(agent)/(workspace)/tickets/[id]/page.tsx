@@ -23,6 +23,9 @@ import {
   X,
   Tag,
   Plus,
+  Sparkles,
+  PenLine,
+  ExternalLink,
 } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import PriorityBadge from "@/components/ui/PriorityBadge";
@@ -53,6 +56,7 @@ import type {
   MembersResponse,
   MeResponse,
   MemberRole,
+  ApiError,
 } from "@/types/ticket";
 import type {
   CannedResponseDTO,
@@ -64,6 +68,11 @@ import type {
   TicketTagAddResponse,
   TicketTagRemoveResponse,
 } from "@/types/tag";
+import type {
+  AiSummaryDTO,
+  AiReplyDraftDTO,
+  AiTagSuggestionDTO,
+} from "@/types/ai";
 
 // =============================================================================
 // CONSTANTS
@@ -84,6 +93,38 @@ const PRIORITY_OPTIONS: { value: TicketPriority; label: string }[] = [
   { value: "HIGH", label: "สูง" },
   { value: "URGENT", label: "เร่งด่วน" },
 ];
+
+// =============================================================================
+// AI ASSIST — shared envelope types + error mapping (Phase 29 Slice 2/3)
+//   - ใช้ร่วมกันใน ReplyBox (suggest-reply) + TagSection (suggest-tags)
+//   - feature gate reactive: 403 FEATURE_NOT_AVAILABLE → locked (upgrade CTA)
+//   - draft เท่านั้น: suggest-reply ไม่ auto-send, suggest-tags ไม่ auto-apply
+// =============================================================================
+
+interface AiReplyDraftResponse {
+  data: AiReplyDraftDTO | null;
+  error: ApiError | null;
+}
+
+interface AiTagSuggestionResponse {
+  data: AiTagSuggestionDTO | null;
+  error: ApiError | null;
+}
+
+/** แปลง error response ของ AI assist เป็นข้อความไทย (ไม่ครอบ 403 — จัดการแยกเป็น locked state) */
+function getAiAssistErrorMessage(status: number, code: string | undefined): string {
+  if (status === 429 || code === "RATE_LIMITED") {
+    return "เรียกใช้บ่อยเกินไป กรุณาลองใหม่ภายหลัง";
+  }
+  if (status === 404 || code === "NOT_FOUND") {
+    return "ไม่พบ ticket นี้";
+  }
+  if (status === 401) {
+    return "กรุณา login ก่อนใช้งาน";
+  }
+  // 502 AI_ERROR และ error อื่น ๆ
+  return "AI ทำงานไม่สำเร็จ กรุณาลองใหม่";
+}
 
 // =============================================================================
 // SUB-COMPONENTS
@@ -300,6 +341,10 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  // AI Suggest Reply (Slice 2): สถานะของปุ่มแยกจาก submit — draft ใส่ลง textarea ไม่ส่งเอง
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const [suggestLocked, setSuggestLocked] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   /** แทรกเนื้อหา canned response ลง textarea — ต่อท้ายด้วย newline ถ้ามีข้อความอยู่แล้ว */
@@ -307,6 +352,46 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
     setBody((prev) => (prev.trim() ? `${prev}\n${cannedBody}` : cannedBody));
     setIsPickerOpen(false);
     textareaRef.current?.focus();
+  }
+
+  /**
+   * ขอ AI ร่างคำตอบ → ใส่ลง textarea ให้ agent แก้แล้วกดส่งเอง
+   * ⚠️ DRAFT เท่านั้น: ไม่ auto-send. ถ้า textarea มีข้อความอยู่แล้ว append ต่อท้าย (ไม่ทับเงียบ ๆ)
+   * — รูปแบบเดียวกับ handleSelectCannedResponse เพื่อกันการสูญเสียข้อความที่ agent พิมพ์ไว้
+   */
+  async function handleSuggestReply() {
+    if (isSuggesting) return;
+    setIsSuggesting(true);
+    setSuggestError(null);
+
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/ai/suggest-reply`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const json = (await res.json()) as AiReplyDraftResponse;
+
+      // feature ไม่อยู่ใน plan → upgrade CTA (ไม่ใช่ error inline)
+      if (res.status === 403 && json.error?.code === "FEATURE_NOT_AVAILABLE") {
+        setSuggestLocked(true);
+        return;
+      }
+
+      if (!res.ok || json.error || !json.data) {
+        setSuggestError(getAiAssistErrorMessage(res.status, json.error?.code));
+        return;
+      }
+
+      // ใส่ draft ลง textarea เดิม — append ถ้ามีข้อความอยู่ (ไม่ทับ), ให้ agent แก้ก่อนส่ง
+      const draft = json.data.reply;
+      setBody((prev) => (prev.trim() ? `${prev}\n${draft}` : draft));
+      textareaRef.current?.focus();
+    } catch {
+      setSuggestError("ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่");
+    } finally {
+      setIsSuggesting(false);
+    }
   }
 
   async function handleSend() {
@@ -467,31 +552,78 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
         </div>
       )}
 
+      {/* AI Suggest Reply: locked (feature ไม่อยู่ใน plan) → upgrade CTA */}
+      {suggestLocked && (
+        <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-warning-tint bg-warning-tint px-3 py-2">
+          <p className="text-xs text-warning-ink flex items-center gap-1.5">
+            <Lock size={12} aria-hidden="true" />
+            AI ร่างคำตอบไม่รวมใน Plan ปัจจุบัน
+          </p>
+          <Link
+            href="/settings/billing"
+            className="text-xs font-semibold text-primary-ink hover:underline focus:outline-none focus:underline shrink-0"
+          >
+            อัปเกรด
+          </Link>
+        </div>
+      )}
+
+      {/* AI Suggest Reply: error inline */}
+      {suggestError && (
+        <div className="mt-2">
+          <FormAlert variant="error" message={suggestError} />
+        </div>
+      )}
+
       <div className="flex justify-between items-center mt-3">
-        {/* ปุ่มเปิด canned response picker */}
-        <div className="relative">
+        {/* ปุ่ม AI + canned response */}
+        <div className="flex items-center gap-2">
+          {/* AI Suggest Reply — ร่างคำตอบใส่ลงช่อง (draft, ไม่ส่งเอง) */}
           <button
             type="button"
-            onClick={() => setIsPickerOpen((open) => !open)}
-            aria-label="แทรกข้อความสำเร็จรูป"
-            aria-haspopup="menu"
-            aria-expanded={isPickerOpen}
+            onClick={() => void handleSuggestReply()}
+            disabled={isSuggesting}
+            aria-label="ให้ AI ร่างคำตอบ"
             className={[
               "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
               "focus:outline-none focus:ring-2 focus:ring-primary",
               "border-border text-secondary hover:bg-stone hover:text-foreground bg-surface",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
             ].join(" ")}
           >
-            <MessageSquareText size={14} aria-hidden="true" />
-            ข้อความสำเร็จรูป
+            {isSuggesting ? (
+              <RefreshCw size={14} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <PenLine size={14} aria-hidden="true" />
+            )}
+            {isSuggesting ? "กำลังร่าง..." : "AI ร่างคำตอบ"}
           </button>
 
-          {isPickerOpen && (
-            <CannedResponsePicker
-              onSelect={handleSelectCannedResponse}
-              onClose={() => setIsPickerOpen(false)}
-            />
-          )}
+          {/* ปุ่มเปิด canned response picker */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsPickerOpen((open) => !open)}
+              aria-label="แทรกข้อความสำเร็จรูป"
+              aria-haspopup="menu"
+              aria-expanded={isPickerOpen}
+              className={[
+                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
+                "focus:outline-none focus:ring-2 focus:ring-primary",
+                "border-border text-secondary hover:bg-stone hover:text-foreground bg-surface",
+              ].join(" ")}
+            >
+              <MessageSquareText size={14} aria-hidden="true" />
+              ข้อความสำเร็จรูป
+            </button>
+
+            {isPickerOpen && (
+              <CannedResponsePicker
+                onSelect={handleSelectCannedResponse}
+                onClose={() => setIsPickerOpen(false)}
+              />
+            )}
+          </div>
         </div>
 
         <button
@@ -686,6 +818,11 @@ function TagSection({ ticketId, initialTags, canEdit }: TagSectionProps) {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyTagId, setBusyTagId] = useState<string | null>(null);
+  // AI Suggest Tags (Slice 3): suggested tag เป็น chip ให้ agent กด apply เอง (ไม่ auto-apply)
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const [suggested, setSuggested] = useState<TagDTO[] | null>(null);
+  const [suggestLocked, setSuggestLocked] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   // โหลด catalog เมื่อเปิด picker ครั้งแรก (user action — ไม่ใช่ on-mount)
   async function openPicker() {
@@ -751,8 +888,50 @@ function TagSection({ ticketId, initialTags, canEdit }: TagSectionProps) {
     }
   }
 
+  /**
+   * ขอ AI แนะนำ tag → แสดงเป็น chip ให้ agent กด apply เอง (ไม่ auto-apply)
+   * backend คืนเฉพาะ tag ที่มีจริงใน tenant แล้ว — apply ผ่าน applyTag เดิม (POST /tags)
+   */
+  async function handleSuggestTags() {
+    if (isSuggesting) return;
+    setIsSuggesting(true);
+    setSuggestError(null);
+    setSuggestLocked(false);
+
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/ai/suggest-tags`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const json = (await res.json()) as AiTagSuggestionResponse;
+
+      // feature ไม่อยู่ใน plan → upgrade CTA (ไม่ใช่ error inline)
+      if (res.status === 403 && json.error?.code === "FEATURE_NOT_AVAILABLE") {
+        setSuggestLocked(true);
+        return;
+      }
+
+      if (!res.ok || json.error || !json.data) {
+        setSuggestError(getAiAssistErrorMessage(res.status, json.error?.code));
+        return;
+      }
+
+      setSuggested(json.data.tags);
+    } catch {
+      setSuggestError("ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่");
+    } finally {
+      setIsSuggesting(false);
+    }
+  }
+
   // tag ใน catalog ที่ยังไม่ถูกติดบน ticket นี้
   const available = (catalog ?? []).filter((c) => !tags.some((t) => t.id === c.id));
+
+  // tag ที่ AI แนะนำและยังไม่ถูก apply (กันเสนอซ้ำตัวที่ติดแล้ว)
+  const suggestedAvailable = (suggested ?? []).filter(
+    (s) => !tags.some((t) => t.id === s.id)
+  );
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 mt-4 pt-4 border-t border-border">
@@ -816,12 +995,244 @@ function TagSection({ ticketId, initialTags, canEdit }: TagSectionProps) {
         </div>
       )}
 
+      {/* AI Suggest Tags — ปุ่มขอ AI แนะนำ tag (agent กด apply เอง ไม่ auto-apply) */}
+      {canEdit && (
+        <button
+          type="button"
+          onClick={() => void handleSuggestTags()}
+          disabled={isSuggesting}
+          aria-label="ให้ AI แนะนำ tag"
+          className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-primary-ink hover:bg-stone transition-colors focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isSuggesting ? (
+            <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Sparkles size={12} aria-hidden="true" />
+          )}
+          {isSuggesting ? "กำลังแนะนำ..." : "AI แนะนำ tag"}
+        </button>
+      )}
+
       {/* error ของ apply/remove — แสดง inline ไม่ block ทั้งหน้า */}
       {actionError && (
         <span className="w-full text-xs text-danger mt-1" role="alert">
           {actionError}
         </span>
       )}
+
+      {/* AI Suggest Tags: locked (feature ไม่อยู่ใน plan) → upgrade CTA */}
+      {suggestLocked && (
+        <div className="w-full mt-2 flex items-center justify-between gap-2 rounded-lg border border-warning-tint bg-warning-tint px-3 py-2">
+          <p className="text-xs text-warning-ink flex items-center gap-1.5">
+            <Lock size={12} aria-hidden="true" />
+            AI แนะนำ tag ไม่รวมใน Plan ปัจจุบัน
+          </p>
+          <Link
+            href="/settings/billing"
+            className="text-xs font-semibold text-primary-ink hover:underline focus:outline-none focus:underline shrink-0"
+          >
+            อัปเกรด
+          </Link>
+        </div>
+      )}
+
+      {/* AI Suggest Tags: error inline */}
+      {suggestError && (
+        <span className="w-full text-xs text-danger mt-1" role="alert">
+          {suggestError}
+        </span>
+      )}
+
+      {/* AI Suggest Tags: ผลลัพธ์ — chip กดเพื่อ apply ผ่าน applyTag เดิม */}
+      {suggested !== null && !suggestLocked && !suggestError && (
+        <div className="w-full mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-secondary mr-1">
+            <Sparkles size={12} aria-hidden="true" />
+            AI แนะนำ:
+          </span>
+          {suggestedAvailable.length === 0 ? (
+            <span className="text-xs text-muted">
+              ไม่มี tag ที่แนะนำ
+            </span>
+          ) : (
+            suggestedAvailable.map((tag) => (
+              <button
+                key={tag.id}
+                type="button"
+                disabled={busyTagId === tag.id}
+                onClick={() => void applyTag(tag)}
+                aria-label={`เพิ่ม tag ${tag.name}`}
+                className="rounded-full focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed transition-opacity hover:opacity-80"
+              >
+                <TagChip tag={tag} />
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// AI SUMMARY SECTION — ปุ่ม "สรุปด้วย AI" + panel แสดงผล (agent-only, on-demand)
+//   - on-demand draft: ไม่ persist ลง DB, แค่ให้ agent อ่าน
+//   - feature gate แบบ reactive: แสดงปุ่มเสมอ → ถ้า 403 FEATURE_NOT_AVAILABLE
+//     แสดง upgrade CTA (client ไม่มี signal ของ ai_summarize ที่เชื่อถือได้
+//     — plan string เดียวบอกไม่ได้เพราะมี per-tenant feature override)
+// =============================================================================
+
+type AiSummaryStatus = "idle" | "loading" | "success" | "locked" | "error";
+
+interface AiSummaryResponse {
+  data: AiSummaryDTO | null;
+  error: ApiError | null;
+}
+
+interface AiSummarySectionProps {
+  ticketId: string;
+}
+
+/** แปลง error response ของ summarize เป็นข้อความไทย (ไม่ครอบ 403 — จัดการแยกเป็น locked state) */
+function getAiSummaryErrorMessage(status: number, code: string | undefined): string {
+  if (status === 429 || code === "RATE_LIMITED") {
+    return "เรียกใช้บ่อยเกินไป กรุณาลองใหม่ภายหลัง";
+  }
+  if (status === 404 || code === "NOT_FOUND") {
+    return "ไม่พบ ticket นี้";
+  }
+  // 502 AI_ERROR และ error อื่น ๆ
+  return "สร้างสรุปไม่สำเร็จ กรุณาลองใหม่";
+}
+
+function AiSummarySection({ ticketId }: AiSummarySectionProps) {
+  const [status, setStatus] = useState<AiSummaryStatus>("idle");
+  const [summary, setSummary] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  async function handleSummarize() {
+    if (status === "loading") return;
+    setStatus("loading");
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/ai/summarize`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const json = (await res.json()) as AiSummaryResponse;
+
+      // feature ไม่อยู่ใน plan → upgrade CTA (ไม่ใช่ error inline)
+      if (res.status === 403 && json.error?.code === "FEATURE_NOT_AVAILABLE") {
+        setStatus("locked");
+        return;
+      }
+
+      if (!res.ok || json.error || !json.data) {
+        setErrorMessage(getAiSummaryErrorMessage(res.status, json.error?.code));
+        setStatus("error");
+        return;
+      }
+
+      setSummary(json.data.summary);
+      setStatus("success");
+    } catch {
+      setErrorMessage("ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่");
+      setStatus("error");
+    }
+  }
+
+  const isLoading = status === "loading";
+
+  return (
+    <div className="bg-surface rounded-xl border border-border shadow-sm overflow-hidden mb-4">
+      <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-border bg-stone">
+        <div className="flex items-center gap-2">
+          <Sparkles size={16} className="text-primary" aria-hidden="true" />
+          <h2 className="text-sm font-semibold text-foreground">สรุป Ticket ด้วย AI</h2>
+        </div>
+        <button
+          type="button"
+          onClick={() => void handleSummarize()}
+          disabled={isLoading}
+          className={[
+            "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold text-white transition-colors",
+            "bg-primary-strong hover:bg-primary-strong-hover disabled:hover:bg-primary-strong",
+            "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+          ].join(" ")}
+        >
+          {isLoading ? (
+            <RefreshCw size={14} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Sparkles size={14} aria-hidden="true" />
+          )}
+          {isLoading
+            ? "กำลังสรุป..."
+            : status === "success"
+              ? "สรุปอีกครั้ง"
+              : "สรุปด้วย AI"}
+        </button>
+      </div>
+
+      <div className="px-6 py-4">
+        {/* loading: skeleton */}
+        {isLoading && (
+          <div className="flex flex-col gap-2" aria-busy="true">
+            <div className="h-3 rounded bg-stone animate-pulse" />
+            <div className="h-3 rounded bg-stone animate-pulse w-[90%]" />
+            <div className="h-3 rounded bg-stone animate-pulse w-[75%]" />
+          </div>
+        )}
+
+        {/* locked: upgrade CTA (feature ไม่อยู่ใน plan) */}
+        {status === "locked" && (
+          <div className="flex flex-col items-center gap-3 py-4 text-center">
+            <div className="w-10 h-10 rounded-full bg-warning-tint flex items-center justify-center">
+              <Lock size={18} className="text-warning-ink" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                AI Summary ไม่รวมใน Plan ปัจจุบัน
+              </p>
+              <p className="text-sm text-secondary mt-1">
+                อัปเกรดแพ็กเกจเพื่อให้ AI สรุปบทสนทนาของ ticket ให้อัตโนมัติ
+              </p>
+            </div>
+            <Link
+              href="/settings/billing"
+              className={[
+                "inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors",
+                "bg-primary-strong hover:bg-primary-strong-hover",
+                "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
+              ].join(" ")}
+            >
+              <ExternalLink size={14} aria-hidden="true" />
+              ดู Plan และอัปเกรด
+            </Link>
+          </div>
+        )}
+
+        {/* error: inline alert */}
+        {status === "error" && errorMessage && (
+          <FormAlert variant="error" message={errorMessage} />
+        )}
+
+        {/* success: summary text (รักษา line break) */}
+        {status === "success" && summary && (
+          <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
+            {summary}
+          </p>
+        )}
+
+        {/* idle: hint ก่อนกดปุ่ม */}
+        {status === "idle" && (
+          <p className="text-sm text-muted">
+            กดปุ่ม “สรุปด้วย AI” เพื่อให้ระบบสรุปบทสนทนาทั้งหมดของ ticket นี้ (draft สำหรับ agent อ่าน)
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -1284,6 +1695,9 @@ export default function AgentTicketDetailPage() {
             }
           />
         </div>
+
+        {/* AI Summary — ปุ่มสรุปด้วย AI + panel (agent-only, on-demand draft) */}
+        <AiSummarySection ticketId={ticketId} />
 
         {/* Message thread */}
         <div className="bg-surface rounded-xl border border-border shadow-sm overflow-hidden mb-4">

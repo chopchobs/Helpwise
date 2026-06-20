@@ -20,6 +20,7 @@
     "smoke:stripe": "tsx --env-file=.env scripts/stripe-smoke.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.105.0",
     "@hookform/resolvers": "^5.4.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
