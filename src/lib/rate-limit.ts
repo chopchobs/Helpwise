@@ -26,6 +26,12 @@ export interface CheckRateLimitOptions {
   limit: number;
   /** ความยาว window เป็นวินาที */
   windowSeconds: number;
+  /**
+   * เมื่อ Redis ล่ม จะ deny (true) หรือ allow (false) — default false (fail-open เดิม)
+   * ตั้ง true สำหรับ endpoint ที่มี cost จริงต่อ request (เช่น AI call) เพื่อกัน
+   * unbounded cost abuse ตอน Redis ล่มแล้ว rate-limit หายไป
+   */
+  failClosed?: boolean;
 }
 
 // =============================================================================
@@ -39,7 +45,7 @@ export interface CheckRateLimitOptions {
 export async function checkRateLimit(
   opts: CheckRateLimitOptions
 ): Promise<RateLimitResult> {
-  const { key, limit, windowSeconds } = opts;
+  const { key, limit, windowSeconds, failClosed = false } = opts;
 
   try {
     // atomic INCR + EXPIRE ใน MULTI/EXEC เดียว — กัน race ที่ incr สำเร็จแต่ expire fail
@@ -71,11 +77,14 @@ export async function checkRateLimit(
       retryAfterSeconds: 0,
     };
   } catch (err) {
-    // FAIL-OPEN: Redis ล่ม → ปล่อยผ่าน ไม่ block ผู้ใช้
-    console.error(
-      "[rate-limit] Redis error (fail-open):",
-      err instanceof Error ? err.message : String(err)
-    );
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (failClosed) {
+      // FAIL-CLOSED: Redis ล่ม → deny เพื่อกัน cost abuse (endpoint ที่มี cost จริงต่อ request)
+      console.error("[rate-limit] Redis error (fail-closed, denying):", errMsg);
+      return { allowed: false, remaining: 0, retryAfterSeconds: windowSeconds };
+    }
+    // FAIL-OPEN (default): Redis ล่ม → ปล่อยผ่าน ไม่ block ผู้ใช้
+    console.error("[rate-limit] Redis error (fail-open):", errMsg);
     return { allowed: true, remaining: limit, retryAfterSeconds: 0 };
   }
 }
