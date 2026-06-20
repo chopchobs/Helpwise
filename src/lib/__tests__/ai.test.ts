@@ -23,7 +23,7 @@ vi.mock("@anthropic-ai/sdk", () => {
   };
 });
 
-import { summarizeThread, AI_SUMMARY_MODEL } from "@/lib/ai";
+import { summarizeThread, suggestReply, suggestTags, AI_SUMMARY_MODEL } from "@/lib/ai";
 
 const SAMPLE = [
   { author: "Customer", visibility: "PUBLIC" as const, body: "เข้าระบบไม่ได้ครับ" },
@@ -109,5 +109,142 @@ describe("summarizeThread", () => {
     delete process.env.ANTHROPIC_API_KEY;
     await expect(summarizeThread(SAMPLE)).rejects.toThrow(/ANTHROPIC_API_KEY/);
     expect(createMock).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// suggestReply (Slice 2)
+// =============================================================================
+
+describe("suggestReply", () => {
+  beforeEach(() => {
+    createMock.mockResolvedValue({
+      content: [{ type: "text", text: "สวัสดีครับ ทางเราได้ reset password ให้แล้ว..." }],
+    });
+  });
+
+  it("คืน draft reply text จาก response content", async () => {
+    const out = await suggestReply(SAMPLE);
+    expect(out).toBe("สวัสดีครับ ทางเราได้ reset password ให้แล้ว...");
+  });
+
+  it("ส่ง model haiku-4-5 + system, ไม่มี tools/thinking/temperature/top_p (minimal request)", async () => {
+    await suggestReply(SAMPLE);
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    const arg = createMock.mock.calls[0][0];
+
+    expect(arg.model).toBe(AI_SUMMARY_MODEL);
+    expect(arg.max_tokens).toBeGreaterThan(0);
+    expect(typeof arg.system).toBe("string");
+    expect(arg).not.toHaveProperty("tools");
+    expect(arg).not.toHaveProperty("thinking");
+    expect(arg).not.toHaveProperty("temperature");
+    expect(arg).not.toHaveProperty("top_p");
+  });
+
+  it("ใส่ thread bodies เข้า prompt + system prompt ระบุ DRAFT", async () => {
+    await suggestReply(SAMPLE);
+    const arg = createMock.mock.calls[0][0];
+    const userContent = arg.messages[0].content as string;
+
+    expect(userContent).toContain("เข้าระบบไม่ได้ครับ");
+    expect(arg.messages).toHaveLength(1);
+    expect(arg.messages[0].role).toBe("user");
+    // system prompt ต้องสื่อว่าเป็น DRAFT (ไม่ใช่ส่งจริง)
+    expect(arg.system as string).toContain("DRAFT");
+    // guardrail prompt injection
+    expect(arg.system as string).toContain("DATA");
+  });
+
+  it("narrow เฉพาะ block type text", async () => {
+    createMock.mockResolvedValue({
+      content: [
+        { type: "thinking", thinking: "..." },
+        { type: "text", text: "draft จริง" },
+      ],
+    });
+    const out = await suggestReply(SAMPLE);
+    expect(out).toBe("draft จริง");
+  });
+
+  it("ไม่มี ANTHROPIC_API_KEY → throw error", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    await expect(suggestReply(SAMPLE)).rejects.toThrow(/ANTHROPIC_API_KEY/);
+  });
+});
+
+// =============================================================================
+// suggestTags (Slice 3)
+// =============================================================================
+
+describe("suggestTags", () => {
+  const AVAILABLE = ["billing", "bug", "login", "feature-request"];
+
+  it("parse JSON array → คืนเฉพาะชื่อที่อยู่ใน availableTagNames", async () => {
+    createMock.mockResolvedValue({
+      content: [{ type: "text", text: '["bug","login"]' }],
+    });
+    const out = await suggestTags(SAMPLE, AVAILABLE);
+    expect(out).toEqual(["bug", "login"]);
+  });
+
+  it("filter ทิ้ง tag ที่ LLM แต่งขึ้นใหม่ (ไม่อยู่ใน available)", async () => {
+    createMock.mockResolvedValue({
+      content: [{ type: "text", text: '["bug","made-up-tag","login"]' }],
+    });
+    const out = await suggestTags(SAMPLE, AVAILABLE);
+    expect(out).toEqual(["bug", "login"]);
+    expect(out).not.toContain("made-up-tag");
+  });
+
+  it("parse JSON array ที่หุ้มด้วยข้อความ/code-fence ได้", async () => {
+    createMock.mockResolvedValue({
+      content: [{ type: "text", text: 'นี่คือ tag ที่เลือก:\n```json\n["billing"]\n```' }],
+    });
+    const out = await suggestTags(SAMPLE, AVAILABLE);
+    expect(out).toEqual(["billing"]);
+  });
+
+  it("fallback comma/newline-separated เมื่อไม่ใช่ JSON", async () => {
+    createMock.mockResolvedValue({
+      content: [{ type: "text", text: "bug, login" }],
+    });
+    const out = await suggestTags(SAMPLE, AVAILABLE);
+    expect(out).toEqual(["bug", "login"]);
+  });
+
+  it("dedup ชื่อซ้ำ", async () => {
+    createMock.mockResolvedValue({
+      content: [{ type: "text", text: '["bug","bug","login"]' }],
+    });
+    const out = await suggestTags(SAMPLE, AVAILABLE);
+    expect(out).toEqual(["bug", "login"]);
+  });
+
+  it("parse ไม่ได้เลย → คืน []", async () => {
+    createMock.mockResolvedValue({
+      content: [{ type: "text", text: "ไม่มีอะไรเลย ขออภัย" }],
+    });
+    const out = await suggestTags(SAMPLE, AVAILABLE);
+    expect(out).toEqual([]);
+  });
+
+  it("availableTagNames ว่าง → คืน [] โดยไม่เรียก AI (ประหยัด cost)", async () => {
+    const out = await suggestTags(SAMPLE, []);
+    expect(out).toEqual([]);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("ส่ง available tags + thread เข้า prompt, minimal request (no tools)", async () => {
+    createMock.mockResolvedValue({ content: [{ type: "text", text: "[]" }] });
+    await suggestTags(SAMPLE, AVAILABLE);
+
+    const arg = createMock.mock.calls[0][0];
+    const userContent = arg.messages[0].content as string;
+    expect(userContent).toContain("billing");
+    expect(userContent).toContain("เข้าระบบไม่ได้ครับ");
+    expect(arg).not.toHaveProperty("tools");
+    expect(arg).not.toHaveProperty("temperature");
   });
 });
