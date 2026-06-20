@@ -15,25 +15,13 @@ const COLUMNS: ReadonlyArray<FooterColumn> = [
   {
     title: "Product",
     links: [
-      { label: "Features", href: "#features" },
       { label: "AI", href: "#ai" },
-      { label: "Pricing", href: "#pricing" },
-    ],
-  },
-  {
-    title: "Resources",
-    links: [
-      { label: "Docs", href: "#docs" },
       { label: "Architecture", href: "#architecture" },
-      { label: "API reference", href: "#api" },
     ],
   },
   {
     title: "Project",
-    links: [
-      { label: "GitHub", href: GITHUB_URL },
-      { label: "About", href: "#about" },
-    ],
+    links: [{ label: "GitHub", href: GITHUB_URL }],
   },
 ];
 
