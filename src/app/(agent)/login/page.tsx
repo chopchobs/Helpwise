@@ -3,7 +3,7 @@
 /**
  * หน้า Agent Login — login สำหรับพนักงาน support (tenant subdomain)
  * เรียก POST /api/auth/agent/login; cookie ถูก set โดย server
- * สำเร็จ → redirect ไป "/" (dashboard — Phase ถัดไป)
+ * สำเร็จ → redirect ไป "/dashboard"
  */
 
 import { useState } from "react";
@@ -77,8 +77,7 @@ export default function AgentLoginPage() {
       }
 
       // cookie ถูก set โดย server แล้ว — redirect ไป dashboard
-      // TODO Phase (Dashboard): เปลี่ยน "/" เป็น "/dashboard" เมื่อสร้างหน้า dashboard แล้ว
-      router.push("/");
+      router.push("/dashboard");
     } catch {
       setFormError("ไม่สามารถเชื่อมต่อได้ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่");
     }
