@@ -75,6 +75,8 @@ export async function POST(
       key: rateLimitKey("ai-summarize", tenantId),
       limit: RATE_LIMIT,
       windowSeconds: RATE_WINDOW_SECONDS,
+      // AI call มี cost จริง → fail-closed: Redis ล่มแล้ว deny กัน unbounded cost abuse
+      failClosed: true,
     });
     if (!rl.allowed) {
       return rateLimitResponse(rl.retryAfterSeconds);

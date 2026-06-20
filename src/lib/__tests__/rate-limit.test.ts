@@ -116,6 +116,35 @@ describe("checkRateLimit", () => {
     expect(result.allowed).toBe(true);
   });
 
+  it("redis throw + failClosed:true → fail-closed (allowed=false, retryAfter=windowSeconds)", async () => {
+    redisMock.exec.mockRejectedValue(new Error("redis down"));
+
+    const result = await checkRateLimit({
+      key: "k",
+      limit: 10,
+      windowSeconds: 60,
+      failClosed: true,
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(result.remaining).toBe(0);
+    expect(result.retryAfterSeconds).toBe(60);
+  });
+
+  it("redis throw + failClosed:false (explicit) → fail-open เหมือนเดิม", async () => {
+    redisMock.exec.mockRejectedValue(new Error("redis down"));
+
+    const result = await checkRateLimit({
+      key: "k",
+      limit: 10,
+      windowSeconds: 60,
+      failClosed: false,
+    });
+
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(10);
+  });
+
   it("redis exec คืน [[err,...],...] (incr error) → fail-open", async () => {
     redisMock.exec.mockResolvedValue([
       [new Error("incr failed"), null],
