@@ -15,6 +15,7 @@ import AuthCard from "@/components/ui/AuthCard";
 import FormInput from "@/components/ui/FormInput";
 import FormButton from "@/components/ui/FormButton";
 import FormAlert from "@/components/ui/FormAlert";
+import { SLUG_REGEX } from "@/lib/slug";
 
 // =============================================================================
 // VALIDATION SCHEMA — ต้องสอดคล้องกับ backend signupSchema
@@ -26,7 +27,7 @@ const signupSchema = z.object({
     .string()
     .min(3, "slug ต้องมีอย่างน้อย 3 ตัวอักษร")
     .max(50, "slug ยาวเกิน 50 ตัวอักษร")
-    .regex(/^[a-z0-9-]+$/, "slug ใช้ได้เฉพาะตัวเล็ก, ตัวเลข, และ hyphen (-)"),
+    .regex(SLUG_REGEX, "slug ใช้ได้เฉพาะตัวเล็ก, ตัวเลข, และ hyphen (-)"),
   name: z.string().min(1, "ชื่อของคุณห้ามว่าง").max(100, "ชื่อยาวเกิน 100 ตัวอักษร"),
   email: z.string().email("รูปแบบ email ไม่ถูกต้อง"),
   password: z
@@ -239,7 +240,7 @@ export default function SignupPage() {
 
       <p className="mt-4 text-center text-xs text-secondary">
         มี workspace อยู่แล้ว?{" "}
-        <a href="/login" className="text-primary-ink hover:underline font-medium">
+        <a href="/signin" className="text-primary-ink hover:underline font-medium">
           เข้าสู่ระบบ
         </a>
       </p>
