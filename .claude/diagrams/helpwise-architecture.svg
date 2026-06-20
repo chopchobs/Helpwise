@@ -1,0 +1,138 @@
+<svg viewBox="0 0 980 800" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<defs>
+  <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#2563eb"/></marker>
+  <marker id="g" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#94a3b8"/></marker>
+</defs>
+<rect x="0" y="0" width="980" height="800" fill="#ffffff"/>
+
+<text x="34" y="36" fill="#0f172a" font-weight="700" font-size="22">Helpwise — System Architecture</text>
+<text x="34" y="57" fill="#64748b" font-size="12.5">Multi-tenant B2B Help Desk · Next.js · PostgreSQL + RLS · Redis · QStash · Stripe · Anthropic AI</text>
+
+<!-- BAND 1 CLIENTS -->
+<text x="34" y="88" fill="#64748b" font-weight="700" font-size="11" letter-spacing="0.5">CLIENTS</text>
+<rect x="34" y="96" width="290" height="56" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="50" y="118" fill="#0f172a" font-weight="600" font-size="12.5">Agent App</text>
+<text x="50" y="136" fill="#64748b" font-size="10" font-family="monospace">{slug}.helpwise.com → /(agent)</text>
+<rect x="345" y="96" width="290" height="56" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="361" y="118" fill="#0f172a" font-weight="600" font-size="12.5">Customer Portal</text>
+<text x="361" y="136" fill="#64748b" font-size="10" font-family="monospace">/(portal) · magic-link auth</text>
+<rect x="656" y="96" width="290" height="56" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="672" y="118" fill="#0f172a" font-weight="600" font-size="12.5">Inbound Webhooks</text>
+<text x="672" y="136" fill="#64748b" font-size="10">Stripe · Email provider (signed)</text>
+
+<line x1="490" y1="152" x2="490" y2="174" stroke="#2563eb" stroke-width="1.8" marker-end="url(#a)"/>
+
+<!-- BAND 2 EDGE -->
+<text x="34" y="172" fill="#64748b" font-weight="700" font-size="11" letter-spacing="0.5">EDGE</text>
+<rect x="34" y="176" width="912" height="58" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="50" y="200" fill="#0f172a" font-weight="600" font-size="13">middleware.ts — Tenant Resolution</text>
+<text x="50" y="220" fill="#64748b" font-size="11">extract subdomain slug → lookup tenant (Redis cache) → inject <tspan font-family="monospace" fill="#0f172a">x-tenant-id · x-tenant-plan</tspan> (overwrite client headers) → 404 if unknown</text>
+
+<line x1="490" y1="234" x2="490" y2="256" stroke="#2563eb" stroke-width="1.8" marker-end="url(#a)"/>
+
+<!-- BAND 3 PIPELINE -->
+<text x="34" y="254" fill="#64748b" font-weight="700" font-size="11" letter-spacing="0.5">REQUEST PIPELINE  (every API route)</text>
+<g font-size="10.5" text-anchor="middle">
+  <rect x="34" y="260" width="158" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.3"/>
+  <text x="113" y="282" fill="#0f172a" font-weight="600">1 · Extract tenant</text>
+  <text x="113" y="298" fill="#64748b" font-size="9">from verified context</text>
+
+  <rect x="222" y="260" width="158" height="52" rx="8" fill="#ffffff" stroke="#C4652A" stroke-width="1.6"/>
+  <text x="301" y="278" fill="#0f172a" font-weight="600">2 · Audience guard</text>
+  <text x="301" y="293" fill="#64748b" font-size="9">requireAgent |</text>
+  <text x="301" y="304" fill="#64748b" font-size="9">requireContact</text>
+
+  <rect x="410" y="260" width="158" height="52" rx="8" fill="#ffffff" stroke="#C4652A" stroke-width="1.6"/>
+  <text x="489" y="282" fill="#0f172a" font-weight="600">3 · Verify ownership</text>
+  <text x="489" y="298" fill="#64748b" font-size="9">membership / own-records</text>
+
+  <rect x="598" y="260" width="158" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.3"/>
+  <text x="677" y="282" fill="#0f172a" font-weight="600">4 · Role + feature</text>
+  <text x="677" y="298" fill="#64748b" font-size="9">MemberRole · hasFeature()</text>
+
+  <rect x="786" y="260" width="160" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.3"/>
+  <text x="866" y="282" fill="#0f172a" font-weight="600">5 · Handler</text>
+  <text x="866" y="298" fill="#64748b" font-size="9">tenant-scoped logic</text>
+</g>
+<line x1="192" y1="286" x2="220" y2="286" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#g)"/>
+<line x1="380" y1="286" x2="408" y2="286" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#g)"/>
+<line x1="568" y1="286" x2="596" y2="286" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#g)"/>
+<line x1="756" y1="286" x2="784" y2="286" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#g)"/>
+
+<line x1="490" y1="312" x2="490" y2="334" stroke="#2563eb" stroke-width="1.8" marker-end="url(#a)"/>
+
+<!-- BAND 4 SERVICES -->
+<text x="34" y="332" fill="#64748b" font-weight="700" font-size="11" letter-spacing="0.5">DOMAIN SERVICES  (lib/)</text>
+<rect x="34" y="338" width="912" height="48" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<g font-size="11" text-anchor="middle" fill="#0f172a" font-weight="600" font-family="monospace">
+  <text x="105" y="367">tenantPrisma</text>
+  <text x="232" y="367">auth</text>
+  <text x="340" y="367">features</text>
+  <text x="455" y="367">audit</text>
+  <text x="555" y="367">sla</text>
+  <text x="655" y="367">email</text>
+  <text x="775" y="367">stripe</text>
+  <text x="885" y="367">ai</text>
+</g>
+
+<line x1="490" y1="386" x2="490" y2="408" stroke="#2563eb" stroke-width="1.8" marker-end="url(#a)"/>
+
+<!-- BAND 5 DATA / ASYNC / EXTERNAL -->
+<text x="34" y="406" fill="#64748b" font-weight="700" font-size="11" letter-spacing="0.5">DATA · ASYNC · EXTERNAL</text>
+
+<rect x="34" y="412" width="220" height="120" rx="10" fill="#fdf6f1" stroke="#C4652A" stroke-width="1.8"/>
+<text x="50" y="434" fill="#0f172a" font-weight="700" font-size="12">PostgreSQL (Supabase)</text>
+<text x="50" y="453" fill="#64748b" font-size="10">Shared DB + shared schema</text>
+<text x="50" y="469" fill="#64748b" font-size="10">every tenant row → <tspan font-family="monospace" fill="#0f172a">tenantId</tspan></text>
+<text x="50" y="487" fill="#C4652A" font-weight="700" font-size="10.5">Row-Level Security (RLS)</text>
+<text x="50" y="502" fill="#64748b" font-size="9.5">defense-in-depth · money = Int</text>
+<text x="50" y="520" fill="#64748b" font-size="9.5">AuditLog immutable</text>
+
+<rect x="266" y="412" width="220" height="120" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="282" y="434" fill="#0f172a" font-weight="700" font-size="12">Redis (Upstash)</text>
+<text x="282" y="453" fill="#64748b" font-size="10">tenant lookup cache</text>
+<text x="282" y="469" fill="#64748b" font-size="10">(slug → tenant + plan)</text>
+<text x="282" y="487" fill="#64748b" font-size="10">queue broker · rate-limit</text>
+<text x="282" y="505" fill="#64748b" font-size="9.5">invalidate on plan change</text>
+
+<rect x="498" y="412" width="220" height="120" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.6"/>
+<text x="514" y="434" fill="#0f172a" font-weight="700" font-size="12">Async Workers (QStash)</text>
+<text x="514" y="453" fill="#64748b" font-size="10">• outbound email send</text>
+<text x="514" y="470" fill="#64748b" font-size="10">• SLA breach sweep</text>
+<text x="514" y="487" fill="#64748b" font-size="10">• inbound email parse</text>
+<text x="514" y="504" fill="#64748b" font-size="9.5">idempotent · signature-verified</text>
+<text x="514" y="520" fill="#64748b" font-size="9.5">business-hours SLA timers</text>
+
+<rect x="730" y="412" width="216" height="120" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="746" y="434" fill="#0f172a" font-weight="700" font-size="12">External</text>
+<text x="746" y="453" fill="#64748b" font-size="10">Stripe — subscriptions</text>
+<text x="746" y="470" fill="#64748b" font-size="10">+ webhooks (signed, idemp.)</text>
+<text x="746" y="487" fill="#64748b" font-size="10">Postmark / SendGrid</text>
+<text x="746" y="504" fill="#64748b" font-size="9.5">Anthropic — AI assist (haiku)</text>
+<text x="746" y="520" fill="#64748b" font-size="9.5">tenant-scoped prompts</text>
+
+<!-- connectors band4 to stores -->
+<line x1="140" y1="412" x2="140" y2="392" stroke="#94a3b8" stroke-width="1.3"/>
+<line x1="376" y1="412" x2="376" y2="392" stroke="#94a3b8" stroke-width="1.3"/>
+<line x1="608" y1="412" x2="608" y2="392" stroke="#94a3b8" stroke-width="1.3"/>
+<line x1="838" y1="412" x2="838" y2="392" stroke="#94a3b8" stroke-width="1.3"/>
+
+<!-- CALLOUTS -->
+<line x1="34" y1="556" x2="946" y2="556" stroke="#e2e8f0" stroke-width="1"/>
+<text x="34" y="582" fill="#64748b" font-weight="700" font-size="11" letter-spacing="0.5">WHAT MAKES IT HARD — the two invariants enforced everywhere</text>
+
+<rect x="34" y="594" width="450" height="92" rx="10" fill="#fdf6f1" stroke="#C4652A" stroke-width="1.6"/>
+<text x="50" y="616" fill="#0f172a" font-weight="700" font-size="12">Tenant Isolation — two layers</text>
+<text x="50" y="636" fill="#64748b" font-size="10.5">1. App-level: every query goes through <tspan font-family="monospace" fill="#0f172a">tenantPrisma(ctx.tenantId)</tspan></text>
+<text x="50" y="653" fill="#64748b" font-size="10.5">2. DB-level: PostgreSQL RLS as a hard backstop</text>
+<text x="50" y="672" fill="#C4652A" font-size="10" font-weight="600">cross-tenant data leak = top-severity bug · tenantId never trusted from client</text>
+
+<rect x="496" y="594" width="450" height="92" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.6"/>
+<text x="512" y="616" fill="#0f172a" font-weight="700" font-size="12">Audience Separation — Agent vs Contact</text>
+<text x="512" y="636" fill="#64748b" font-size="10.5">Agent = <tspan font-family="monospace" fill="#0f172a">User + TenantMember</tspan> (role-based, multi-tenant)</text>
+<text x="512" y="653" fill="#64748b" font-size="10.5">Contact = tenant-scoped, sees <tspan font-style="italic">own tickets only</tspan></text>
+<text x="512" y="672" fill="#64748b" font-size="10" font-weight="600">guards never mix · internal notes filtered server-side (not just UI)</text>
+
+<text x="34" y="716" fill="#94a3b8" font-size="10">Request flow: Client → middleware (tenant) → pipeline (guard → verify → scope) → services → tenant-scoped data · async work offloaded to QStash</text>
+<text x="34" y="734" fill="#94a3b8" font-size="9.5">29+ phases · per-phase feature branches · Definition-of-Done gated reviews (code-review · qa · security) · AI with tenant-scoped prompts</text>
+</svg>

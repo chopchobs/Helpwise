@@ -118,3 +118,5 @@ prisma/
   database migrations, webhook setup, SLA sweep cron, deployment checklist)
 - [`CLAUDE.md`](CLAUDE.md) — Architecture, multi-tenancy rules, and conventions for
   contributors
+
+  ![alt text](public/helpwise-architecture.svg)
