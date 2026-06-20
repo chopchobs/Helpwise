@@ -76,8 +76,8 @@ const SKIP_TENANT_PATH_PREFIXES = [
   // MEDIUM-3: signup อยู่บน root domain (ไม่มี tenant context) — เพิ่มเป็น defense-in-depth
   // กัน getTenantContext() ถูกเรียกโดยไม่ตั้งใจในอนาคต (เช่น middleware ที่เพิ่มทีหลัง)
   "/api/auth/signup",
-  // SLA sweep cron job — ไม่มี tenant context (ยิงจาก external scheduler ระดับ system)
-  // ตรวจ secret ใน route handler เอง (SLA_SWEEP_SECRET) ไม่ใช่ tenant context
+  // Background jobs (เช่น sla-sweep, send-email) — ไม่มี tenant context
+  // (ยิงจาก Upstash QStash ระดับ system); route handler verify QStash signature เอง
   "/api/jobs/",
   // Healthcheck — tenant-agnostic global endpoint สำหรับ uptime monitor/load balancer
   // ต้องเข้าถึงได้แม้ผ่าน tenant subdomain โดยไม่ต้อง resolve tenant

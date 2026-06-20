@@ -16,14 +16,16 @@ requests (or, for `AUTH_SECRET`, the app will fail to start).
 | `DIRECT_URL` | **Yes** | Direct PostgreSQL connection (port `5432`, no pooler). Used by `prisma migrate` / `prisma db seed`. | `postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:5432/postgres` |
 | `NEXT_PUBLIC_ROOT_DOMAIN` | **Yes** | Root domain used for tenant subdomain routing (`{slug}.{domain}`). Never hardcode this elsewhere. | `helpwise.com` |
 | `NEXT_PUBLIC_API_BASE_URL` | **Yes** | Base URL template shown to agents on the Settings → API Keys page. | `https://{slug}.helpwise.com` |
-| `REDIS_URL` | **Yes** | Redis connection string (Upstash). Used for tenant-context cache, rate limiting, and BullMQ queues. | `rediss://default:[password]@[host].upstash.io:6379` |
+| `REDIS_URL` | **Yes** | Redis connection string (Upstash). Used for tenant-context cache and rate limiting. (Async jobs use Upstash QStash, not Redis.) | `rediss://default:[password]@[host].upstash.io:6379` |
 | `STRIPE_SECRET_KEY` | **Yes** (if billing enabled) | Stripe server-side secret key. | `sk_test_...` / `sk_live_...` |
 | `STRIPE_WEBHOOK_SECRET` | **Yes** in production | Stripe webhook signing secret. Without it, `/api/webhooks/stripe` rejects all requests. | `whsec_...` |
 | `EMAIL_PROVIDER` | No | `"postmark"` \| `"sendgrid"` \| empty. Empty = console stub (dev only — emails are logged, not sent). | `postmark` |
 | `EMAIL_PROVIDER_API_KEY` | **Yes** if `EMAIL_PROVIDER` set | API key/token for the chosen email provider. | `xxxx` |
 | `EMAIL_FROM_ADDRESS` | **Yes** if `EMAIL_PROVIDER` set | From-address for outbound email. | `support@helpwise.com` |
 | `EMAIL_INBOUND_WEBHOOK_SECRET` | **Yes** in production | Shared secret for verifying inbound email webhooks (Postmark). Production rejects all requests if unset; dev allows with a warning. | `xxxx` |
-| `SLA_SWEEP_SECRET` | **Yes** in production | Bearer secret for `POST /api/jobs/sla-sweep`. Production rejects requests if unset; dev allows with a warning. | `xxxx` |
+| `QSTASH_TOKEN` | **Yes** in production | Upstash QStash token for publishing background jobs (outbound email, etc.). | `xxxx` |
+| `QSTASH_CURRENT_SIGNING_KEY` / `QSTASH_NEXT_SIGNING_KEY` | **Yes** in production | QStash signing keys used to verify job requests (incl. `POST /api/jobs/sla-sweep`). Production rejects unsigned requests; dev allows with a warning. Both support key rotation. | `sig_...` |
+| `QSTASH_TARGET_BASE_URL` | **Yes** in production | Public origin QStash calls back into worker routes, e.g. `https://acme.helpwise.com`. | `https://...` |
 | `NODE_ENV` | Set by platform | `development` \| `production`. Controls HSTS, CSP `unsafe-eval`, and several "allow in dev / reject in prod" checks. | `production` |
 
 > Stripe Price IDs are **not** environment variables — they live on `Plan.stripePriceIdMonthly`
@@ -76,7 +78,8 @@ Redis (Upstash, `REDIS_URL`) is used for:
 
 - **Tenant context cache** — subdomain → tenant lookup (`src/proxy.ts`)
 - **Rate limiting** — fixed-window counters (`src/lib/rate-limit.ts`)
-- **BullMQ queues** — async jobs (outbound email, SLA breach checks, inbound email processing)
+
+> Async jobs (outbound email, SLA breach sweep) run on **Upstash QStash**, not Redis — see "SLA Sweep Cron" below.
 
 Rate limiting is **fail-open**: if Redis is unreachable, requests are allowed through
 rather than blocked. This means Redis downtime does not cause an outage, but it does
@@ -144,21 +147,19 @@ recipient address (e.g. `support@{slug}.helpwise.com`).
 
 `POST /api/jobs/sla-sweep` is a cross-tenant system job that scans all tenants for SLA
 breaches (first-response and resolution deadlines). It is intended to be called
-periodically by an external scheduler (e.g. Vercel Cron, Upstash QStash).
+periodically by an **Upstash QStash schedule**.
 
-- Authenticated via `SLA_SWEEP_SECRET` as a Bearer token (or `X-Sweep-Secret` header).
-- In production, requests without a valid secret are rejected (`401`). In development,
-  requests without a secret are allowed through with a console warning.
+- Authenticated via **QStash signature verification** (`QSTASH_CURRENT_SIGNING_KEY` /
+  `QSTASH_NEXT_SIGNING_KEY`). There is no separate sweep secret.
+- In production, requests with an invalid/missing signature are rejected (`401`,
+  fail-closed). In development, requests are allowed through with a console warning.
 - The sweep is idempotent: a ticket already flagged as breached is not re-flagged on
   subsequent runs.
 - The response contains only aggregate counts — no tenant-specific data is exposed.
 
-Schedule example (cron syntax, run every 5 minutes):
-
-```
-*/5 * * * * curl -X POST https://your-app.example.com/api/jobs/sla-sweep \
-  -H "Authorization: Bearer $SLA_SWEEP_SECRET"
-```
+Schedule: create a QStash schedule that `POST`s to
+`{QSTASH_TARGET_BASE_URL}/api/jobs/sla-sweep` (e.g. every 5 minutes). QStash signs each
+request automatically; no manual `Authorization` header is needed.
 
 ---
 
@@ -225,8 +226,9 @@ Before deploying (or promoting) to production:
       webhook endpoint is configured and pointing at this deployment
 - [ ] `EMAIL_INBOUND_WEBHOOK_SECRET` is set and the email provider's inbound webhook is
       configured with the matching secret
-- [ ] `SLA_SWEEP_SECRET` is set and the external scheduler is configured to call
-      `POST /api/jobs/sla-sweep` with it
+- [ ] `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`, and
+      `QSTASH_TARGET_BASE_URL` are set, and a QStash schedule is configured to call
+      `POST /api/jobs/sla-sweep`
 - [ ] `NODE_ENV=production` is set (enables HSTS and removes `'unsafe-eval'` from CSP)
 - [ ] The deployment runs behind a trusted proxy/edge that overwrites `x-forwarded-for`
       (see above)
