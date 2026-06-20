@@ -47,7 +47,7 @@ const PLANS = [
     pricePerYear: 990000, // ฿9,900/ปี (~2 เดือนฟรี)
     maxAgents: 15,
     maxSlaPolicies: 5,
-    features: ["sla_policies", "csat_survey", "custom_branding"],
+    features: ["sla_policies", "csat_survey", "custom_branding", "ai_assist"],
     stripePriceIdMonthly: null as string | null,
     stripePriceIdYearly: null as string | null,
     isActive: true,
@@ -59,7 +59,7 @@ const PLANS = [
     pricePerYear: 2990000, // ฿29,900/ปี (~2 เดือนฟรี)
     maxAgents: 0, // 0 = unlimited
     maxSlaPolicies: 0, // 0 = unlimited
-    features: ["sla_policies", "csat_survey", "custom_branding", "api_access"],
+    features: ["sla_policies", "csat_survey", "custom_branding", "api_access", "ai_assist"],
     stripePriceIdMonthly: null as string | null,
     stripePriceIdYearly: null as string | null,
     isActive: true,
@@ -97,6 +97,12 @@ const FEATURE_FLAGS = [
   {
     key: "analytics",
     description: "Reporting and analytics dashboard with KPIs, trends, and breakdowns",
+    defaultEnabled: false,
+    requiredPlan: "pro" as string | null,
+  },
+  {
+    key: "ai_assist",
+    description: "AI-assisted ticket summarization for agents",
     defaultEnabled: false,
     requiredPlan: "pro" as string | null,
   },

@@ -23,6 +23,8 @@ import {
   X,
   Tag,
   Plus,
+  Sparkles,
+  ExternalLink,
 } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import PriorityBadge from "@/components/ui/PriorityBadge";
@@ -53,6 +55,7 @@ import type {
   MembersResponse,
   MeResponse,
   MemberRole,
+  ApiError,
 } from "@/types/ticket";
 import type {
   CannedResponseDTO,
@@ -64,6 +67,7 @@ import type {
   TicketTagAddResponse,
   TicketTagRemoveResponse,
 } from "@/types/tag";
+import type { AiSummaryDTO } from "@/types/ai";
 
 // =============================================================================
 // CONSTANTS
@@ -827,6 +831,169 @@ function TagSection({ ticketId, initialTags, canEdit }: TagSectionProps) {
 }
 
 // =============================================================================
+// AI SUMMARY SECTION — ปุ่ม "สรุปด้วย AI" + panel แสดงผล (agent-only, on-demand)
+//   - on-demand draft: ไม่ persist ลง DB, แค่ให้ agent อ่าน
+//   - feature gate แบบ reactive: แสดงปุ่มเสมอ → ถ้า 403 FEATURE_NOT_AVAILABLE
+//     แสดง upgrade CTA (client ไม่มี signal ของ ai_summarize ที่เชื่อถือได้
+//     — plan string เดียวบอกไม่ได้เพราะมี per-tenant feature override)
+// =============================================================================
+
+type AiSummaryStatus = "idle" | "loading" | "success" | "locked" | "error";
+
+interface AiSummaryResponse {
+  data: AiSummaryDTO | null;
+  error: ApiError | null;
+}
+
+interface AiSummarySectionProps {
+  ticketId: string;
+}
+
+/** แปลง error response ของ summarize เป็นข้อความไทย (ไม่ครอบ 403 — จัดการแยกเป็น locked state) */
+function getAiSummaryErrorMessage(status: number, code: string | undefined): string {
+  if (status === 429 || code === "RATE_LIMITED") {
+    return "เรียกใช้บ่อยเกินไป กรุณาลองใหม่ภายหลัง";
+  }
+  if (status === 404 || code === "NOT_FOUND") {
+    return "ไม่พบ ticket นี้";
+  }
+  // 502 AI_ERROR และ error อื่น ๆ
+  return "สร้างสรุปไม่สำเร็จ กรุณาลองใหม่";
+}
+
+function AiSummarySection({ ticketId }: AiSummarySectionProps) {
+  const [status, setStatus] = useState<AiSummaryStatus>("idle");
+  const [summary, setSummary] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  async function handleSummarize() {
+    if (status === "loading") return;
+    setStatus("loading");
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/ai/summarize`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const json = (await res.json()) as AiSummaryResponse;
+
+      // feature ไม่อยู่ใน plan → upgrade CTA (ไม่ใช่ error inline)
+      if (res.status === 403 && json.error?.code === "FEATURE_NOT_AVAILABLE") {
+        setStatus("locked");
+        return;
+      }
+
+      if (!res.ok || json.error || !json.data) {
+        setErrorMessage(getAiSummaryErrorMessage(res.status, json.error?.code));
+        setStatus("error");
+        return;
+      }
+
+      setSummary(json.data.summary);
+      setStatus("success");
+    } catch {
+      setErrorMessage("ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่");
+      setStatus("error");
+    }
+  }
+
+  const isLoading = status === "loading";
+
+  return (
+    <div className="bg-surface rounded-xl border border-border shadow-sm overflow-hidden mb-4">
+      <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-border bg-stone">
+        <div className="flex items-center gap-2">
+          <Sparkles size={16} className="text-primary" aria-hidden="true" />
+          <h2 className="text-sm font-semibold text-foreground">สรุป Ticket ด้วย AI</h2>
+        </div>
+        <button
+          type="button"
+          onClick={() => void handleSummarize()}
+          disabled={isLoading}
+          className={[
+            "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold text-white transition-colors",
+            "bg-primary-strong hover:bg-primary-strong-hover disabled:hover:bg-primary-strong",
+            "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+          ].join(" ")}
+        >
+          {isLoading ? (
+            <RefreshCw size={14} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Sparkles size={14} aria-hidden="true" />
+          )}
+          {isLoading
+            ? "กำลังสรุป..."
+            : status === "success"
+              ? "สรุปอีกครั้ง"
+              : "สรุปด้วย AI"}
+        </button>
+      </div>
+
+      <div className="px-6 py-4">
+        {/* loading: skeleton */}
+        {isLoading && (
+          <div className="flex flex-col gap-2" aria-busy="true">
+            <div className="h-3 rounded bg-stone animate-pulse" />
+            <div className="h-3 rounded bg-stone animate-pulse w-[90%]" />
+            <div className="h-3 rounded bg-stone animate-pulse w-[75%]" />
+          </div>
+        )}
+
+        {/* locked: upgrade CTA (feature ไม่อยู่ใน plan) */}
+        {status === "locked" && (
+          <div className="flex flex-col items-center gap-3 py-4 text-center">
+            <div className="w-10 h-10 rounded-full bg-warning-tint flex items-center justify-center">
+              <Lock size={18} className="text-warning-ink" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                AI Summary ไม่รวมใน Plan ปัจจุบัน
+              </p>
+              <p className="text-sm text-secondary mt-1">
+                อัปเกรดแพ็กเกจเพื่อให้ AI สรุปบทสนทนาของ ticket ให้อัตโนมัติ
+              </p>
+            </div>
+            <Link
+              href="/settings/billing"
+              className={[
+                "inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors",
+                "bg-primary-strong hover:bg-primary-strong-hover",
+                "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
+              ].join(" ")}
+            >
+              <ExternalLink size={14} aria-hidden="true" />
+              ดู Plan และอัปเกรด
+            </Link>
+          </div>
+        )}
+
+        {/* error: inline alert */}
+        {status === "error" && errorMessage && (
+          <FormAlert variant="error" message={errorMessage} />
+        )}
+
+        {/* success: summary text (รักษา line break) */}
+        {status === "success" && summary && (
+          <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
+            {summary}
+          </p>
+        )}
+
+        {/* idle: hint ก่อนกดปุ่ม */}
+        {status === "idle" && (
+          <p className="text-sm text-muted">
+            กดปุ่ม “สรุปด้วย AI” เพื่อให้ระบบสรุปบทสนทนาทั้งหมดของ ticket นี้ (draft สำหรับ agent อ่าน)
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
 // MAIN COMPONENT
 // =============================================================================
 
@@ -1284,6 +1451,9 @@ export default function AgentTicketDetailPage() {
             }
           />
         </div>
+
+        {/* AI Summary — ปุ่มสรุปด้วย AI + panel (agent-only, on-demand draft) */}
+        <AiSummarySection ticketId={ticketId} />
 
         {/* Message thread */}
         <div className="bg-surface rounded-xl border border-border shadow-sm overflow-hidden mb-4">
