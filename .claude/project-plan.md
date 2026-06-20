@@ -42,14 +42,14 @@
 | 26 | Tags/labels for ticket triage | `phase-26/tags-labels` | ✅ done | ✅ |
 | 27 | PostgreSQL Row Level Security (defense-in-depth) | `phase-27/rls-hardening` | ✅ done | ✅ |
 | 28 | Async queue (QStash) + notifications — outbound email queue, in-app assign notify, SLA near-breach/breach notify | `phase-28/async-queue-notifications` | ✅ done | ✅ |
-| 29 | AI-assist (Claude Haiku 4.5) — summarize · suggest-reply (draft) · suggest-tags | `phase-29/ai-assist` | ✅ done | ❌ (รอ Dev push+merge) |
+| 29 | AI-assist (Claude Haiku 4.5) — summarize · suggest-reply (draft) · suggest-tags | `phase-29/ai-assist` | ✅ done | ✅ |
 
 > *Phase 20 = decision เชิงลบ (บันทึกว่า nonce CSP ใช้กับ `proxy.ts` ไม่ได้ — คง `unsafe-inline`) ไม่ใช่ feature ใหม่
 > **Chore branches** (merged, ไม่ใช่ phase): `chore/db-init-seed`, `fix/proxy-host-header`, `chore/theme-warm-palette`
 
 ## Git State (สำหรับ verify รอบหน้า)
-- **Phase 29 ยังไม่ merge:** branch `phase-29/ai-assist` มี 2 commit (`2c6e8af` Slice 1, `e4c242b` Slice 2+3) — **ยังไม่ push/merge** (Dev push+merge เอง). ทั้ง 3 slice ผ่าน security+qa gate, tsc clean, 545 tests pass
-- main HEAD (Phase 28 merge): `915a4b355501b2990b228411e64ecc99eac57a94` — **ยังไม่ push** (Dev push เอง)
+- main HEAD (Phase 29 merge): `66882f6` (`Merge branch 'phase-29/ai-assist'`) — **ยังไม่ push** (Dev push เอง). Phase 29 (3 slice AI-assist) merge `--no-ff` เข้า main local แล้ว, tsc clean, 545 tests pass
+- Phase 28 merge: `915a4b3` — **ยังไม่ push** (Dev push เอง)
 - ทุก phase-branch + chore-branch merge เข้า main แล้ว — ไม่มี branch ค้าง (local/remote = `main` เท่านั้น)
 - วิธี verify รอบหน้า: `git log --merges --oneline main`
 
