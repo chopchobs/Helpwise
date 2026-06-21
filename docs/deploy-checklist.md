@@ -89,7 +89,15 @@ Demo creds เป็น **public-by-design** (role=AGENT) → ใครก็ย
 
 ## 5. Seed demo data (acme / globex)
 
-- [ ] รัน demo seed กับ prod DB (idempotent — รันซ้ำปลอดภัย)
+> ⚠️ ลำดับ 3 step — `seed-demo.ts` ต้องมี Plan `"pro"` อยู่ก่อน ไม่งั้น fail.
+> รัน `prisma db seed` **คั่นกลาง** ระหว่าง migrate กับ demo seed เสมอ
+
+```bash
+npx prisma migrate deploy   # §4 — apply schema
+npx prisma db seed          # seed Plans + FeatureFlags (prerequisite ของ demo)
+npx tsx prisma/seed-demo.ts # demo data acme/globex (idempotent)
+```
+
 - [ ] verify acme = 7 demo ticket, ไม่มี dev/smoke junk
 
 ---
