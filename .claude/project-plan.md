@@ -5,7 +5,7 @@
 > รายละเอียดกฎทั้งหมดอยู่ใน `CLAUDE.md` ของ repo — ไฟล์นี้ **อ้างอิง ไม่ duplicate**
 
 ## Stack
-→ อ้าง `CLAUDE.md` § Tech Stack (Next.js 16.2 App Router · Prisma + PostgreSQL/Supabase · Tailwind v4 · Stripe · Redis/Upstash · Postmark · BullMQ)
+→ อ้าง `CLAUDE.md` § Tech Stack (Next.js 16.2 App Router · Prisma 7 + PostgreSQL/Supabase · Tailwind v4 · Custom UI + Lucide · Recharts · React Hook Form + Zod · Stripe · Redis/Upstash · Postmark · Upstash QStash · Claude Haiku)
 
 ## Phase Status (1 แถว = 1 phase-branch จริงบน main)
 
@@ -40,7 +40,7 @@
 | 24 | Reporting & analytics dashboard | `phase-24/reporting-dashboard` | ✅ done | ✅ |
 | 25 | File attachments via Supabase Storage | `phase-25/file-attachments` | ✅ done | ✅ |
 | 26 | Tags/labels for ticket triage | `phase-26/tags-labels` | ✅ done | ✅ |
-| 27 | PostgreSQL Row Level Security (defense-in-depth) | `phase-27/rls-hardening` | ✅ done | ✅ |
+| 27 | PostgreSQL Row Level Security — **scaffolded** as defense-in-depth (not active; app connects via BYPASSRLS role, `RLS_ENABLED=false`) | `phase-27/rls-hardening` | ✅ done | ✅ |
 | 28 | Async queue (QStash) + notifications — outbound email queue, in-app assign notify, SLA near-breach/breach notify | `phase-28/async-queue-notifications` | ✅ done | ✅ |
 | 29 | AI-assist (Claude Haiku 4.5) — summarize · suggest-reply (draft) · suggest-tags | `phase-29/ai-assist` | ✅ done | ✅ |
 | 30 | Portfolio Demo Readiness — landing page + demo seed (acme/globex) + one-click demo-login + AI rate-limit fail-closed | `phase-30/portfolio-demo` | ✅ done | ✅ |
@@ -49,24 +49,25 @@
 > **Chore branches** (merged, ไม่ใช่ phase): `chore/db-init-seed`, `fix/proxy-host-header`, `chore/theme-warm-palette`
 
 ## Git State (สำหรับ verify รอบหน้า)
-- main HEAD (Phase 30 merge): `30166cf` (`Merge branch 'phase-30/portfolio-demo'`) — **ยังไม่ push** (Dev push เอง). Phase 30 (landing + demo seed + demo-login + AI fail-closed) merge `--no-ff` เข้า main local แล้ว, tsc clean, security gate PASS (no High/Critical). acme dev/smoke junk #1-18 cleanup เสร็จแล้ว (tx commit: ลบ 18 ticket + 5 orphan contact, audit คงครบ) — acme = demo ล้วน 7 ticket. ดู memory `seed-demo-idempotency-acme-cruft`
-- Phase 29 merge: `66882f6` (`Merge branch 'phase-29/ai-assist'`) — Phase 29 (3 slice AI-assist) merge `--no-ff` เข้า main local แล้ว, tsc clean, 545 tests pass
-- Phase 28 merge: `915a4b3` — **ยังไม่ push** (Dev push เอง)
-- ทุก phase-branch + chore-branch merge เข้า main แล้ว — ไม่มี branch ค้าง (local/remote = `main` เท่านั้น)
-- วิธี verify รอบหน้า: `git log --merges --oneline main`
+**Status: LAUNCHED — live ที่ gethelpwise.xyz · ทุกเฟส merge + push แล้ว (`main` = `origin/main` in-sync)**
+- main HEAD: `30ef022` (`docs: verify README accuracy`). Phase 31-33 (production-deploy → deploy-verify → post-launch docs) ทำตรงบน main (docs/handoff + `chore: swap root domain to gethelpwise.xyz` `f417541`) — ไม่ใช่ feature-branch
+- ทุก phase-branch (01-30) + chore-branch merge เข้า main + push ขึ้น `origin/main` แล้ว — ไม่มี branch ค้าง, ไม่มี commit ค้าง push
+- Phase 30 (landing + demo seed acme/globex + demo-login + AI fail-closed): security gate PASS (no High/Critical); acme = demo ล้วน 7 ticket (#1001-1007) หลัง cleanup junk. ดู memory `seed-demo-idempotency-acme-cruft`
+- วิธี verify รอบหน้า: `git log --merges --oneline main` · `git status -sb` (ควรเป็น `main...origin/main` ไม่มี ahead/behind)
 
 ## Decisions & Constraints (ยังมีผล)
 - กฎหลักทั้งหมด → อ้าง `CLAUDE.md`: Multi-tenancy Rules · Identity & Audiences · Ticketing / Internal-note isolation · SLA · Inbound/Outbound Email · Subscription & Billing (money เก็บเป็น `Int`) · Feature Flag · Audit Log · **Agent Ownership Map**
 - Memory (`.claude/projects/.../memory/MEMORY.md`): Prisma 7 + Supabase datasource · tenant resolution อยู่ที่ `src/proxy.ts` (ไม่ใช่ `middleware.ts`) · tenantPrisma ไม่ใช้ใน `$transaction` · iCloud stray duplicate files
-- **RLS kill-switch `RLS_ENABLED` default = `false`** (verified: `.env.example:17`, `src/lib/tenant.ts:51`) — RLS code merged แล้วแต่ **ยังไม่ activate** จนกว่าจะ migrate production
+- **Isolation = application-enforced** (`tenantPrisma()` scope ทุก query) เป็นหลัก. **RLS = scaffolded defense-in-depth, ยังไม่ active** — prod app connect ผ่าน **BYPASSRLS role**, kill-switch `RLS_ENABLED` default = `false` (verified: `.env.example:17`, `src/lib/tenant.ts:51`). RLS code merged แล้วแต่จะ enforce ก็ต่อเมื่อสลับ role + เปิด flag
 - **Queue = Upstash QStash** (ไม่ใช่ BullMQ — serverless fit): outbound email + sla-sweep ผ่าน QStash signature (worker route verify fail-closed บน prod, tenantId จาก verified source → `tenantPrisma`). sla-sweep เลิกใช้ `SLA_SWEEP_SECRET` แล้ว. Notification = agent-audience (TenantMember recipient, FORCE RLS). deferred hardening → memory `phase28-deferred-hardening`
 
 ## Definition of Done
 → อ้าง DoD 8 ข้อใน `CLAUDE.md` § Definition of Done — เป็นเกณฑ์ **block** ของ `code-review` / `qa-testing` / `security`
 
 ## ⚠️ ค้าง / ต้องสังเกต
-1. **ไม่มี Phase ค้าง** — merge ครบทุก branch (Phase 28 merge เข้า main local แล้ว, Dev push เอง)
-2. **RLS ยังไม่ activate** (`RLS_ENABLED=false`) — เปิดพร้อม migrate production เท่านั้น
+1. **ไม่มี Phase ค้าง · LAUNCHED แล้ว** — merge + push ครบทุก branch, deploy live ที่ gethelpwise.xyz (Phase 31-33)
+2. **RLS ยังไม่ active** (`RLS_ENABLED=false`, app ใช้ BYPASSRLS role) — application-enforced isolation เป็นด่านจริง; จะ activate RLS ต้องสลับ DB role + เปิด flag
 3. **Stray duplicate files (iCloud)** — เป็นปัญหาเป็นระยะ ทำ build พัง; ลบทีละไฟล์ (`rm <file>` ไม่ใช่ `rm -rf`) เมื่อพบ
-4. **Phase 28 deploy ค้าง (Dev ทำทีหลัง):** apply migration `20260619000000_add_notification` + `20260619010000_add_sla_notification` · provision QStash env (`QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`, `QSTASH_TARGET_BASE_URL`) · ตั้ง QStash cron schedule ยิง `/api/jobs/sla-sweep` · ลบ env `SLA_SWEEP_SECRET` ที่เลิกใช้
-5. นี่คือ plan/handoff ครั้งแรกของ project — ก่อนหน้านี้ไม่มี `project-plan.md`
+4. **Phase 28 deploy = เสร็จแล้วตอน launch** (Phase 31-33): migration `20260619000000_add_notification` + `20260619010000_add_sla_notification` apply แล้ว · QStash env provision + cron ยิง `/api/jobs/sla-sweep` แล้ว · `SLA_SWEEP_SECRET` ถอดออกครบ. deferred hardening ที่ยังเหลือ → memory `phase28-deferred-hardening`
+5. **Email = Postmark scaffold** (`src/lib/email.ts` fetch-based, ไม่มี SDK dep; SendGrid = TODO) — wire จริง + verify provider key ก่อนเปิด outbound production จริงจัง
+6. นี่คือ plan/handoff ครั้งแรกของ project — ก่อนหน้านี้ไม่มี `project-plan.md`

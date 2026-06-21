@@ -15,7 +15,7 @@
 
 | หัวข้อกฎ | เจ้าภาพหลัก (ต้องบังคับใช้) | เกี่ยวข้อง |
 | --- | --- | --- |
-| **Multi-tenancy Rules** | `database` (schema + `tenantId` + RLS), `backend` (tenant-scoped query, context, membership verify) | `security` (audit อันดับ 1), `frontend` |
+| **Multi-tenancy Rules** | `database` (schema + `tenantId`; RLS scaffolded as defense-in-depth, **not active** — BYPASSRLS role), `backend` (application-enforced tenant-scoped query, context, membership verify) | `security` (audit อันดับ 1), `frontend` |
 | **Identity & Audiences** | `backend` (แยก guard agent vs contact), `security` (privilege/visibility) | `database` (Contact per-tenant), `frontend` (แยก app/portal) |
 | **Ticketing Rules** | `backend` (lifecycle, visibility), `database` (Ticket/Message schema) | `frontend` (ซ่อน internal note ฝั่ง portal), `security` |
 | **SLA Rules** | `backend` (timer, business hours), `database` (SlaPolicy) | `frontend` (badge/นับเวลา) |
@@ -34,12 +34,13 @@
 
 - Next.js 16.2 (App Router) + TypeScript
 - Prisma + PostgreSQL (Supabase)
-- Tailwind CSS v4 · UI: Shadcn UI, Radix UI
-- State: Zustand · Forms: React Hook Form + Zod · Icons: Lucide React
+- Tailwind CSS v4 · UI: Custom components + Lucide React (icons)
+- Charts: Recharts (reporting) · Forms: React Hook Form + Zod
 - **Billing: Stripe** (Subscriptions + Webhooks)
 - **Cache / Tenant lookup: Redis** (Upstash)
 - **Email: Postmark/SendGrid** (outbound + inbound parse webhook)
 - **Queue: Upstash QStash** — งาน async: ส่ง email, ตรวจ SLA breach, ประมวลผล inbound
+- **AI: Claude Haiku** (ticket summarize / suggest-reply / suggest-tags)
 
 ---
 
@@ -129,7 +130,7 @@ const tickets = await db.ticket.findMany()
 - **SlaPolicy ต่อ tenant** (และอาจผูกกับ plan): กำหนด **first-response time** + **resolution time** ตาม priority
 - timer คิดตาม **business hours** ของ tenant (เก็บใน settings) ไม่ใช่ 24 ชม. เสมอ
 - **pause timer เมื่อ status = `PENDING`** (รอลูกค้าตอบ) แล้ว resume เมื่อกลับมา
-- ตรวจ SLA breach แบบ async ผ่าน queue (BullMQ) — เมื่อใกล้/เกิน deadline → flag + แจ้งเตือน
+- ตรวจ SLA breach แบบ async ผ่าน queue (Upstash QStash) — เมื่อใกล้/เกิน deadline → flag + แจ้งเตือน
 - SLA แบบละเอียด (เช่น หลาย policy, business hours) เป็น feature ที่ **gate ตาม plan** ผ่าน `hasFeature()`
 
 ---
