@@ -1,8 +1,12 @@
-import { DEMO_URL, GITHUB_URL } from "@/lib/landing-links";
+import { GITHUB_URL } from "@/lib/landing-links";
 import GithubIcon from "@/components/landing/GithubIcon";
 
+interface FinalCtaProps {
+  demoUrl: string;
+}
+
 // Final CTA band — full-width terracotta, text ขาวบน bg-primary-strong (AA)
-export default function FinalCta() {
+export default function FinalCta({ demoUrl }: FinalCtaProps) {
   return (
     <section className="bg-primary-strong">
       <div className="mx-auto w-full max-w-6xl px-4 py-16 text-center sm:px-6">
@@ -11,7 +15,7 @@ export default function FinalCta() {
         </h2>
         <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <a
-            href={DEMO_URL}
+            href={demoUrl}
             className="inline-flex w-full items-center justify-center rounded-lg bg-white px-6 py-3 text-base font-semibold text-primary-ink transition-colors hover:bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:w-auto"
           >
             Try the live demo

@@ -1,9 +1,13 @@
-import { DEMO_URL, GITHUB_URL } from "@/lib/landing-links";
+import { GITHUB_URL } from "@/lib/landing-links";
 import HeroMockup from "@/components/landing/HeroMockup";
 import GithubIcon from "@/components/landing/GithubIcon";
 
+interface HeroProps {
+  demoUrl: string;
+}
+
 // Hero section — headline + subhead + CTA + static product mockup
-export default function Hero() {
+export default function Hero({ demoUrl }: HeroProps) {
   return (
     <section className="border-b border-border bg-background">
       <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24">
@@ -18,7 +22,7 @@ export default function Hero() {
 
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <a
-              href={DEMO_URL}
+              href={demoUrl}
               className="inline-flex w-full items-center justify-center rounded-lg bg-primary-strong px-6 py-3 text-base font-semibold text-white transition-colors hover:bg-primary-strong-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:w-auto"
             >
               Try the live demo →

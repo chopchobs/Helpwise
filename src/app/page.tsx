@@ -5,20 +5,24 @@ import AiSection from "@/components/landing/AiSection";
 import UnderTheHood from "@/components/landing/UnderTheHood";
 import FinalCta from "@/components/landing/FinalCta";
 import LandingFooter from "@/components/landing/LandingFooter";
+import { resolveDemoUrl } from "@/lib/demo-url";
 
-// Landing page (root domain, ไม่มี tenant context) — server component
-export default function Home() {
+// Landing page — render ที่ "/" ของทุก host (รวม tenant subdomain) — server component
+// demoUrl resolve ตาม host: subdomain → "/demo" (อยู่ tenant เดิม), root → acme fallback
+export default async function Home() {
+  const demoUrl = await resolveDemoUrl();
+
   return (
     <div className="flex flex-1 flex-col bg-background">
-      <LandingNav />
+      <LandingNav demoUrl={demoUrl} />
       <main className="flex-1">
-        <Hero />
+        <Hero demoUrl={demoUrl} />
         <TechStrip />
 
         <AiSection />
         <UnderTheHood />
 
-        <FinalCta />
+        <FinalCta demoUrl={demoUrl} />
       </main>
       <LandingFooter />
     </div>

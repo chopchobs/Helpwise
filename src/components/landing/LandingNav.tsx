@@ -1,10 +1,14 @@
 import Link from "next/link";
-import { DEMO_URL, GITHUB_URL, SIGNIN_URL } from "@/lib/landing-links";
+import { GITHUB_URL, SIGNIN_URL } from "@/lib/landing-links";
 import GithubIcon from "@/components/landing/GithubIcon";
+
+interface LandingNavProps {
+  demoUrl: string;
+}
 
 // Nav bar ของ landing — sticky top, server component (ไม่มี interactivity)
 // ลิงก์กลางซ่อนบน mobile เพื่อกัน nav ล้น (mobile-first, ไม่มี hamburger ตาม scope)
-export default function LandingNav() {
+export default function LandingNav({ demoUrl }: LandingNavProps) {
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-surface/95 backdrop-blur">
       <nav
@@ -50,7 +54,7 @@ export default function LandingNav() {
             Sign in
           </a>
           <a
-            href={DEMO_URL}
+            href={demoUrl}
             className="inline-flex items-center justify-center rounded-lg bg-primary-strong px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-strong-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
             Try live demo
