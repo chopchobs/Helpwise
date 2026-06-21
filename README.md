@@ -2,8 +2,11 @@
 
 Helpwise is a multi-tenant SaaS help desk / ticketing platform for B2B companies. Each
 tenant (customer company) gets an internal agent workspace and a public customer portal,
-fully isolated from other tenants via a shared-database, shared-schema architecture
-(`tenantId`-scoped queries on every tenant model).
+fully isolated from other tenants via application-enforced tenant isolation — a
+shared-database, shared-schema architecture with `tenantId`-scoped queries on every
+tenant model. PostgreSQL Row-Level Security is scaffolded as defense-in-depth but
+not yet activated (the app currently connects with a `BYPASSRLS` role; enforcing RLS
+requires a dedicated non-bypass role plus DB-level cross-tenant tests).
 
 ## Tech Stack
 

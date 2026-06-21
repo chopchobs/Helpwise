@@ -14,7 +14,7 @@ const HIGHLIGHTS: Highlight[] = [
   },
   {
     icon: Layers,
-    text: "Multi-tenant from day one — app-level scoping + PostgreSQL Row-Level Security",
+    text: "Multi-tenant from day one — application-enforced tenant isolation, with PostgreSQL RLS scaffolded as defense-in-depth",
   },
   {
     icon: Bot,
@@ -42,7 +42,7 @@ export default function UnderTheHood() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/helpwise-architecture.svg"
-            alt="Helpwise system architecture: subdomain routing, multi-tenant Postgres with RLS, QStash queue, Anthropic AI"
+            alt="Helpwise system architecture: subdomain routing, application-enforced multi-tenant isolation (PostgreSQL RLS scaffolded as defense-in-depth), QStash queue, Anthropic AI"
             loading="lazy"
             className="mx-auto h-auto w-full max-w-4xl"
           />
