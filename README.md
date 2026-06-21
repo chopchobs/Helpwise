@@ -19,7 +19,7 @@ separate set of tickets, contacts, and data:
 - **Globex** → [globex.gethelpwise.xyz](https://globex.gethelpwise.xyz)
 
 **No signup required.** From the landing page click **"Try live demo"**, or inside a
-workspace click **"Log in as demo agent"** to enter as a read-to-explore demo agent.
+workspace click **"Log in as demo agent"** to enter as a ready-to-explore demo agent.
 Once inside, open any ticket and try **AI summarize**. Switch between Acme and Globex to
 confirm the two tenants never see each other's data — that's the isolation working end to end.
 
@@ -48,8 +48,8 @@ confirm the two tenants never see each other's data — that's the isolation wor
 - **Framework:** Next.js 16.2 (App Router) + TypeScript
 - **Database:** Prisma 7 + PostgreSQL (Supabase)
 - **Styling:** Tailwind CSS v4
-- **UI:** Shadcn UI, Radix UI
-- **State:** Zustand
+- **UI:** Custom components + Lucide React (icons)
+- **Charts:** Recharts (reporting dashboard)
 - **Forms & Validation:** React Hook Form + Zod
 - **Cache / queues:** Redis + QStash (Upstash)
 - **Billing:** Stripe (Subscriptions + Webhooks)
