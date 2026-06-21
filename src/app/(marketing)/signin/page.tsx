@@ -54,7 +54,7 @@ export default function SigninPage() {
       // ประกอบ URL ของ tenant login แล้ว full navigation
       // (ข้าม subdomain — ใช้ window.location ไม่ใช่ router)
       // buildTenantLoginUrl validate slug อีกชั้น (defensive) — null = format ผิด กัน open-redirect
-      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com";
+      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "gethelpwise.xyz";
       const loginUrl = buildTenantLoginUrl(values.slug, rootDomain);
       if (!loginUrl) {
         setFormError("slug ไม่ถูกต้อง ไม่สามารถพาไป workspace ได้");
@@ -114,7 +114,7 @@ export default function SigninPage() {
               className="px-3 py-2 bg-stone text-sm text-secondary border-l border-border select-none whitespace-nowrap"
               aria-hidden="true"
             >
-              .helpwise.com
+              .gethelpwise.xyz
             </span>
           </div>
           {errors.slug ? (

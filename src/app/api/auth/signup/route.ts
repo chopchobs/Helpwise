@@ -230,7 +230,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       console.error("[signup] audit.log failed:", auditErr instanceof Error ? auditErr.message : String(auditErr));
     }
 
-    // 7. Return slug เพื่อให้ frontend redirect ไป {slug}.helpwise.com/login
+    // 7. Return slug เพื่อให้ frontend redirect ไป {slug}.gethelpwise.xyz/login
     //    ไม่ auto-login เพราะ cookie คนละ domain (root vs subdomain)
     return NextResponse.json(
       { data: { slug: result.tenant.slug }, error: null },

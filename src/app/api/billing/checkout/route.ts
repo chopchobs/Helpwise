@@ -178,7 +178,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com";
+    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "gethelpwise.xyz";
     const baseUrl = `https://${tenant.slug}.${rootDomain}`;
     const successUrl = `${baseUrl}/settings/billing?status=success`;
     const cancelUrl = `${baseUrl}/settings/billing?status=cancel`;

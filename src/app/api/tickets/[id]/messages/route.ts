@@ -179,7 +179,7 @@ export async function POST(
         },
       });
 
-      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com";
+      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "gethelpwise.xyz";
       // ใช้ slug จาก tenant ถ้ามี — fallback ใช้ tenantId เพื่อ unique
       // Note: ctx ไม่มี slug โดยตรง — ดึง subdomain จาก tenant record ถ้าต้องการ
       // สำหรับ Message-ID ใช้ tenantId แทน slug ก็พอ (ไม่จำเป็นต้อง valid subdomain)

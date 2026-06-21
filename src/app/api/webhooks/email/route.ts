@@ -122,7 +122,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com";
+  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "gethelpwise.xyz";
 
   // ─── ขั้นที่ 3: resolve tenant จาก recipient address ─────────────────────
   // ⚠️ tenant ต้องมาจาก recipient address เท่านั้น — ห้าม trust field อื่นจาก payload

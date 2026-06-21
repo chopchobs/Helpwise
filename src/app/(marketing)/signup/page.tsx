@@ -88,7 +88,7 @@ export default function SignupPage() {
         // สมัครสำเร็จ — แสดง workspace URL ให้ user ไป login
         // ไม่ auto-redirect เพราะ cookie คนละ domain
         const rootDomain =
-          process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com";
+          process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "gethelpwise.xyz";
         setSuccessState({ slug: json.data.slug, rootDomain });
       }
     } catch {
@@ -186,7 +186,7 @@ export default function SignupPage() {
               className="px-3 py-2 bg-stone text-sm text-secondary border-l border-border select-none whitespace-nowrap"
               aria-hidden="true"
             >
-              .helpwise.com
+              .gethelpwise.xyz
             </span>
           </div>
           {errors.slug ? (

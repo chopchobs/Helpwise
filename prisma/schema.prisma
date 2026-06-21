@@ -152,7 +152,7 @@ model User {
 // =============================================================================
 
 // Tenant — root ของทุกอย่างที่ tenant-scoped
-// slug ใช้สำหรับ subdomain routing: {slug}.helpwise.com
+// slug ใช้สำหรับ subdomain routing: {slug}.gethelpwise.xyz
 // settings เก็บ business hours + portal branding (logoUrl, accentColor) เป็น Json
 // หมายเหตุ: business hours เก็บใน settings Json แทนที่จะสร้าง model แยก
 //   เพราะ structure ไม่ซับซ้อน (ไม่มี relation) และ query ทั้งก้อนเสมอ

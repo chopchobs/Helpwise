@@ -54,7 +54,7 @@
 ### 6. 🔒 Multi-tenancy section (เปลี่ยน engineering เป็น selling point)
 หัวข้อ: "True isolation. Not just a `WHERE` clause."
 - 3 จุด:
-  - **Subdomain per tenant** — `acme.helpwise.com` · per-tenant branding
+  - **Subdomain per tenant** — `acme.gethelpwise.xyz` · per-tenant branding
   - **Defense in depth** — app-level scoping + PostgreSQL Row-Level Security
   - **Two audiences, never mixed** — agents & customers ใช้ auth คนละเส้น
 - *ทำไม:* customer มอง = ปลอดภัย · recruiter มอง = "คนนี้เข้าใจ multi-tenant ลึกระดับ senior"

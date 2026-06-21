@@ -87,7 +87,7 @@ const tickets = await db.ticket.findMany()
 
 ### Subdomain Routing
 
-- URL: `{slug}.helpwise.com` (เช่น `acme.helpwise.com`)
+- URL: `{slug}.gethelpwise.xyz` (เช่น `acme.gethelpwise.xyz`)
 - `middleware.ts`: แยก `slug` → lookup tenant (cache Redis) → ส่ง `x-tenant-id`, `x-tenant-plan` (**เขียนทับ header จาก client เสมอ**) → ไม่พบ = 404
 
 ---
@@ -136,7 +136,7 @@ const tickets = await db.ticket.findMany()
 
 ## 📧 Inbound / Outbound Email Rules
 
-- **Inbound:** ลูกค้าส่งเมลเข้า `support@{slug}.helpwise.com` → provider ยิง webhook → parse เป็น ticket ใหม่/append เข้า ticket เดิม (ดู threading)
+- **Inbound:** ลูกค้าส่งเมลเข้า `support@{slug}.gethelpwise.xyz` → provider ยิง webhook → parse เป็น ticket ใหม่/append เข้า ticket เดิม (ดู threading)
   - **idempotent ด้วย Message-ID** (เก็บใน `ProcessedInboundEmail`) — provider ส่งซ้ำได้ ห้ามสร้าง ticket ซ้ำ (หลักการเดียวกับ Stripe webhook)
   - **verify** ว่าเมลมาจาก provider จริง (signature/secret) — กัน spoof สร้าง ticket ปลอม
   - routing: address → resolve tenant (เหมือน subdomain แต่ผ่านอีเมล)

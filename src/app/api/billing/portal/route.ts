@@ -76,7 +76,7 @@ export async function POST(_request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com";
+    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "gethelpwise.xyz";
     const returnUrl = `https://${tenant.slug}.${rootDomain}/settings/billing`;
 
     // ─── ขั้นที่ 4: สร้าง Stripe Billing Portal Session ─────────────────────

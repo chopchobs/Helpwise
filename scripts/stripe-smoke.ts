@@ -181,7 +181,7 @@ async function main(): Promise<void> {
   if (!checkoutPriceId) {
     fail("Checkout session", "ไม่มี priceId ที่ reconcile ผ่าน — ข้าม checkout test");
   } else {
-    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com";
+    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "gethelpwise.xyz";
     const successUrl = `https://${rootDomain}/settings/billing?status=success`;
     const cancelUrl = `https://${rootDomain}/settings/billing?status=cancel`;
 

@@ -724,7 +724,7 @@ export default function BrandingSettingsPage() {
 
         {/* Info note */}
         <p className="mt-4 text-xs text-muted">
-          การเปลี่ยนแปลงจะมีผลกับ portal ลูกค้า (&lt;slug&gt;.helpwise.com/portal) ทันที ไม่ต้องรีสตาร์ทระบบ
+          การเปลี่ยนแปลงจะมีผลกับ portal ลูกค้า (&lt;slug&gt;.gethelpwise.xyz/portal) ทันที ไม่ต้องรีสตาร์ทระบบ
         </p>
 
       </div>

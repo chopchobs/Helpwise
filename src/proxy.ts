@@ -61,7 +61,7 @@ const RESERVED_SUBDOMAINS = new Set([
 
 /**
  * Path prefixes ที่เป็น marketing/admin — ไม่ต้อง tenant context
- * (ใช้บน root domain: helpwise.com/pricing, helpwise.com/login ฯลฯ)
+ * (ใช้บน root domain: gethelpwise.xyz/pricing, gethelpwise.xyz/login ฯลฯ)
  *
  * H-2: ต้องลงท้ายด้วย "/" เพื่อ exact-prefix match ที่ถูกต้อง
  * (กัน "/admin_panel" match "/admin", "/api/webhooks/stripe_bypass" match "/api/webhooks/stripe")
@@ -200,7 +200,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     request.headers.get("x-forwarded-host") ??
     url.host;
   const hostname = rawHost.split(":")[0]; // ตัด port ออก
-  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com";
+  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "gethelpwise.xyz";
 
   // H-2: ข้าม path ที่ไม่ต้องการ tenant context (assets, webhooks, admin)
   // match exact หรือมี "/" ตามหลัง prefix — กัน "/admin_panel" match "/admin/"
@@ -213,7 +213,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   }
 
   // แยก slug จาก hostname
-  // รูปแบบ: {slug}.helpwise.com หรือ {slug}.localhost สำหรับ dev
+  // รูปแบบ: {slug}.gethelpwise.xyz หรือ {slug}.localhost สำหรับ dev
   let slug: string | null = null;
 
   if (hostname === rootDomain || hostname === "localhost") {

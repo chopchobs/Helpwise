@@ -54,7 +54,7 @@ export interface ParsedInboundEmail {
     email: string;
     name: string | null;
   };
-  /** recipient email address ที่ email ถูกส่งมา (เช่น support@acme.helpwise.com) */
+  /** recipient email address ที่ email ถูกส่งมา (เช่น support@acme.gethelpwise.xyz) */
   recipient: string;
   subject: string;
   textBody: string;
@@ -315,17 +315,17 @@ function timingSafeCompare(input: string, expected: Buffer): boolean {
  * แยก tenant slug จาก recipient email address
  *
  * รูปแบบที่รองรับ:
- *   - support@{slug}.helpwise.com         ← รูปแบบหลัก (local-part = support)
- *   - support+{tag}@{slug}.helpwise.com   ← มี MailboxHash / plus-addressing
- *   - {slug}@helpwise.com                 ← รูปแบบสำรอง (slug อยู่ที่ local-part)
- *   - {anything}@{slug}.helpwise.com      ← local-part อื่น ๆ บน subdomain ของ slug
+ *   - support@{slug}.gethelpwise.xyz         ← รูปแบบหลัก (local-part = support)
+ *   - support+{tag}@{slug}.gethelpwise.xyz   ← มี MailboxHash / plus-addressing
+ *   - {slug}@gethelpwise.xyz                 ← รูปแบบสำรอง (slug อยู่ที่ local-part)
+ *   - {anything}@{slug}.gethelpwise.xyz      ← local-part อื่น ๆ บน subdomain ของ slug
  *
  * หมายเหตุ: รูปแบบหลักที่ใช้คือ subdomain slug
- *   "support@acme.helpwise.com" → slug = "acme"
+ *   "support@acme.gethelpwise.xyz" → slug = "acme"
  *   slug ต้องผ่าน /^[a-z0-9-]+$/ เสมอ
  *
  * @param recipient - email address ของ recipient (ควร lowercase แล้ว)
- * @param rootDomain - root domain เช่น "helpwise.com" (จาก NEXT_PUBLIC_ROOT_DOMAIN)
+ * @param rootDomain - root domain เช่น "gethelpwise.xyz" (จาก NEXT_PUBLIC_ROOT_DOMAIN)
  * @returns slug string หรือ null ถ้า parse ไม่ได้หรือ slug ไม่ valid
  */
 export function extractSlugFromRecipient(
@@ -348,19 +348,19 @@ export function extractSlugFromRecipient(
   let slug: string | null = null;
 
   // --- รูปแบบ 1: {anything}@{slug}.{rootDomain} ---
-  // เช่น support@acme.helpwise.com → domain = "acme.helpwise.com", slug = "acme"
+  // เช่น support@acme.gethelpwise.xyz → domain = "acme.gethelpwise.xyz", slug = "acme"
   const subdomainSuffix = `.${domain}`;
   if (emailDomain.endsWith(subdomainSuffix)) {
     const subdomain = emailDomain.slice(0, -(subdomainSuffix.length));
-    // subdomain ต้องไม่มี dot เพิ่ม (เช่น "a.b.helpwise.com" ไม่ใช่ tenant slug)
+    // subdomain ต้องไม่มี dot เพิ่ม (เช่น "a.b.gethelpwise.xyz" ไม่ใช่ tenant slug)
     if (subdomain.length > 0 && !subdomain.includes(".")) {
       slug = subdomain;
     }
   }
 
   // --- รูปแบบ 2: {slug}@{rootDomain} (fallback — slug ที่ local-part) ---
-  // เช่น acme@helpwise.com → slug = "acme"
-  // ลบ MailboxHash (+tag) ออก: "acme+abc123@helpwise.com" → localPart base = "acme"
+  // เช่น acme@gethelpwise.xyz → slug = "acme"
+  // ลบ MailboxHash (+tag) ออก: "acme+abc123@gethelpwise.xyz" → localPart base = "acme"
   if (!slug && emailDomain === domain) {
     const localBase = localPart.split("+")[0] ?? localPart;
     if (localBase.length > 0) {

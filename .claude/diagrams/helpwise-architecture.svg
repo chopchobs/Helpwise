@@ -12,7 +12,7 @@
 <text x="34" y="88" fill="#64748b" font-weight="700" font-size="11" letter-spacing="0.5">CLIENTS</text>
 <rect x="34" y="96" width="290" height="56" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
 <text x="50" y="118" fill="#0f172a" font-weight="600" font-size="12.5">Agent App</text>
-<text x="50" y="136" fill="#64748b" font-size="10" font-family="monospace">{slug}.helpwise.com → /(agent)</text>
+<text x="50" y="136" fill="#64748b" font-size="10" font-family="monospace">{slug}.gethelpwise.xyz → /(agent)</text>
 <rect x="345" y="96" width="290" height="56" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
 <text x="361" y="118" fill="#0f172a" font-weight="600" font-size="12.5">Customer Portal</text>
 <text x="361" y="136" fill="#64748b" font-size="10" font-family="monospace">/(portal) · magic-link auth</text>

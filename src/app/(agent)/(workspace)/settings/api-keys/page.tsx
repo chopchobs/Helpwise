@@ -421,7 +421,7 @@ function ApiKeyRow({ apiKey, onRevoke, isActing }: ApiKeyRowProps) {
 // =============================================================================
 
 function ApiUsageHint() {
-  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://{your-subdomain}.helpwise.com";
+  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://{your-subdomain}.gethelpwise.xyz";
 
   return (
     <div className="bg-stone rounded-xl border border-border p-4 flex flex-col gap-2">

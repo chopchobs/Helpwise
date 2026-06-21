@@ -145,7 +145,7 @@ export default function PortalLoginPage() {
 
       <p className="mt-4 text-center text-xs text-secondary">
         ต้องการความช่วยเหลือ?{" "}
-        <a href="mailto:support@helpwise.com" className="text-primary-ink hover:underline font-medium">
+        <a href="mailto:support@gethelpwise.xyz" className="text-primary-ink hover:underline font-medium">
           ติดต่อทีม support
         </a>
       </p>

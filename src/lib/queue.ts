@@ -170,7 +170,7 @@ export async function verifyQStashSignature(
     // verify เทียบ signature กับ raw body — throw/false = invalid
     // ⚠️ ใช้ pinned target URL ไม่ใช่ request.url:
     //    QStash sign ด้วย target URL ตอน publish/schedule (= QSTASH_TARGET_BASE_URL + path) แต่
-    //    request.url หลัง Vercel proxy + custom subdomain {slug}.helpwise.com จะไม่ตรง
+    //    request.url หลัง Vercel proxy + custom subdomain {slug}.gethelpwise.xyz จะไม่ตรง
     //    (host/scheme/query เพี้ยน) → SignatureError ทุก job. pin ให้ sign-side กับ
     //    verify-side อ่านค่าเดียวกันจาก env เสมอ
     //    resolve แบบ lazy ที่นี่ (หลังเช็ค signing key แล้ว) — caller ที่ไม่ส่ง targetUrl

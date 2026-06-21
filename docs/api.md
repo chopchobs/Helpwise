@@ -5,7 +5,7 @@ available to tenants on the **Enterprise** plan.
 
 - **Base URL:** `https://{slug}.{ROOT_DOMAIN}/api/v1` — replace `{slug}` with your
   tenant's subdomain (e.g. `acme`) and `{ROOT_DOMAIN}` with your Helpwise domain
-  (e.g. `helpwise.com`), so `https://acme.helpwise.com/api/v1`.
+  (e.g. `gethelpwise.xyz`), so `https://acme.gethelpwise.xyz/api/v1`.
 - **Format:** All requests and responses use JSON.
 - **Versioning:** The current version is `v1`.
 
@@ -137,7 +137,7 @@ List tickets for your tenant, with optional filters and pagination.
 #### Example request
 
 ```bash
-curl -s "https://acme.helpwise.com/api/v1/tickets?status=OPEN&priority=HIGH&page=1&limit=20" \
+curl -s "https://acme.gethelpwise.xyz/api/v1/tickets?status=OPEN&priority=HIGH&page=1&limit=20" \
   -H "Authorization: Bearer hw_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
@@ -192,7 +192,7 @@ Get a single ticket, including its public messages.
 #### Example request
 
 ```bash
-curl -s "https://acme.helpwise.com/api/v1/tickets/clx1a2b3c4d5e6f7g8h9i0j1" \
+curl -s "https://acme.gethelpwise.xyz/api/v1/tickets/clx1a2b3c4d5e6f7g8h9i0j1" \
   -H "Authorization: Bearer hw_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
@@ -274,7 +274,7 @@ Create a new ticket.
 #### Example request
 
 ```bash
-curl -s -X POST "https://acme.helpwise.com/api/v1/tickets" \
+curl -s -X POST "https://acme.gethelpwise.xyz/api/v1/tickets" \
   -H "Authorization: Bearer hw_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{

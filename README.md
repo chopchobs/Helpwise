@@ -66,7 +66,7 @@ requires a dedicated non-bypass role plus DB-level cross-tenant tests).
    ```
 
    Open [http://localhost:3000](http://localhost:3000). Tenant-specific pages are served
-   from subdomains (`{slug}.localhost:3000` in development, `{slug}.helpwise.com` in
+   from subdomains (`{slug}.localhost:3000` in development, `{slug}.gethelpwise.xyz` in
    production) — see `src/proxy.ts` for tenant resolution.
 
 ## npm Scripts

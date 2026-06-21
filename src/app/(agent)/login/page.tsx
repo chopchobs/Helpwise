@@ -134,7 +134,7 @@ export default function AgentLoginPage() {
       <p className="mt-4 text-center text-xs text-secondary">
         ยังไม่มี workspace?{" "}
         <a
-          href={`https://${process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com"}/signup`}
+          href={`https://${process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "gethelpwise.xyz"}/signup`}
           className="text-primary-ink hover:underline font-medium"
         >
           สมัครใช้งาน

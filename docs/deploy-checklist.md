@@ -8,17 +8,17 @@
 
 ## 0. ตัดสินก่อนอย่างอื่น — DNS
 
-Demo flow ออกแบบให้ปุ่มยิงไป **tenant subdomain** (`acme.helpwise.com/demo`) เพราะ demo-login + login
+Demo flow ออกแบบให้ปุ่มยิงไป **tenant subdomain** (`acme.gethelpwise.xyz/demo`) เพราะ demo-login + login
 ต้องมี tenant context. `src/proxy.ts` resolve tenant จาก `{slug}.NEXT_PUBLIC_ROOT_DOMAIN` บน Host header.
 
 | Option | demo subdomain ใช้ได้? | งาน |
 |---|---|---|
-| **A — Custom domain + wildcard (แนะนำ)** | ✅ | จด domain → add `helpwise.com` + `*.helpwise.com` ที่ Vercel → `NEXT_PUBLIC_ROOT_DOMAIN=helpwise.com` |
+| **A — Custom domain + wildcard (แนะนำ)** | ✅ | จด domain → add `gethelpwise.xyz` + `*.gethelpwise.xyz` ที่ Vercel → `NEXT_PUBLIC_ROOT_DOMAIN=gethelpwise.xyz` |
 | B — `*.vercel.app` เปล่า | ❌ | Vercel ไม่ให้ wildcard ใต้ `vercel.app` → subdomain demo พัง ต้อง refactor เป็น path-based (นอก scope) |
 
 ➡️ **เลือก Option A** — ทั้งระบบพึ่ง subdomain; vercel.app เปล่า demo ไม่ได้
 
-> ⚠️ **Wildcard cert gotcha:** Vercel ออก wildcard SSL (`*.helpwise.com`) อัตโนมัติได้ก็ต่อเมื่อทำ
+> ⚠️ **Wildcard cert gotcha:** Vercel ออก wildcard SSL (`*.gethelpwise.xyz`) อัตโนมัติได้ก็ต่อเมื่อทำ
 > DNS-01 challenge ได้ → **ชี้ nameservers ของ domain มาที่ Vercel** (ใช้ Vercel DNS).
 > ถ้าคง external DNS + แค่ CNAME wildcard → cert wildcard มักไม่ออกอัตโนมัติ.
 
@@ -49,10 +49,10 @@ Demo creds เป็น **public-by-design** (role=AGENT) → ใครก็ย
 ## 3. Vercel Environment Variables (scope: Production)
 
 ### Landing / Demo (ห้ามลืม — fallback เป็น `"#"` = ปุ่มตาย)
-- [ ] `NEXT_PUBLIC_DEMO_URL` = `https://acme.helpwise.com/demo`
-- [ ] `NEXT_PUBLIC_SIGNIN_URL` = `https://acme.helpwise.com/login`
-- [ ] `NEXT_PUBLIC_ROOT_DOMAIN` = `helpwise.com` *(หัวใจ subdomain routing — ต้องตรง domain จริง)*
-- [ ] `NEXT_PUBLIC_API_BASE_URL` = `https://{slug}.helpwise.com`
+- [ ] `NEXT_PUBLIC_DEMO_URL` = `https://acme.gethelpwise.xyz/demo`
+- [ ] `NEXT_PUBLIC_SIGNIN_URL` = `https://acme.gethelpwise.xyz/login`
+- [ ] `NEXT_PUBLIC_ROOT_DOMAIN` = `gethelpwise.xyz` *(หัวใจ subdomain routing — ต้องตรง domain จริง)*
+- [ ] `NEXT_PUBLIC_API_BASE_URL` = `https://{slug}.gethelpwise.xyz`
 
 ### Core (build/runtime)
 - [ ] `DATABASE_URL` — pooled (pgbouncer)
@@ -67,7 +67,7 @@ Demo creds เป็น **public-by-design** (role=AGENT) → ใครก็ย
 ### Queue (QStash)
 - [ ] `QSTASH_TOKEN`
 - [ ] `QSTASH_CURRENT_SIGNING_KEY` + `QSTASH_NEXT_SIGNING_KEY`
-- [ ] `QSTASH_TARGET_BASE_URL` = `https://acme.helpwise.com` *(URL จริง ไม่ใช่ `{slug}` template)*
+- [ ] `QSTASH_TARGET_BASE_URL` = `https://acme.gethelpwise.xyz` *(URL จริง ไม่ใช่ `{slug}` template)*
 
 ### Stripe / Email / Storage
 - [ ] `STRIPE_SECRET_KEY` (`sk_live_...`)
@@ -113,14 +113,14 @@ npx tsx prisma/seed-demo.ts # demo data acme/globex (idempotent)
 ## 7. Webhooks (ทำหลัง deploy ได้ prod URL แล้ว)
 
 - [ ] **Stripe** — สร้าง webhook endpoint `https://.../api/webhooks/stripe/` → เอา signing secret ใส่ `STRIPE_WEBHOOK_SECRET` → redeploy
-- [ ] **Inbound email** — ตั้ง webhook URL `https://{slug}.helpwise.com/api/webhooks/email/` ที่ provider
-- [ ] **QStash schedule** — สร้าง cron ยิง `https://acme.helpwise.com/api/jobs/sla-sweep`
+- [ ] **Inbound email** — ตั้ง webhook URL `https://{slug}.gethelpwise.xyz/api/webhooks/email/` ที่ provider
+- [ ] **QStash schedule** — สร้าง cron ยิง `https://acme.gethelpwise.xyz/api/jobs/sla-sweep`
 
 ---
 
 ## 8. Verify production
 
-- [ ] `acme.helpwise.com` resolve + cert (apex + wildcard) Active
+- [ ] `acme.gethelpwise.xyz` resolve + cert (apex + wildcard) Active
 - [ ] ปุ่ม "Try live demo" → `/demo` → auto-login → **`/dashboard`**
 - [ ] login ปกติ → **`/dashboard`**
 - [ ] AI endpoint ทำงาน; Redis down → fail-closed (deny)

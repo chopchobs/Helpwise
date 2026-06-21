@@ -129,7 +129,7 @@ async function sendViaPostmark(msg: EmailMessage): Promise<void> {
   }
 
   const body: Record<string, unknown> = {
-    From: process.env.EMAIL_FROM_ADDRESS ?? `support@${process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com"}`,
+    From: process.env.EMAIL_FROM_ADDRESS ?? `support@${process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "gethelpwise.xyz"}`,
     To: msg.to,
     Subject: msg.subject,
     HtmlBody: msg.html,

@@ -13,7 +13,7 @@ env:
   DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
   REDIS_URL: redis://localhost:6379
   AUTH_SECRET: ci_dummy_secret_at_least_32_characters_long_xx
-  NEXT_PUBLIC_ROOT_DOMAIN: helpwise.com
+  NEXT_PUBLIC_ROOT_DOMAIN: gethelpwise.xyz
 
 jobs:
   build-and-test:

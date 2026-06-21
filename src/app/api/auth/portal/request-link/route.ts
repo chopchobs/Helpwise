@@ -138,7 +138,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     //    HIGH-3: ใช้ fragment (#token=) แทน query string (?token=)
     //    → fragment ไม่ถูกส่งไปยัง server ดังนั้นไม่ปรากฏใน access log / Referrer header
     //    → frontend อ่าน token จาก location.hash แล้ว POST เข้า /api/auth/portal/verify ใน body
-    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "helpwise.com";
+    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "gethelpwise.xyz";
     const magicLinkUrl = `https://${tenant.slug}.${rootDomain}/portal/verify#token=${rawToken}`;
 
     // 8. ส่ง email (stub ใน dev — log URL ออก console)

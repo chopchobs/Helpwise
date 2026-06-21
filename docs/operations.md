@@ -14,18 +14,18 @@ requests (or, for `AUTH_SECRET`, the app will fail to start).
 | `AUTH_SECRET` | **Yes** | Secret used to sign/verify session JWTs (HS256). **Must be at least 32 characters** — the app throws on startup otherwise. Generate with `openssl rand -base64 48`. | `Q3x...` (48+ char random string) |
 | `DATABASE_URL` | **Yes** | Pooled PostgreSQL connection (pgbouncer, port `6543`). Used at runtime via the `@prisma/adapter-pg` driver adapter. | `postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres?pgbouncer=true` |
 | `DIRECT_URL` | **Yes** | Direct PostgreSQL connection (port `5432`, no pooler). Used by `prisma migrate` / `prisma db seed`. | `postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:5432/postgres` |
-| `NEXT_PUBLIC_ROOT_DOMAIN` | **Yes** | Root domain used for tenant subdomain routing (`{slug}.{domain}`). Never hardcode this elsewhere. | `helpwise.com` |
-| `NEXT_PUBLIC_API_BASE_URL` | **Yes** | Base URL template shown to agents on the Settings → API Keys page. | `https://{slug}.helpwise.com` |
+| `NEXT_PUBLIC_ROOT_DOMAIN` | **Yes** | Root domain used for tenant subdomain routing (`{slug}.{domain}`). Never hardcode this elsewhere. | `gethelpwise.xyz` |
+| `NEXT_PUBLIC_API_BASE_URL` | **Yes** | Base URL template shown to agents on the Settings → API Keys page. | `https://{slug}.gethelpwise.xyz` |
 | `REDIS_URL` | **Yes** | Redis connection string (Upstash). Used for tenant-context cache and rate limiting. (Async jobs use Upstash QStash, not Redis.) | `rediss://default:[password]@[host].upstash.io:6379` |
 | `STRIPE_SECRET_KEY` | **Yes** (if billing enabled) | Stripe server-side secret key. | `sk_test_...` / `sk_live_...` |
 | `STRIPE_WEBHOOK_SECRET` | **Yes** in production | Stripe webhook signing secret. Without it, `/api/webhooks/stripe` rejects all requests. | `whsec_...` |
 | `EMAIL_PROVIDER` | No | `"postmark"` \| `"sendgrid"` \| empty. Empty = console stub (dev only — emails are logged, not sent). | `postmark` |
 | `EMAIL_PROVIDER_API_KEY` | **Yes** if `EMAIL_PROVIDER` set | API key/token for the chosen email provider. | `xxxx` |
-| `EMAIL_FROM_ADDRESS` | **Yes** if `EMAIL_PROVIDER` set | From-address for outbound email. | `support@helpwise.com` |
+| `EMAIL_FROM_ADDRESS` | **Yes** if `EMAIL_PROVIDER` set | From-address for outbound email. | `support@gethelpwise.xyz` |
 | `EMAIL_INBOUND_WEBHOOK_SECRET` | **Yes** in production | Shared secret for verifying inbound email webhooks (Postmark). Production rejects all requests if unset; dev allows with a warning. | `xxxx` |
 | `QSTASH_TOKEN` | **Yes** in production | Upstash QStash token for publishing background jobs (outbound email, etc.). | `xxxx` |
 | `QSTASH_CURRENT_SIGNING_KEY` / `QSTASH_NEXT_SIGNING_KEY` | **Yes** in production | QStash signing keys used to verify job requests (incl. `POST /api/jobs/sla-sweep`). Production rejects unsigned requests; dev allows with a warning. Both support key rotation. | `sig_...` |
-| `QSTASH_TARGET_BASE_URL` | **Yes** in production | Public origin QStash calls back into worker routes, e.g. `https://acme.helpwise.com`. | `https://...` |
+| `QSTASH_TARGET_BASE_URL` | **Yes** in production | Public origin QStash calls back into worker routes, e.g. `https://acme.gethelpwise.xyz`. | `https://...` |
 | `NODE_ENV` | Set by platform | `development` \| `production`. Controls HSTS, CSP `unsafe-eval`, and several "allow in dev / reject in prod" checks. | `production` |
 
 > Stripe Price IDs are **not** environment variables — they live on `Plan.stripePriceIdMonthly`
@@ -123,7 +123,7 @@ Copy the `whsec_...` value the CLI prints into `STRIPE_WEBHOOK_SECRET` in your `
 
 The inbound email endpoint is `POST /api/webhooks/email`. It is also a cross-tenant
 system route — it has no `x-tenant-id` header and resolves the tenant itself from the
-recipient address (e.g. `support@{slug}.helpwise.com`).
+recipient address (e.g. `support@{slug}.gethelpwise.xyz`).
 
 - Verified via `EMAIL_INBOUND_WEBHOOK_SECRET` (HTTP Basic Auth password or
   `X-Webhook-Secret` header, depending on provider configuration).
@@ -134,7 +134,7 @@ recipient address (e.g. `support@{slug}.helpwise.com`).
 ### Setup
 
 1. In Postmark (or your configured provider), set the inbound webhook URL to:
-   `https://{slug}.helpwise.com/api/webhooks/email`
+   `https://{slug}.gethelpwise.xyz/api/webhooks/email`
 2. Set `EMAIL_INBOUND_WEBHOOK_SECRET` to a shared secret and configure the provider to
    send it via Basic Auth or `X-Webhook-Secret`.
 
