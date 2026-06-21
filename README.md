@@ -2,11 +2,46 @@
 
 Helpwise is a multi-tenant SaaS help desk / ticketing platform for B2B companies. Each
 tenant (customer company) gets an internal agent workspace and a public customer portal,
-fully isolated from other tenants via application-enforced tenant isolation — a
+fully isolated from other tenants via **application-enforced tenant isolation** — a
 shared-database, shared-schema architecture with `tenantId`-scoped queries on every
-tenant model. PostgreSQL Row-Level Security is scaffolded as defense-in-depth but
+tenant model. PostgreSQL Row-Level Security is **scaffolded as defense-in-depth** but
 not yet activated (the app currently connects with a `BYPASSRLS` role; enforcing RLS
 requires a dedicated non-bypass role plus DB-level cross-tenant tests).
+
+## 🚀 Live Demo
+
+**Live on Vercel → [gethelpwise.xyz](https://gethelpwise.xyz)** (custom domain + wildcard SSL)
+
+Two demo workspaces demonstrate **real multi-tenant isolation** — each sees a completely
+separate set of tickets, contacts, and data:
+
+- **Acme** → [acme.gethelpwise.xyz](https://acme.gethelpwise.xyz)
+- **Globex** → [globex.gethelpwise.xyz](https://globex.gethelpwise.xyz)
+
+**No signup required.** From the landing page click **"Try live demo"**, or inside a
+workspace click **"Log in as demo agent"** to enter as a read-to-explore demo agent.
+Once inside, open any ticket and try **AI summarize**. Switch between Acme and Globex to
+confirm the two tenants never see each other's data — that's the isolation working end to end.
+
+## Engineering Highlights
+
+- **Multi-tenant isolation** — subdomain → tenant resolution at the edge, then every
+  query scoped by `tenantId` through a `tenantPrisma()` client. RLS is scaffolded as a
+  second, DB-level defense-in-depth layer.
+- **Two separate audiences** — internal agent workspace vs. public customer portal, with
+  distinct auth guards (`requireAgent()` / `requireContact()`) so internal notes can never
+  leak to the portal.
+- **AI assist, built safely** — Claude Haiku powers summarize / suggest-reply / suggest-tags.
+  Calls are tenant-scoped, run with **no tool access**, and **fail closed** under rate limits.
+- **Async by design** — outbound email and SLA breach sweeps run through Upstash QStash (a
+  serverless-friendly HTTP queue) with signature-verified worker routes.
+- **Production-grade plumbing** — Vercel deploy with wildcard SSL (`*.gethelpwise.xyz`),
+  GitHub Actions CI, a Vitest suite, and Stripe billing via idempotent, signature-verified
+  webhooks.
+
+## Architecture
+
+![Helpwise architecture diagram](public/helpwise-architecture.svg)
 
 ## Tech Stack
 
@@ -16,12 +51,14 @@ requires a dedicated non-bypass role plus DB-level cross-tenant tests).
 - **UI:** Shadcn UI, Radix UI
 - **State:** Zustand
 - **Forms & Validation:** React Hook Form + Zod
-- **Cache / queues:** Redis (Upstash)
+- **Cache / queues:** Redis + QStash (Upstash)
 - **Billing:** Stripe (Subscriptions + Webhooks)
 - **Email:** Postmark/SendGrid (outbound + inbound parse webhook)
+- **AI:** Claude Haiku (ticket summarize / suggest-reply / suggest-tags)
 - **Testing:** Vitest
+- **Hosting:** Vercel (custom domain + wildcard SSL)
 
-## Getting Started
+## Run Locally
 
 ### Prerequisites
 
@@ -46,9 +83,9 @@ requires a dedicated non-bypass role plus DB-level cross-tenant tests).
    cp .env.example .env
    ```
 
-   See [`docs/operations.md`](docs/operations.md) for a full reference of every environment
-   variable, including how to generate `AUTH_SECRET` and where to get Supabase/Stripe/Redis
-   credentials.
+   [`.env.example`](.env.example) documents every variable. See
+   [`docs/operations.md`](docs/operations.md) for a full reference — including how to
+   generate `AUTH_SECRET` and where to get Supabase/Stripe/Redis credentials.
 
 3. Apply database migrations, generate the Prisma client, and seed reference data
    (plans, feature flags):
@@ -121,5 +158,3 @@ prisma/
   database migrations, webhook setup, SLA sweep cron, deployment checklist)
 - [`CLAUDE.md`](CLAUDE.md) — Architecture, multi-tenancy rules, and conventions for
   contributors
-
-  ![alt text](public/helpwise-architecture.svg)
