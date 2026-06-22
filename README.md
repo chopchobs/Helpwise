@@ -129,7 +129,6 @@ src/
     (agent)/      Internal agent workspace — requires agent login + tenant membership
     (portal)/     Public customer portal — contacts see only their own tickets
     (marketing)/  Landing pages, pricing (no tenant context)
-    (admin)/      Super-admin (cross-tenant management)
     api/          API routes — every route enforces tenant context + audience guard
     api/v1/       Public REST API (API-key auth) — see docs/api.md
     api/webhooks/ Stripe + inbound email webhooks (signature-verified, idempotent)
@@ -143,6 +142,7 @@ src/
     email.ts      Inbound parsing / outbound sending / threading
     sla.ts        SLA deadline calculation (business hours aware)
     rate-limit.ts Redis-backed rate limiting
+    slug.ts       Canonical slug validation / normalization
   proxy.ts        Tenant resolution from subdomain (Node runtime)
 prisma/
   schema.prisma   Database schema

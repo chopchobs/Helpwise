@@ -50,8 +50,8 @@
   - `app/(agent)/` — app ภายในสำหรับ agent (ต้อง login เป็น User + เป็นสมาชิก tenant)
   - `app/(portal)/` — portal สาธารณะสำหรับลูกค้า (Contact) — เห็นเฉพาะ ticket ของตัวเอง
   - `app/(marketing)/` — landing, pricing (ไม่มี tenant)
-  - `app/(admin)/` — super-admin (จัดการทุก tenant)
   - `app/api/` — ทุก route ต้องผ่าน tenant context + audience guard
+  - `app/api/v1/` — public REST API (API-key auth)
   - `app/api/webhooks/stripe/` · `app/api/webhooks/email/` — inbound webhooks (verify signature)
 - `lib/`
   - `lib/tenant.ts` — tenant context resolution
@@ -60,7 +60,8 @@
   - `lib/features.ts` · `lib/audit.ts` · `lib/stripe.ts`
   - `lib/email.ts` — parse inbound / ส่ง outbound / threading
   - `lib/sla.ts` — คำนวณ deadline + business hours
-- `middleware.ts` — tenant extraction จาก subdomain (root level)
+  - `lib/slug.ts` — canonical slug validation/normalization
+- `src/proxy.ts` — tenant extraction จาก subdomain (Node runtime, root level)
 
 ---
 
@@ -89,7 +90,7 @@ const tickets = await db.ticket.findMany()
 ### Subdomain Routing
 
 - URL: `{slug}.gethelpwise.xyz` (เช่น `acme.gethelpwise.xyz`)
-- `middleware.ts`: แยก `slug` → lookup tenant (cache Redis) → ส่ง `x-tenant-id`, `x-tenant-plan` (**เขียนทับ header จาก client เสมอ**) → ไม่พบ = 404
+- `src/proxy.ts`: แยก `slug` → lookup tenant (cache Redis) → ส่ง `x-tenant-id`, `x-tenant-plan` (**เขียนทับ header จาก client เสมอ**) → ไม่พบ = 404
 
 ---
 
