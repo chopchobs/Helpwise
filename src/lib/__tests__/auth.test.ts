@@ -60,6 +60,7 @@ import {
   CONTACT_COOKIE_NAME,
 } from "@/lib/auth";
 import { SignJWT, jwtVerify } from "jose";
+import { Prisma } from "@prisma/client";
 
 const AUTH_SECRET = "a".repeat(32);
 
@@ -331,6 +332,37 @@ describe("toAuthErrorResponse", () => {
       error: { code: "INTERNAL_ERROR", message: "Internal server error" },
       status: 500,
     });
+  });
+
+  // XT-WRITE-05: composite tenant FK → cross-tenant FK ถูก reject ที่ DB (PG 23503 / P2003)
+  // ต้อง map เป็น 400 สะอาด และห้าม echo ชื่อ constraint/field จาก Prisma
+  it("Prisma P2003 (FK constraint / 23503) → INVALID_REFERENCE/400 และไม่ leak constraint name", () => {
+    const fkError = new Prisma.PrismaClientKnownRequestError(
+      "Foreign key constraint failed on the field: `Ticket_tenantId_requesterContactId_fkey`",
+      { code: "P2003", clientVersion: "test" }
+    );
+    const res = toAuthErrorResponse(fkError);
+    expect(res).toEqual({
+      data: null,
+      error: {
+        code: "INVALID_REFERENCE",
+        message: "ข้อมูลอ้างอิงไม่ถูกต้องสำหรับ workspace นี้",
+      },
+      status: 400,
+    });
+    // ห้าม leak constraint/field name จาก Prisma error ออกไปหา client
+    expect(res.error.message).not.toContain("fkey");
+    expect(res.error.message).not.toContain("requesterContactId");
+  });
+
+  it("Prisma error code อื่น (เช่น P2002 unique) → ตกไป INTERNAL_ERROR/500 (ไม่ถูก map เป็น 400)", () => {
+    const uniqueError = new Prisma.PrismaClientKnownRequestError(
+      "Unique constraint failed",
+      { code: "P2002", clientVersion: "test" }
+    );
+    const res = toAuthErrorResponse(uniqueError);
+    expect(res.status).toBe(500);
+    expect(res.error.code).toBe("INTERNAL_ERROR");
   });
 });
 

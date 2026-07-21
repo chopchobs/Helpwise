@@ -29,6 +29,7 @@
 import { SignJWT, jwtVerify, type JWTPayload } from "jose";
 import { cookies } from "next/headers";
 import { tenantPrisma, getTenantContext, type TenantContext } from "@/lib/tenant";
+import { Prisma } from "@prisma/client";
 import type { TenantMember, User, Contact, MemberRole } from "@prisma/client";
 
 // =============================================================================
@@ -85,8 +86,16 @@ export class AuthError extends Error {
 }
 
 /**
- * แปลง AuthError เป็น { data: null, error } ตาม API response convention
- * ใช้ใน route handler: catch block
+ * แปลง error เป็น { data: null, error } ตาม API response convention
+ * ใช้ใน route handler: catch block (universal handler ของทุก route)
+ *
+ * ⚠️ XT-WRITE-05 defense-in-depth:
+ *   composite tenant FK (ผูก tenantId) ทำให้ Postgres reject cross-tenant FK ที่ระดับ DB
+ *   (raw error = PG 23503 → Prisma P2003). ทุก write path มี app-layer verify อยู่แล้ว
+ *   (verifyContactBelongsToTenant / verifyAssigneeMembership / author จาก session)
+ *   แต่ถ้ามี residual violation หลุดมา (เช่น TOCTOU race verify→write, หรือ path ใหม่
+ *   ที่ลืม verify) เรา map P2003 เป็น 400 สะอาด — ไม่ปล่อย error ดิบ (constraint/field name)
+ *   หลุดไปหา client และไม่คืน 500 opaque
  */
 export function toAuthErrorResponse(err: unknown): {
   data: null;
@@ -104,6 +113,22 @@ export function toAuthErrorResponse(err: unknown): {
       data: null,
       error: { code, message: err.message },
       status: err.statusCode,
+    };
+  }
+  // Prisma foreign-key constraint (P2003 = PG 23503) — referenced relation ไม่ valid
+  // ในบริบท tenant นี้ (cross-tenant / stale id). คืน 400 สะอาด ห้าม echo err.message
+  // (Prisma FK error message มีชื่อ constraint/field — ถือเป็น info leak)
+  if (
+    err instanceof Prisma.PrismaClientKnownRequestError &&
+    err.code === "P2003"
+  ) {
+    return {
+      data: null,
+      error: {
+        code: "INVALID_REFERENCE",
+        message: "ข้อมูลอ้างอิงไม่ถูกต้องสำหรับ workspace นี้",
+      },
+      status: 400,
     };
   }
   // error ที่ไม่ใช่ AuthError — ไม่ expose detail
