@@ -35,6 +35,8 @@ import FormAlert from "@/components/ui/FormAlert";
 import AttachmentPicker from "@/components/ui/AttachmentPicker";
 import AttachmentList from "@/components/ui/AttachmentList";
 import TagChip from "@/components/ui/TagChip";
+import PresenceBar from "@/components/ui/PresenceBar";
+import { useTicketPresence } from "@/hooks/useTicketPresence";
 import { uploadAttachment } from "@/lib/attachment-upload";
 import {
   formatDateFull,
@@ -326,6 +328,8 @@ function CannedResponsePicker({ onSelect, onClose }: CannedResponsePickerProps) 
 interface ReplyBoxProps {
   ticketId: string;
   onMessageSent: (msg: AgentTicketMessage) => void;
+  /** ยิง typing broadcast ให้ agent อื่นเห็น (throttled ใน hook) — optional */
+  onTyping?: () => void;
 }
 
 /**
@@ -333,7 +337,7 @@ interface ReplyBoxProps {
  * มี toggle PUBLIC reply / INTERNAL note
  * ส่ง visibility ตามที่ agent เลือก
  */
-function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
+function ReplyBox({ ticketId, onMessageSent, onTyping }: ReplyBoxProps) {
   const [body, setBody] = useState("");
   const [visibility, setVisibility] = useState<MessageVisibility>("PUBLIC");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -516,7 +520,10 @@ function ReplyBox({ ticketId, onMessageSent }: ReplyBoxProps) {
       <textarea
         ref={textareaRef}
         value={body}
-        onChange={(e) => setBody(e.target.value)}
+        onChange={(e) => {
+          setBody(e.target.value);
+          onTyping?.();
+        }}
         onKeyDown={handleKeyDown}
         placeholder={
           isInternal
@@ -1257,6 +1264,12 @@ export default function AgentTicketDetailPage() {
   const [members, setMembers] = useState<MemberListItem[]>([]);
   // role ของ user ปัจจุบัน — ใช้ gate ปุ่ม Merge (เฉพาะ OWNER/ADMIN)
   const [memberRole, setMemberRole] = useState<MemberRole | null>(null);
+  // identity สำหรับ real-time presence (จาก /api/auth/agent/me) — null จนกว่า me โหลดเสร็จ
+  const [presenceIdentity, setPresenceIdentity] = useState<{
+    tenantId: string;
+    memberId: string;
+    name: string;
+  } | null>(null);
   const [isMergeDialogOpen, setIsMergeDialogOpen] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
   const [mergeError, setMergeError] = useState<string | null>(null);
@@ -1322,6 +1335,12 @@ export default function AgentTicketDetailPage() {
         const json = (await res.json()) as MeResponse;
         if (res.ok && json.data) {
           setMemberRole(json.data.member.role);
+          // เก็บ identity สำหรับ presence — tenantId/memberId มาจาก server context เท่านั้น (ไม่ hardcode/เดา)
+          setPresenceIdentity({
+            tenantId: json.data.tenant.id,
+            memberId: json.data.member.id,
+            name: json.data.user.name ?? json.data.user.email,
+          });
         }
       } catch {
         // ไม่ block UI — ปุ่ม Merge จะถูกซ่อนถ้าโหลด role ไม่สำเร็จ
@@ -1329,6 +1348,18 @@ export default function AgentTicketDetailPage() {
     }
     void loadSession();
   }, []);
+
+  // Real-time presence — เปิดใช้เมื่อรู้ identity (me โหลดเสร็จ); fail-soft ถ้า realtime ใช้ไม่ได้
+  const presence = useTicketPresence(
+    presenceIdentity
+      ? {
+          tenantId: presenceIdentity.tenantId,
+          ticketId,
+          memberId: presenceIdentity.memberId,
+          name: presenceIdentity.name,
+        }
+      : null
+  );
 
   async function handleStatusChange(status: TicketStatus) {
     if (!ticket || isPatchingStatus) return;
@@ -1579,9 +1610,14 @@ export default function AgentTicketDetailPage() {
             )}
           </div>
 
-          <h1 className="text-xl font-bold text-foreground leading-snug mb-4">
+          <h1 className="text-xl font-bold text-foreground leading-snug mb-2">
             {ticket.subject}
           </h1>
+
+          {/* Real-time presence — agent อื่นที่กำลังดู/พิมพ์ ticket นี้ (ไม่ render ถ้าไม่มีใคร) */}
+          <div className="mb-4 min-h-[1.5rem]">
+            <PresenceBar others={presence.others} typing={presence.typing} />
+          </div>
 
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-secondary">
             <span>
@@ -1726,7 +1762,11 @@ export default function AgentTicketDetailPage() {
 
         {/* Reply box — ซ่อนเมื่อ ticket ถูก merge แล้ว (read-only) */}
         {ticket.mergedInto === null && (
-          <ReplyBox ticketId={ticketId} onMessageSent={handleMessageSent} />
+          <ReplyBox
+            ticketId={ticketId}
+            onMessageSent={handleMessageSent}
+            onTyping={presence.setTyping}
+          />
         )}
       </div>
 
