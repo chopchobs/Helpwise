@@ -36,6 +36,7 @@ import AttachmentPicker from "@/components/ui/AttachmentPicker";
 import AttachmentList from "@/components/ui/AttachmentList";
 import TagChip from "@/components/ui/TagChip";
 import PresenceBar from "@/components/ui/PresenceBar";
+import CollisionBanner from "@/components/ui/CollisionBanner";
 import { useTicketPresence } from "@/hooks/useTicketPresence";
 import { uploadAttachment } from "@/lib/attachment-upload";
 import {
@@ -1762,11 +1763,15 @@ export default function AgentTicketDetailPage() {
 
         {/* Reply box — ซ่อนเมื่อ ticket ถูก merge แล้ว (read-only) */}
         {ticket.mergedInto === null && (
-          <ReplyBox
-            ticketId={ticketId}
-            onMessageSent={handleMessageSent}
-            onTyping={presence.setTyping}
-          />
+          <div className="flex flex-col gap-2">
+            {/* Collision hint — เตือนตอนกำลังจะตอบว่ามี agent อื่นดู/พิมพ์อยู่ (กันตอบชนกัน) */}
+            <CollisionBanner others={presence.others} typing={presence.typing} />
+            <ReplyBox
+              ticketId={ticketId}
+              onMessageSent={handleMessageSent}
+              onTyping={presence.setTyping}
+            />
+          </div>
         )}
       </div>
 

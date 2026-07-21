@@ -42,7 +42,8 @@ tenant:{tenantId}:ticket:{ticketId}
 
 ## RLS policies บน `realtime.messages` (database เขียน migration)
 
-Scope ด้วย claim ล้วน — อ่าน `tenantId` จาก `request.jwt.claims`, match กับ prefix ของ topic:
+Scope ด้วย claim ล้วน — อ่าน `tenantId` จาก `request.jwt.claims`, match กับ prefix ของ topic
+ด้วย `starts_with()` (**ไม่ใช่ `LIKE`** — literal prefix ล้วน ไม่มี `%`/`_` pattern semantics):
 
 ```sql
 -- SELECT = สิทธิ์รับ presence/broadcast ของ channel
@@ -50,8 +51,11 @@ create policy "agent receive own-tenant ticket presence"
   on realtime.messages for select to authenticated
   using (
     (realtime.messages.extension in ('presence','broadcast'))
-    and realtime.topic() like
-      'tenant:' || (current_setting('request.jwt.claims', true)::json ->> 'tenantId') || ':ticket:%'
+    and (current_setting('request.jwt.claims', true)::json ->> 'tenantId') ~ '^[a-zA-Z0-9-]+$'
+    and starts_with(
+      realtime.topic(),
+      'tenant:' || (current_setting('request.jwt.claims', true)::json ->> 'tenantId') || ':ticket:'
+    )
   );
 
 -- INSERT = สิทธิ์ส่ง presence.track / typing broadcast
@@ -59,12 +63,19 @@ create policy "agent send own-tenant ticket presence"
   on realtime.messages for insert to authenticated
   with check (
     (realtime.messages.extension in ('presence','broadcast'))
-    and realtime.topic() like
-      'tenant:' || (current_setting('request.jwt.claims', true)::json ->> 'tenantId') || ':ticket:%'
+    and (current_setting('request.jwt.claims', true)::json ->> 'tenantId') ~ '^[a-zA-Z0-9-]+$'
+    and starts_with(
+      realtime.topic(),
+      'tenant:' || (current_setting('request.jwt.claims', true)::json ->> 'tenantId') || ':ticket:'
+    )
   );
 ```
 
-**Isolation guard:** `tenantId` claim ควร validate เป็น cuid/uuid format (ฝั่ง backend ตอน mint — มัน server-controlled อยู่แล้ว) เพื่อกัน `like` wildcard/`:` injection ใน topic prefix. Topic ต้องขึ้นต้น `tenant:{claimTenantId}:` เป๊ะ → tenant A join channel tenant B ไม่ได้แม้เดา ticketId ถูก.
+**Isolation guard (defense-in-depth ที่ DB layer):** ใช้ `starts_with()` แทน `LIKE` เพื่อไม่ให้ security boundary
+แขวนกับ app validation ด่านเดียว — `%`/`_`/`:` ใน claim เป็น literal ล้วน จึงไม่มี wildcard/`:` injection ใน
+topic prefix แม้ mint path ในอนาคตลืม validate. เสริม regex guard บน claim (`^[a-zA-Z0-9-]+$`) ที่ policy อีกชั้น.
+`starts_with` เป็น STRICT: claim หาย → prefix NULL → deny (fail-closed). Topic ต้องขึ้นต้น `tenant:{claimTenantId}:ticket:`
+เป๊ะ → tenant A join channel tenant B ไม่ได้แม้เดา ticketId ถูก. (backend ก็ยัง validate cuid ตอน mint อยู่ — สองชั้น.)
 
 ## Env keys ใหม่ (อ้างชื่อ — Dev provision, ห้าม hardcode ค่า)
 
@@ -81,11 +92,16 @@ create policy "agent send own-tenant ticket presence"
 ```
 POST /api/realtime/token
   auth: requireAgent()   // agent audience เท่านั้น
-  body: { ticketId: string }   // optional — ใช้ verify ว่า ticket อยู่ใน tenant ก่อน mint (defense-in-depth)
+  body: (none)   // endpoint ไม่อ่าน body — token เป็น tenant-scoped ไม่ใช่ ticket-scoped
   200 → { data: { token: string, expiresAt: number } }
   401 → { error: "..." } (ไม่ใช่ agent / session หมดอายุ)
   return shape ตาม convention project: { data, error }
 ```
+
+> **Token scope = tenant-scoped (ไม่ใช่ ticket-scoped).** token 1 ใบ authorize ให้ agent join presence
+> ของ ticket ใดก็ได้ใน tenant ตัวเอง — ถูกต้องตาม model เพราะ agent เห็นทุก ticket ใน tenant อยู่แล้ว
+> (ดู Identity & Audiences). RLS scope ด้วย `tenantId` claim ล้วน ไม่ผูก ticketId → endpoint จึงไม่ต้อง
+> รับ/verify `ticketId` และ**ไม่มี** guard "verify ticket ก่อน mint" (อย่าเข้าใจผิดว่ามี).
 
 ## Deliverables Slice 1
 
