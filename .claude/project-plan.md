@@ -44,6 +44,8 @@
 | 28 | Async queue (QStash) + notifications — outbound email queue, in-app assign notify, SLA near-breach/breach notify | `phase-28/async-queue-notifications` | ✅ done | ✅ |
 | 29 | AI-assist (Claude Haiku 4.5) — summarize · suggest-reply (draft) · suggest-tags | `phase-29/ai-assist` | ✅ done | ✅ |
 | 30 | Portfolio Demo Readiness — landing page + demo seed (acme/globex) + one-click demo-login + AI rate-limit fail-closed | `phase-30/portfolio-demo` | ✅ done | ✅ |
+| 34 | Tenant-isolation fuzz suite (37 case/8 axis) + ปิด XT-WRITE-05 (composite tenant FK) | (บน main โดยตรง) | ✅ done | ✅ |
+| 35 | Real-time presence/collision (Supabase Realtime) — token/RLS/presence/typing/collision; qa PASS-with-conditions | `feature/phase-35-realtime-presence` | ✅ done | ✅ |
 
 > *Phase 20 = decision เชิงลบ (บันทึกว่า nonce CSP ใช้กับ `proxy.ts` ไม่ได้ — คง `unsafe-inline`) ไม่ใช่ feature ใหม่
 > **Chore branches** (merged, ไม่ใช่ phase): `chore/db-init-seed`, `fix/proxy-host-header`, `chore/theme-warm-palette`
