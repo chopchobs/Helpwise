@@ -227,6 +227,9 @@ model TenantMember {
 
   // composite unique: 1 user ใน 1 tenant ได้ครั้งเดียว
   @@unique([tenantId, userId])
+  // composite unique (tenantId, id) — target ของ composite FK จาก Ticket/TicketMessage
+  // (assignee/authorMember) เพื่อบังคับ tenant match ที่ DB layer (กัน cross-tenant FK)
+  @@unique([tenantId, id])
   @@index([tenantId])
   @@index([userId])
 }
@@ -271,6 +274,9 @@ model Contact {
 
   // composite unique: email ซ้ำข้าม tenant ได้ แต่ในเดียวกันห้ามซ้ำ
   @@unique([tenantId, email])
+  // composite unique (tenantId, id) — target ของ composite FK จาก Ticket/TicketMessage
+  // (requesterContact/authorContact) เพื่อบังคับ tenant match ที่ DB layer (กัน cross-tenant FK)
+  @@unique([tenantId, id])
   @@index([tenantId])
   @@index([tenantId, email]) // index ซ้อนเพื่อ lookup ตอน inbound email routing
 }
@@ -317,13 +323,18 @@ model Ticket {
   priority     TicketPriority @default(NORMAL)
 
   // ผู้แจ้ง ticket — Contact ของ tenant นี้เท่านั้น
+  // composite FK [tenantId, requesterContactId] -> Contact[tenantId, id]:
+  //   DB บังคับว่า contact ต้องอยู่ tenant เดียวกับ ticket (กัน cross-tenant FK)
+  //   tenantId scalar ตัวเดียวใช้ร่วมกับ relation tenant + assignee (multi-tenant pattern)
   requesterContactId String
-  requesterContact   Contact @relation(fields: [requesterContactId], references: [id])
+  requesterContact   Contact @relation(fields: [tenantId, requesterContactId], references: [tenantId, id])
 
   // agent ที่รับผิดชอบ — TenantMember ของ tenant นี้เท่านั้น (nullable)
-  // FK ชี้ TenantMember ไม่ใช่ User เพื่อกันการ assign ข้าม tenant
+  // composite FK [tenantId, assigneeId] -> TenantMember[tenantId, id]:
+  //   MATCH SIMPLE → assigneeId null = ไม่เช็ค FK (ไม่มี assignee ได้);
+  //   ถ้า set = บังคับ tenantId ตรงกัน (กัน assign ข้าม tenant ที่ DB layer)
   assigneeId String?
-  assignee   TenantMember? @relation("TicketAssignee", fields: [assigneeId], references: [id])
+  assignee   TenantMember? @relation("TicketAssignee", fields: [tenantId, assigneeId], references: [tenantId, id])
 
   // SLA policy ที่ใช้กับ ticket นี้
   slaPolicyId String?
@@ -399,10 +410,14 @@ model TicketMessage {
   // === Audience/Author ===
   // author เป็น agent หรือ contact ได้ — ใช้ nullable FK สองตัว, exactly one ต้องไม่ null
   // constraint บังคับที่ app layer: ต้องมี authorMemberId หรือ authorContactId อย่างใดอย่างหนึ่ง
+  // composite FK ผูก tenantId ร่วม (กัน cross-tenant FK):
+  //   [tenantId, authorMemberId]  -> TenantMember[tenantId, id]
+  //   [tenantId, authorContactId] -> Contact[tenantId, id]
+  //   MATCH SIMPLE → id-column null = ไม่เช็ค FK; ถ้า set = บังคับ tenant ตรงกัน
   authorMemberId  String?
-  authorMember    TenantMember? @relation("MessageAuthorMember", fields: [authorMemberId], references: [id])
+  authorMember    TenantMember? @relation("MessageAuthorMember", fields: [tenantId, authorMemberId], references: [tenantId, id])
   authorContactId String?
-  authorContact   Contact?      @relation("MessageAuthorContact", fields: [authorContactId], references: [id])
+  authorContact   Contact?      @relation("MessageAuthorContact", fields: [tenantId, authorContactId], references: [tenantId, id])
 
   // visibility = INTERNAL ห้ามหลุดไปฝั่ง portal — กรองที่ query ระดับ backend
   visibility MessageVisibility @default(PUBLIC)
