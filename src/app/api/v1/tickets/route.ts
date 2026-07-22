@@ -22,6 +22,7 @@ import {
   createTicketWithNumber,
   verifyContactBelongsToTenant,
 } from "@/lib/tickets";
+import { dispatchWebhookEvent } from "@/lib/webhook-dispatch";
 
 // =============================================================================
 // VALIDATION SCHEMAS
@@ -322,6 +323,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // metadata: apiKeyId + resolvedContactId เพื่อ trace abuse (key ถูกขโมยสร้าง spam) — ไม่ log email/PII
       metadata: { apiKeyId: apiKey.id, via: "api", requesterContactId: resolvedContactId },
     });
+
+    // Outbound webhook ticket.created (contract § 3) — fire-and-forget, feature gate ใน dispatcher
+    void dispatchWebhookEvent(
+      db,
+      ctx.tenantId,
+      {
+        eventType: "TICKET_CREATED",
+        occurredAt: ticket.createdAt,
+        ticket: {
+          id: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          subject: ticket.subject,
+          status: ticket.status,
+          priority: ticket.priority,
+          assigneeMemberId: ticket.assigneeId,
+          requesterContactId: ticket.requesterContactId,
+          channel: ticket.channel,
+          createdAt: ticket.createdAt,
+          updatedAt: ticket.updatedAt,
+        },
+      },
+      ctx.plan
+    );
 
     return NextResponse.json({ data: responseDTO, error: null }, { status: 201 });
   } catch (err) {

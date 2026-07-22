@@ -4,6 +4,7 @@
  *
  * P0 invariants:
  *   - internal-note isolation: message ที่ไม่ใช่ PUBLIC → ไม่แตะ DB, ไม่ publish
+ *   - feature gate "webhooks" ปิด → ไม่ query endpoint, ไม่สร้าง delivery, ไม่ publish
  *   - ไม่มี endpoint ที่ subscribe → ไม่สร้าง delivery, ไม่ publish
  *   - 1 event → หลาย delivery แต่ eventId เดียวกัน (receiver dedupe ได้)
  *   - query endpoint ผ่าน tenant-scoped db เท่านั้น + enabled:true + events has eventType
@@ -12,10 +13,18 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { publishMock } = vi.hoisted(() => ({ publishMock: vi.fn() }));
+const { publishMock, hasFeatureMock } = vi.hoisted(() => ({
+  publishMock: vi.fn(),
+  hasFeatureMock: vi.fn(),
+}));
 
 vi.mock("@/lib/queue", () => ({
   publishWebhookDeliveryJob: (job: unknown) => publishMock(job),
+}));
+
+vi.mock("@/lib/features", () => ({
+  hasFeature: (...args: unknown[]) => hasFeatureMock(...args),
+  FEATURE_KEYS: { WEBHOOKS: "webhooks" },
 }));
 
 import {
@@ -81,6 +90,8 @@ describe("dispatchWebhookEvent", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // default: feature เปิด — เคสปิดเทสแยกด้านล่าง
+    hasFeatureMock.mockResolvedValue(true);
     db = makeDb();
     let seq = 0;
     db.webhookDelivery.create.mockImplementation(async () => ({
@@ -191,6 +202,37 @@ describe("dispatchWebhookEvent", () => {
     expect(data.eventType).toBe("TICKET_MESSAGE_CREATED");
     expect(data.payload.type).toBe("ticket.message_created");
     expect(publishMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("feature flag ปิด → ไม่ query endpoint, ไม่สร้าง delivery, ไม่ publish", async () => {
+    hasFeatureMock.mockResolvedValue(false);
+    db.webhookEndpoint.findMany.mockResolvedValue([{ id: "ep-1" }]);
+
+    await dispatchWebhookEvent(asScoped(db), TENANT_ID, ticketInput());
+
+    expect(hasFeatureMock).toHaveBeenCalledWith(TENANT_ID, "webhooks", undefined);
+    expect(db.webhookEndpoint.findMany).not.toHaveBeenCalled();
+    expect(db.webhookDelivery.create).not.toHaveBeenCalled();
+    expect(publishMock).not.toHaveBeenCalled();
+  });
+
+  it("ส่ง tenantPlan มา → forward ให้ hasFeature (กัน query plan ซ้ำ)", async () => {
+    db.webhookEndpoint.findMany.mockResolvedValue([]);
+
+    await dispatchWebhookEvent(asScoped(db), TENANT_ID, ticketInput(), "pro");
+
+    expect(hasFeatureMock).toHaveBeenCalledWith(TENANT_ID, "webhooks", "pro");
+  });
+
+  it("internal-note isolation ชนะ feature gate: INTERNAL → ไม่แม้แต่เช็ค feature", async () => {
+    await dispatchWebhookEvent(
+      asScoped(db),
+      TENANT_ID,
+      messageInput("INTERNAL")
+    );
+
+    expect(hasFeatureMock).not.toHaveBeenCalled();
+    expect(publishMock).not.toHaveBeenCalled();
   });
 
   it("create ล้ม → ไม่ throw ออกไป caller (ticket route ต้องไม่พัง)", async () => {

@@ -134,6 +134,7 @@ export const FEATURE_KEYS = {
   MULTIPLE_SLA_POLICIES: "multiple_sla_policies",
   ANALYTICS: "analytics",
   AI_ASSIST: "ai_assist",
+  WEBHOOKS: "webhooks",
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];

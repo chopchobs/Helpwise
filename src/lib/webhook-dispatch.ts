@@ -18,6 +18,7 @@ import { randomUUID } from "crypto";
 import { WebhookDeliveryStatus } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import type { TenantScopedPrisma } from "@/lib/tenant";
+import { hasFeature, FEATURE_KEYS } from "@/lib/features";
 import { publishWebhookDeliveryJob } from "@/lib/queue";
 import {
   buildMessageEventPayload,
@@ -62,11 +63,14 @@ export type DispatchWebhookEventInput =
  * @param db       tenant-scoped Prisma client (tenantId inject อัตโนมัติผ่าน extension)
  * @param tenantId tenant เจ้าของ event — ต้องมาจาก context ที่ verify แล้วเท่านั้น
  *                 (ใส่ลง envelope + job payload ที่ worker จะใช้ scope ต่อ)
+ * @param tenantPlan plan ปัจจุบันของ tenant (ctx.plan) — ส่งมาเพื่อกัน query plan ซ้ำใน
+ *                 hasFeature(); ไม่ส่ง = hasFeature query DB เอง (route ที่ไม่มี tenant context)
  */
 export async function dispatchWebhookEvent(
   db: TenantScopedPrisma,
   tenantId: string,
-  input: DispatchWebhookEventInput
+  input: DispatchWebhookEventInput,
+  tenantPlan?: string
 ): Promise<void> {
   try {
     // 1. Internal-note isolation — กันตั้งแต่ก่อนแตะ DB
@@ -78,7 +82,14 @@ export async function dispatchWebhookEvent(
       return;
     }
 
-    // 2. endpoint ที่เปิดอยู่ + subscribe event นี้ (tenant-scoped ผ่าน db)
+    // 2. Feature gate — จุดเดียวของทั้งระบบ (ไม่กระจายไป call site)
+    //    เหตุผล: call site ลืมเช็คไม่ได้ + tenant ที่ plan ตกชั้นหยุดส่งทันที
+    //    โดยไม่ต้องไล่แก้ทุก route. ปิด = เงียบ ๆ (ไม่สร้าง delivery ไม่ publish)
+    if (!(await hasFeature(tenantId, FEATURE_KEYS.WEBHOOKS, tenantPlan))) {
+      return;
+    }
+
+    // 3. endpoint ที่เปิดอยู่ + subscribe event นี้ (tenant-scoped ผ่าน db)
     const endpoints = await db.webhookEndpoint.findMany({
       where: { enabled: true, events: { has: input.eventType } },
       select: { id: true },
@@ -86,7 +97,7 @@ export async function dispatchWebhookEvent(
     // ไม่มีใคร subscribe → ไม่สร้าง delivery, ไม่ publish
     if (endpoints.length === 0) return;
 
-    // 3. eventId ตัวเดียวต่อ event แล้ว build envelope ครั้งเดียวใช้ร่วมทุก endpoint
+    // 4. eventId ตัวเดียวต่อ event แล้ว build envelope ครั้งเดียวใช้ร่วมทุก endpoint
     //    (receiver ที่ subscribe หลาย endpoint dedupe ด้วย id เดียวกันได้ — § 2)
     const eventId = `evt_${randomUUID()}`;
     const envelope: WebhookEnvelope =
@@ -94,7 +105,7 @@ export async function dispatchWebhookEvent(
         ? buildMessageEventPayload({ ...input, eventId, tenantId })
         : buildTicketEventPayload({ ...input, eventId, tenantId });
 
-    // 4. delivery หนึ่งแถวต่อ endpoint — payload เป็น snapshot (retry ไม่ re-query)
+    // 5. delivery หนึ่งแถวต่อ endpoint — payload เป็น snapshot (retry ไม่ re-query)
     for (const endpoint of endpoints) {
       // tenantId ถูก inject โดย extension → cast ผ่าน Omit; ใช้ scalar endpointId
       // ห้าม { endpoint: { connect } } (extension reject relation-connect)
@@ -112,7 +123,7 @@ export async function dispatchWebhookEvent(
         select: { id: true },
       });
 
-      // 5. ส่งต่อให้ worker ยิงจริง (job ผอม — worker โหลดจาก DB เอง)
+      // 6. ส่งต่อให้ worker ยิงจริง (job ผอม — worker โหลดจาก DB เอง)
       await publishWebhookDeliveryJob({ tenantId, deliveryId: delivery.id });
     }
   } catch (err) {
