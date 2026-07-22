@@ -26,6 +26,7 @@ import { tenantPrisma } from "@/lib/tenant";
 import { audit } from "@/lib/audit";
 import { MessageVisibility, Prisma, TicketStatus } from "@prisma/client";
 import { createTicketWithNumber } from "@/lib/tickets";
+import { dispatchWebhookEvent } from "@/lib/webhook-dispatch";
 
 // =============================================================================
 // VALIDATION SCHEMAS
@@ -242,6 +243,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       },
       ticketId: ticket.id,
     });
+
+    // Outbound webhook ticket.created (contract § 3 — portal ก็เป็น trigger point)
+    // ⚠️ audience: dispatch เป็น tenant-side side-effect (endpoint เป็นของ tenant ไม่ใช่ของ contact)
+    //    ไม่ได้ให้สิทธิ์/ข้อมูลอะไรเพิ่มกับ contact — guard ด้านบนคงเดิมทุกประการ
+    // fire-and-forget: feature gate + error handling อยู่ในตัว dispatcher
+    void dispatchWebhookEvent(
+      db,
+      ctx.tenantId,
+      {
+        eventType: "TICKET_CREATED",
+        occurredAt: ticket.createdAt,
+        ticket: {
+          id: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          subject: ticket.subject,
+          status: ticket.status,
+          priority: ticket.priority,
+          assigneeMemberId: ticket.assigneeId,
+          requesterContactId: ticket.requesterContactId,
+          channel: ticket.channel,
+          createdAt: ticket.createdAt,
+          updatedAt: ticket.updatedAt,
+        },
+      },
+      ctx.plan
+    );
 
     return NextResponse.json({ data: ticketWithRelations, error: null }, { status: 201 });
   } catch (err) {

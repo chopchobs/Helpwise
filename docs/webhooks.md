@@ -43,17 +43,17 @@ Deliveries** (มี HTTP status, response body ที่ระบบเก็�
 
 | Event (`type`) | ยิงเมื่อ |
 | --- | --- |
-| `ticket.created` | มี ticket ใหม่ (agent สร้าง, สร้างผ่าน `POST /api/v1/tickets`, หรือ inbound email สร้าง ticket ใหม่) |
+| `ticket.created` | มี ticket ใหม่ (agent สร้าง, ลูกค้าเปิดผ่าน portal, สร้างผ่าน `POST /api/v1/tickets`, หรือ inbound email สร้าง ticket ใหม่) |
 | `ticket.status_changed` | สถานะของ ticket เปลี่ยนจริง |
 | `ticket.assigned` | ผู้รับผิดชอบ (assignee) ของ ticket เปลี่ยนจริง |
 | `ticket.priority_changed` | ความสำคัญ (priority) ของ ticket เปลี่ยนจริง |
-| `ticket.message_created` | มีข้อความสาธารณะใหม่ในเธรด — จาก agent ที่ตอบใน workspace หรือจากอีเมลขาเข้าของลูกค้า **เฉพาะ `visibility: PUBLIC`** |
+| `ticket.message_created` | มีข้อความสาธารณะใหม่ในเธรด — จาก agent ที่ตอบใน workspace, ลูกค้าตอบผ่าน portal, หรือจากอีเมลขาเข้าของลูกค้า **เฉพาะ `visibility: PUBLIC`** |
 
 หมายเหตุสำคัญ
 
-- **ข้อจำกัดปัจจุบัน:** ticket และข้อความที่ลูกค้าสร้างเองผ่าน **portal** ยังไม่ยิง event
-  (`ticket.created` / `ticket.message_created`) — ช่องทางที่ยิง event แล้วคือ agent workspace,
-  `POST /api/v1/tickets` และอีเมลขาเข้า ถ้าคุณต้องการ event จาก portal ด้วย โปรดติดต่อทีมงาน
+- ช่องทางที่ยิง event ครบทุกทาง: agent workspace · portal ของลูกค้า · `POST /api/v1/tickets` · อีเมลขาเข้า
+  ใช้ `channel` ใน payload (`portal` / `email` / `api` / `agent`) แยกที่มาได้ และใช้ `message.authorType`
+  (`agent` / `contact`) แยกว่าใครเป็นคนเขียนข้อความ
 - ถ้าแก้หลายฟิลด์ในการอัปเดตครั้งเดียว (เช่น เปลี่ยนทั้ง status และ priority) จะได้ **หลาย event
   แยกกัน คนละ `id`** ไม่ใช่ event เดียวรวมทุกการเปลี่ยนแปลง
 - event จะถูกส่งไปยัง endpoint ที่ `enabled = true` และ subscribe event นั้นไว้เท่านั้น
