@@ -532,12 +532,13 @@ export async function PATCH(
 
     // webhook § 3: ยิงเฉพาะฟิลด์ที่เปลี่ยนจริง — หลายฟิลด์ใน PATCH เดียว = หลาย event
     // แยกกัน (คนละ eventId). snapshot ticket ใช้ค่าหลัง update ร่วมกันทุก event (§ 2)
-    // fire-and-forget: feature gate + error handling อยู่ใน dispatcher
-    const emitTicketWebhook = (
+    // caller ต้อง await (กัน serverless ตัดงานก่อนสร้าง delivery/publish job) —
+    // dispatcher ไม่ throw: feature gate + error handling อยู่ข้างใน
+    const emitTicketWebhook = async (
       eventType: TicketWebhookEventType,
       changes: WebhookTicketChanges
-    ): void => {
-      void dispatchWebhookEvent(
+    ): Promise<void> => {
+      await dispatchWebhookEvent(
         db,
         ctx.tenantId,
         {
@@ -575,7 +576,7 @@ export async function PATCH(
         })
       );
 
-      emitTicketWebhook("TICKET_STATUS_CHANGED", {
+      await emitTicketWebhook("TICKET_STATUS_CHANGED", {
         status: { from: existingTicket.status, to: status },
       });
     }
@@ -594,7 +595,7 @@ export async function PATCH(
         })
       );
 
-      emitTicketWebhook("TICKET_PRIORITY_CHANGED", {
+      await emitTicketWebhook("TICKET_PRIORITY_CHANGED", {
         priority: { from: existingTicket.priority, to: priority },
       });
     }
@@ -614,7 +615,7 @@ export async function PATCH(
         })
       );
 
-      emitTicketWebhook("TICKET_ASSIGNED", {
+      await emitTicketWebhook("TICKET_ASSIGNED", {
         assigneeMemberId: { from: existingTicket.assigneeId, to: assigneeId },
       });
 

@@ -324,8 +324,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       metadata: { apiKeyId: apiKey.id, via: "api", requesterContactId: resolvedContactId },
     });
 
-    // Outbound webhook ticket.created (contract § 3) — fire-and-forget, feature gate ใน dispatcher
-    void dispatchWebhookEvent(
+    // Outbound webhook ticket.created (contract § 3) — await เพื่อกัน serverless ตัดงานกลางคัน
+    // (dispatcher ไม่ throw: feature gate + error handling อยู่ข้างใน)
+    await dispatchWebhookEvent(
       db,
       ctx.tenantId,
       {

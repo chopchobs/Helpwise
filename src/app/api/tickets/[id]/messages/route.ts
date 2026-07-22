@@ -281,7 +281,7 @@ export async function POST(
     // 8. Outbound webhook ticket.message_created (contract § 3)
     // ⚠️ เฉพาะ PUBLIC — INTERNAL note ห้ามออกนอกระบบทุกช่องทาง รวมถึง webhook
     if (visibility === "PUBLIC") {
-      void dispatchWebhookEvent(
+      await dispatchWebhookEvent(
         db,
         ctx.tenantId,
         {

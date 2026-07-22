@@ -490,9 +490,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // Outbound webhook ticket.created (contract § 3) — fire-and-forget เหมือน notification
-    // feature gate + error handling อยู่ใน dispatcher (ไม่ทำให้ request ของ agent พัง)
-    void dispatchWebhookEvent(
+    // Outbound webhook ticket.created (contract § 3) — await เพื่อกัน serverless ตัดงานกลางคัน
+    // feature gate + error handling อยู่ใน dispatcher (ไม่ throw → ไม่ทำให้ request ของ agent พัง)
+    await dispatchWebhookEvent(
       db,
       ctx.tenantId,
       {

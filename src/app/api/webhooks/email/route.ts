@@ -365,7 +365,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
         // webhook § 3: inbound ที่ append เข้า ticket เดิม = ticket.message_created
         // inbound message เป็น PUBLIC เสมอ (สร้างด้านบน) — dispatcher กัน non-PUBLIC ซ้ำอีกชั้น
-        void dispatchWebhookEvent(db, tenantId, {
+        await dispatchWebhookEvent(db, tenantId, {
           eventType: "TICKET_MESSAGE_CREATED",
           occurredAt: appendedMessage.createdAt,
           ticket: {
@@ -428,7 +428,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
       // webhook § 3: inbound email ที่สร้าง ticket ใหม่ = ticket.created
       // ไม่ส่ง tenantPlan (route นี้ไม่มี tenant context จาก middleware) → dispatcher query plan เอง
-      void dispatchWebhookEvent(db, tenantId, {
+      await dispatchWebhookEvent(db, tenantId, {
         eventType: "TICKET_CREATED",
         occurredAt: newTicket.createdAt,
         ticket: {

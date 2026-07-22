@@ -247,8 +247,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Outbound webhook ticket.created (contract § 3 — portal ก็เป็น trigger point)
     // ⚠️ audience: dispatch เป็น tenant-side side-effect (endpoint เป็นของ tenant ไม่ใช่ของ contact)
     //    ไม่ได้ให้สิทธิ์/ข้อมูลอะไรเพิ่มกับ contact — guard ด้านบนคงเดิมทุกประการ
-    // fire-and-forget: feature gate + error handling อยู่ในตัว dispatcher
-    void dispatchWebhookEvent(
+    // await เพื่อกัน serverless ตัดงานกลางคัน (dispatcher ไม่ throw: กัน error ในตัวแล้ว)
+    await dispatchWebhookEvent(
       db,
       ctx.tenantId,
       {

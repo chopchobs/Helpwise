@@ -169,7 +169,7 @@ export async function POST(
     // ⚠️ audience: dispatch เป็น tenant-side side-effect (endpoint เป็นของ tenant ไม่ใช่ของ contact)
     //    ไม่ได้ให้สิทธิ์/ข้อมูลอะไรเพิ่มกับ contact — guard ด้านบนคงเดิมทุกประการ
     if (message.visibility === MessageVisibility.PUBLIC) {
-      void dispatchWebhookEvent(
+      await dispatchWebhookEvent(
         db,
         ctx.tenantId,
         {
