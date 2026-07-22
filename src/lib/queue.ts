@@ -187,3 +187,61 @@ export async function verifyQStashSignature(
     return { valid: false, rawBody };
   }
 }
+
+// =============================================================================
+// OUTBOUND WEBHOOK DELIVERY (Phase 36 — docs/webhooks-contract.md § 5)
+// =============================================================================
+
+/** path ของ webhook delivery worker ที่ QStash จะยิง POST เข้ามา */
+export const WEBHOOK_DELIVER_WORKER_PATH = "/api/jobs/webhook-deliver";
+
+/**
+ * QStash retry เพิ่มเติมหลัง attempt แรก — 1 + 4 = WEBHOOK_MAX_ATTEMPTS (5) ตาม § 5
+ * (worker เป็นคนนับ attemptCount จริงใน DB; ค่านี้แค่บอก QStash ว่าให้ยิงซ้ำกี่ครั้ง)
+ */
+const WEBHOOK_QSTASH_RETRIES = 4;
+
+/**
+ * Payload contract สำหรับ webhook delivery job — ผอมที่สุดตาม § 5
+ *
+ * ⚠️ worker โหลด envelope/endpoint จาก DB เองด้วย tenantPrisma(tenantId)
+ *    tenantId ในนี้เชื่อถือได้เพราะผ่าน QStash signature verify แล้วเท่านั้น
+ */
+export interface WebhookDeliveryJob {
+  /** tenant เจ้าของ delivery — worker ใช้ scope ทุก query */
+  tenantId: string;
+  /** WebhookDelivery.id ที่จะส่ง */
+  deliveryId: string;
+}
+
+/**
+ * publish webhook delivery job ไป QStash
+ *
+ * dev fallback: ไม่มี QSTASH_TOKEN และไม่ใช่ production → log warn + no-op
+ * production: ไม่มี token → throw (กัน job เงียบหายบน prod)
+ */
+export async function publishWebhookDeliveryJob(
+  job: WebhookDeliveryJob
+): Promise<void> {
+  const token = process.env.QSTASH_TOKEN;
+
+  if (!token) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "[queue] QSTASH_TOKEN is not set — cannot publish webhook delivery job in production"
+      );
+    }
+    // dev: ข้าม publish + warn (delivery ค้างสถานะ PENDING เพราะ worker ไม่ถูกเรียก)
+    console.warn(
+      "[queue] QSTASH_TOKEN is not set — skipping publish in dev mode (webhook will NOT be delivered)"
+    );
+    return;
+  }
+
+  const client = new Client({ token });
+  await client.publishJSON({
+    url: getJobTargetUrl(WEBHOOK_DELIVER_WORKER_PATH),
+    body: job,
+    retries: WEBHOOK_QSTASH_RETRIES,
+  });
+}

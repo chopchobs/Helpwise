@@ -11,6 +11,7 @@
 3. **Internal-note isolation**: event `ticket.message_created` dispatch **เฉพาะ `visibility = PUBLIC`** เท่านั้น. INTERNAL note **ห้ามออกนอกระบบเด็ดขาด** — กรองทั้งฝั่ง producer และ **re-check ที่ worker** (ไม่ trust payload ที่ enqueue ไว้).
 4. **Audience = agent-only**: CRUD endpoint ทั้งหมดผ่าน `requireAgent({ roles: ["OWNER","ADMIN"] })`. Portal/contact ห้ามแตะ.
 5. **Feature gate**: `hasFeature(tenantId, "webhooks", plan)` → ปิด = `403 FEATURE_LOCKED`. **ห้าม hardcode plan check**.
+   ฝั่ง producer ให้ gate **ภายใน `dispatchWebhookEvent()` จุดเดียว** (ไม่ใช่ที่ call site แต่ละที่) — call site ลืมไม่ได้ และ tenant ที่ plan ตกชั้นจะหยุดส่งทันทีโดยไม่ต้องแก้ทุก route
 6. **SSRF = ภัยหลักของฟีเจอร์นี้** (tenant ป้อน URL ให้ server เราไปยิง) — ดู § SSRF Guard. บังคับ **2 จุด**: create/update-time และ **send-time หลัง DNS resolve** (กัน DNS rebinding).
 
 ---
@@ -228,8 +229,11 @@ header        = `t=${t},v1=${v1}`
   - ล้ม และ `attemptCount >= MAX_ATTEMPTS` → `status = DEAD` (เข้า DLQ) → return **200** (หยุด retry)
 - **idempotent**: ถ้า delivery ปัจจุบัน `status === "SUCCEEDED"` แล้ว → skip ทันที return 200 (`{ skipped: "already_succeeded" }`)
 - **endpoint ถูกลบ / `enabled = false` ตอน worker รัน** → skip return 200 (`{ skipped: "endpoint_disabled" }`)
-- **Replay (DLQ)**: `POST /api/webhooks/deliveries/[id]/replay` → รับเฉพาะ delivery ที่ `status = DEAD`
+- **Replay (DLQ)**: `POST /api/webhooks/deliveries/[id]/replay` → รับ delivery ที่ `status !== SUCCEEDED`
+  (ครอบ `DEAD` = DLQ จริง, `FAILED`, และ `PENDING` ที่ค้างเพราะ publish ไป QStash ไม่สำเร็จ)
   → reset `attemptCount = 0`, `status = PENDING`, publish job ใหม่ (payload เดิม ไม่ re-query — snapshot)
+  → `409 ALREADY_SUCCEEDED` ถ้า delivery สำเร็จไปแล้ว
+  > replay ตอน QStash ยัง retry ตัวเดิมค้างอยู่ = ยิงซ้ำได้ — รับได้เพราะ receiver dedupe ด้วย `eventId` (§ 2)
 
 ### QStash job payload (producer → worker)
 
