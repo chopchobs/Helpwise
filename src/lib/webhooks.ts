@@ -148,9 +148,10 @@ const BLOCKED_HOSTNAME_SUFFIXES = [".localhost", ".internal"];
 /** URL.hostname ของ IPv6 literal มีวงเล็บติดมา ("[::1]") — ตัดออกก่อนเช็ค */
 function normalizeHostname(hostname: string): string {
   const lower = hostname.toLowerCase();
-  return lower.startsWith("[") && lower.endsWith("]")
-    ? lower.slice(1, -1)
-    : lower;
+  const unwrapped =
+    lower.startsWith("[") && lower.endsWith("]") ? lower.slice(1, -1) : lower;
+  // ตัด trailing dot ของ FQDN ("localhost." → "localhost") — กัน deny-list หลุดเพราะ root-label
+  return unwrapped.replace(/\.+$/, "");
 }
 
 function isBlockedHostname(host: string): boolean {

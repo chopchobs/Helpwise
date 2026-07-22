@@ -231,6 +231,25 @@ describe("validateWebhookUrl", () => {
     expect(validateWebhookUrl(url)).toEqual({ ok: false, reason });
   });
 
+  // FQDN trailing dot: "localhost." ต้องถูกมองเป็น "localhost" ไม่งั้น deny-list หลุด
+  it.each([
+    ["https://localhost./", "blocked_host"],
+    ["https://LOCALHOST./", "blocked_host"],
+    ["https://metadata.google.internal./", "blocked_host"],
+    ["https://foo.internal./", "blocked_host"],
+  ])("reject trailing-dot FQDN %s", (url, reason) => {
+    expect(validateWebhookUrl(url)).toEqual({ ok: false, reason });
+  });
+
+  it("regression: host public ที่มี trailing dot ยังผ่าน (เหมือนไม่มีจุด)", () => {
+    expect(validateWebhookUrl("https://example.com./").ok).toBe(true);
+    expect(validateWebhookUrl("https://example.com/").ok).toBe(true);
+  });
+
+  it("reject hostname ที่เหลือว่างหลังตัด trailing dot", () => {
+    expect(validateWebhookUrl("https://./").ok).toBe(false);
+  });
+
   it("reject URL ที่ parse ไม่ได้ และ scheme อื่น (file:)", () => {
     expect(validateWebhookUrl("not a url")).toEqual({
       ok: false,
