@@ -264,15 +264,20 @@ header        = `t=${t},v1=${v1}`
 
 ## 7. REST API (agent-only, OWNER/ADMIN, feature-gated) — รูปแบบ `{ data, error }` เสมอ
 
+> ⚠️ **path เป็น `/api/webhook-endpoints` + `/api/webhook-deliveries` ไม่ใช่ `/api/webhooks`** —
+> `src/app/api/webhooks/` ถูกใช้โดย **inbound** webhook อยู่แล้ว (`webhooks/stripe`, `webhooks/email`)
+> การเพิ่ม `[id]` segment เข้าไปทำให้ route tree ปนกันระหว่าง inbound (รับเข้า, verify signature ของ provider)
+> กับ outbound management (agent-only CRUD) — แยก path กันคนละต้นไม้เพื่อไม่ให้เผลอ
+
 | method + path | หน้าที่ | หมายเหตุ |
 |---|---|---|
-| `GET /api/webhooks` | list endpoints | **ไม่คืน `secret`** |
-| `POST /api/webhooks` | สร้าง endpoint | คืน `{ endpoint, plaintextSecret }` **ครั้งเดียว** |
-| `PATCH /api/webhooks/[id]` | แก้ description/url/events/enabled | url ที่แก้ต้องผ่าน SSRF guard ซ้ำ |
-| `DELETE /api/webhooks/[id]` | ลบ endpoint | cascade ลบ deliveries |
-| `POST /api/webhooks/[id]/rotate-secret` | หมุน secret | คืน plaintext ใหม่ครั้งเดียว |
-| `GET /api/webhooks/deliveries?endpointId=&status=` | list delivery (paginate `take` ≤ 50) | DLQ = `status=DEAD` |
-| `POST /api/webhooks/deliveries/[id]/replay` | re-enqueue delivery ที่ DEAD | 409 ถ้าไม่ใช่ DEAD |
+| `GET /api/webhook-endpoints` | list endpoints | **ไม่คืน `secret`** |
+| `POST /api/webhook-endpoints` | สร้าง endpoint | คืน `{ endpoint, plaintextSecret }` **ครั้งเดียว** |
+| `PATCH /api/webhook-endpoints/[id]` | แก้ description/url/events/enabled | url ที่แก้ต้องผ่าน SSRF guard ซ้ำ |
+| `DELETE /api/webhook-endpoints/[id]` | ลบ endpoint | cascade ลบ deliveries |
+| `POST /api/webhook-endpoints/[id]/rotate-secret` | หมุน secret | คืน plaintext ใหม่ครั้งเดียว |
+| `GET /api/webhook-deliveries?endpointId=&status=` | list delivery (paginate `take` ≤ 50) | DLQ = `status=DEAD` |
+| `POST /api/webhook-deliveries/[id]/replay` | re-enqueue delivery ที่ยังไม่สำเร็จ | 409 ถ้า `SUCCEEDED` |
 
 **DTO** (`src/types/webhook.ts`) — `WebhookEndpointDTO` (ไม่มี field `secret`), `WebhookDeliveryDTO`
 
