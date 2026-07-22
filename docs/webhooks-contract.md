@@ -182,13 +182,18 @@ ON CONFLICT ("key") DO NOTHING;
 
 | enum | wire `type` | trigger point |
 |---|---|---|
-| `TICKET_CREATED` | `ticket.created` | `POST /api/tickets`, `POST /api/v1/tickets`, inbound email สร้าง ticket ใหม่ |
+| `TICKET_CREATED` | `ticket.created` | `POST /api/tickets`, `POST /api/v1/tickets`, `POST /api/portal/tickets`, inbound email สร้าง ticket ใหม่ |
 | `TICKET_STATUS_CHANGED` | `ticket.status_changed` | `PATCH /api/tickets/[id]` เมื่อ status เปลี่ยนจริง |
 | `TICKET_ASSIGNED` | `ticket.assigned` | `PATCH /api/tickets/[id]` เมื่อ assigneeId เปลี่ยนจริง |
 | `TICKET_PRIORITY_CHANGED` | `ticket.priority_changed` | `PATCH /api/tickets/[id]` เมื่อ priority เปลี่ยนจริง |
-| `TICKET_MESSAGE_CREATED` | `ticket.message_created` | `POST /api/tickets/[id]/messages` **เฉพาะ visibility=PUBLIC** |
+| `TICKET_MESSAGE_CREATED` | `ticket.message_created` | `POST /api/tickets/[id]/messages`, `POST /api/portal/tickets/[id]/messages`, inbound email ที่ append เข้า ticket เดิม — **ทุกเส้นทางเฉพาะ visibility=PUBLIC** |
 
 > เปลี่ยนหลายฟิลด์ใน PATCH เดียว → ยิงหลาย event (แยก eventId คนละตัว)
+>
+> ⚠️ **Portal (contact audience) ต้องยิง event ด้วย** — ticket ที่ลูกค้าเปิดเองผ่าน portal และข้อความที่ลูกค้าตอบ
+> เป็น event ที่ integrator คาดหวังมากที่สุด. `dispatchWebhookEvent` เป็น **agent-side side-effect**
+> ไม่ได้ทำให้ contact เห็นอะไรเพิ่ม — endpoint เป็นของ tenant ไม่ใช่ของ contact
+> (`authorType: "contact"` สำหรับข้อความจาก portal)
 
 ---
 
@@ -229,7 +234,7 @@ header        = `t=${t},v1=${v1}`
   - ล้ม และ `attemptCount >= MAX_ATTEMPTS` → `status = DEAD` (เข้า DLQ) → return **200** (หยุด retry)
 - **idempotent**: ถ้า delivery ปัจจุบัน `status === "SUCCEEDED"` แล้ว → skip ทันที return 200 (`{ skipped: "already_succeeded" }`)
 - **endpoint ถูกลบ / `enabled = false` ตอน worker รัน** → skip return 200 (`{ skipped: "endpoint_disabled" }`)
-- **Replay (DLQ)**: `POST /api/webhooks/deliveries/[id]/replay` → รับ delivery ที่ `status !== SUCCEEDED`
+- **Replay (DLQ)**: `POST /api/webhook-deliveries/[id]/replay` → รับ delivery ที่ `status !== SUCCEEDED`
   (ครอบ `DEAD` = DLQ จริง, `FAILED`, และ `PENDING` ที่ค้างเพราะ publish ไป QStash ไม่สำเร็จ)
   → reset `attemptCount = 0`, `status = PENDING`, publish job ใหม่ (payload เดิม ไม่ re-query — snapshot)
   → `409 ALREADY_SUCCEEDED` ถ้า delivery สำเร็จไปแล้ว

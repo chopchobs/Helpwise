@@ -134,20 +134,20 @@ export interface WebhookDeliveryDTO {
   updatedAt: string;
 }
 
-/** Response shape: GET /api/webhooks */
+/** Response shape: GET /api/webhook-endpoints */
 export interface WebhookEndpointListResponse {
   data: { endpoints: WebhookEndpointDTO[] } | null;
   error: ApiError | null;
 }
 
-/** Response shape: POST /api/webhooks และ POST /api/webhooks/:id/rotate-secret
+/** Response shape: POST /api/webhook-endpoints และ POST /api/webhook-endpoints/:id/rotate-secret
  *  plaintextSecret เห็นได้ครั้งเดียว */
 export interface WebhookEndpointCreateResponse {
   data: { endpoint: WebhookEndpointDTO; plaintextSecret: string } | null;
   error: ApiError | null;
 }
 
-/** Response shape: GET /api/webhooks/deliveries */
+/** Response shape: GET /api/webhook-deliveries */
 export interface WebhookDeliveryListResponse {
   data: { deliveries: WebhookDeliveryDTO[] } | null;
   error: ApiError | null;

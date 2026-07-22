@@ -9,6 +9,9 @@ available to tenants on the **Enterprise** plan.
 - **Format:** All requests and responses use JSON.
 - **Versioning:** The current version is `v1`.
 
+> Prefer receiving ticket events instead of polling this API? See
+> [Outbound Webhooks](./webhooks.md) (requires the `webhooks` feature, Pro plan and above).
+
 ## Authentication
 
 All `/api/v1/*` endpoints require an API key, sent as a Bearer token:
