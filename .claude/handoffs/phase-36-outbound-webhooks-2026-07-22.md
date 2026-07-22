@@ -66,10 +66,19 @@ Working state:
 - [ ] **apply migration** — `prisma migrate status` มีค้าง **3 ตัว**: `20260721000000_realtime_presence_rls` (Phase 35 — น่าจะ apply ด้วยมือผ่าน SQL editor จึงไม่ถูกบันทึกใน `_prisma_migrations`; ใครรัน `migrate deploy` จะได้ตัวนี้พ่วง แต่ idempotent) + `20260722000000` + `20260722010000` ของ Phase 36
 - [ ] **เปิด FeatureFlag `webhooks`** ให้ tenant ที่ต้องการ (default `false`, `requiredPlan: pro`)
 
-### Open Questions — Dev ตัดสิน
-- **encryption-at-rest ของ `WebhookEndpoint.secret`** — blocker หรือ backlog (Stripe/Svix เก็บ plaintext เหมือนกัน)
-- **ภาษาเอกสาร** — `docs/webhooks.md` เป็นไทย แต่ `docs/api.md` อังกฤษล้วน จะแปลให้เข้าชุดไหม
-- **rotate-secret ไม่มี grace period** — delivery ที่ retry ค้างจะถูกเซ็นด้วย secret ใหม่ทันที receiver ที่ยังไม่อัปเดตจะ verify ไม่ผ่าน (เขียนเตือนไว้ใน docs แล้ว)
+### Dev ตัดสินแล้ว (ปิดแล้ว — อย่ายกกลับมาถามซ้ำ)
+- ✅ **encryption-at-rest ของ `WebhookEndpoint.secret` = DEFERRED (backlog) ไม่ใช่ blocker ก่อน merge**
+  เหตุผล: secret ต้องอยู่ในรูปที่ถอดกลับได้เพื่อ HMAC sign ทุก delivery (ต่างจาก API key ที่ hash ทางเดียวพอ) ·
+  ผู้ให้บริการเทียบเคียง (Stripe, Svix) เก็บ signing secret แบบเดียวกัน · ชั้นป้องกันปัจจุบันคือ **ไม่ให้ secret
+  อยู่ใน select/DTO/audit/log/response เลย** (verify แล้ว) → ความเสี่ยงที่เหลือคือผู้ที่อ่าน DB ได้โดยตรง
+  ซึ่งถ้าถึงขั้นนั้นก็เข้าถึงข้อมูล tenant อื่นได้อยู่แล้ว ไม่ได้แย่ลงเพราะฟีเจอร์นี้
+- ✅ **แปล `docs/webhooks.md` เป็นอังกฤษ = next action ข้อแรกของ session หน้า** (ให้เข้าชุดกับ `docs/api.md`)
+  เป็น **งานเต็มก้อน 577 บรรทัด** — ตั้งใจให้เป็นงานหลักตอนเปิด context ใหม่ **ไม่ใช่งานปิดท้าย session**
+  ⚠️ ตอนแปลต้องคง parity ของโค้ดตัวอย่าง verify signature กับ `verifyWebhookSignature` ใน `src/lib/webhooks.ts`
+  (ของเดิม verify มาแล้ว 17 case) และคงคำเตือน "rotate-secret ไม่มี grace period" ไว้
+
+### Open Questions ที่ยังเหลือ
+- **rotate-secret ไม่มี grace period** — delivery ที่ retry ค้างจะถูกเซ็นด้วย secret ใหม่ทันที receiver ที่ยังไม่อัปเดตจะ verify ไม่ผ่าน (เขียนเตือนไว้ใน docs แล้ว — จะทำ dual-secret window ไหม ยังไม่ตัดสิน)
 
 ### Backlog ที่ระบุไว้แล้ว (non-blocking)
 - **ถอด `responseBody` ออกจาก select/DTO ของ `GET /api/webhook-deliveries`** — API คืนมาแต่ **UI ไม่ได้ใช้เลย** ลดพื้นที่โจมตีได้ฟรี (`src/app/api/webhook-deliveries/route.ts:53,84` + `src/types/webhook.ts:131`)
@@ -82,9 +91,10 @@ Working state:
 ## Next Session
 ### เริ่มต้นด้วย
 1. อ่าน `.claude/project-plan.md` + handoff นี้
-2. `git log --oneline main..HEAD` + `npx vitest run` verify state (คาด 13 commit / 825 pass)
-3. **รัน `security` gate ให้จบก่อนอย่างอื่น** — ใช้ scope แบบ read-only ไม่ให้เขียนไฟล์/รันสคริปต์ (รูปแบบนี้ทำให้ `qa-testing` ที่ล้มซ้ำ ๆ ทำงานจบได้)
-4. ปิด finding ที่ security เจอ → merge → Dev push + apply migration
+2. `git log --oneline main..HEAD` + `npx vitest run` verify state (คาด 15 commit / 825 pass)
+3. **งานหลักข้อแรก: แปล `docs/webhooks.md` เป็นอังกฤษ** (Dev สั่งไว้ — งานเต็มก้อน 577 บรรทัด, เจ้าภาพ `docs-writer`)
+4. **รัน `security` gate ให้จบ** — ใช้ scope แบบ read-only ไม่ให้เขียนไฟล์/รันสคริปต์ (รูปแบบนี้ทำให้ `qa-testing` ที่ล้มซ้ำ ๆ ทำงานจบได้)
+5. ปิด finding ที่ security เจอ → merge → Dev push + apply migration
 
 ### Phase ถัดไป
 - หลัง merge Phase 36 → Portfolio item ถัดไป (ยังไม่เลือก — #1 fuzz suite และ #2 webhooks, #3 realtime ทำไปแล้ว)
