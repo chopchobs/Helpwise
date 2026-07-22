@@ -261,4 +261,34 @@ describe("dispatchWebhookEvent", () => {
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
   });
+
+  it("endpoint กลาง publish ล้ม → อีก 2 ตัวยังสร้าง delivery + publish ครบ (ไม่ partial fan-out)", async () => {
+    db.webhookEndpoint.findMany.mockResolvedValue([
+      { id: "ep-1" },
+      { id: "ep-2" },
+      { id: "ep-3" },
+    ]);
+    // delivery ของ ep-2 คือ del-2 (create ถูกเรียกตามลำดับ endpoint)
+    publishMock.mockImplementation(async (job: { deliveryId: string }) => {
+      if (job.deliveryId === "del-2") throw new Error("qstash down");
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      dispatchWebhookEvent(asScoped(db), TENANT_ID, ticketInput())
+    ).resolves.toBeUndefined();
+
+    // ⭐ ตัวที่ล้มไม่บล็อกตัวอื่น: create ครบ 3, publish ครบ 3
+    expect(db.webhookDelivery.create).toHaveBeenCalledTimes(3);
+    expect(publishMock).toHaveBeenCalledTimes(3);
+    const endpointIds = db.webhookDelivery.create.mock.calls.map(
+      (c) => (c[0] as { data: { endpointId: string } }).data.endpointId
+    );
+    expect(endpointIds).toEqual(["ep-1", "ep-2", "ep-3"]);
+
+    // log ระบุ endpoint ที่ล้มเท่านั้น — ไม่มี url/secret/payload
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(String(errorSpy.mock.calls[0][0])).toContain("ep-2");
+    errorSpy.mockRestore();
+  });
 });

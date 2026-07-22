@@ -106,11 +106,17 @@ export async function dispatchWebhookEvent(
         : buildTicketEventPayload({ ...input, eventId, tenantId });
 
     // 5. delivery หนึ่งแถวต่อ endpoint — payload เป็น snapshot (retry ไม่ re-query)
-    for (const endpoint of endpoints) {
-      // tenantId ถูก inject โดย extension → cast ผ่าน Omit; ใช้ scalar endpointId
-      // ห้าม { endpoint: { connect } } (extension reject relation-connect)
-      const data: Omit<Prisma.WebhookDeliveryUncheckedCreateInput, "tenantId"> =
-        {
+    //    fan-out ขนาน (dispatcher อยู่ใน critical path ของ request แล้ว → ไม่จ่าย
+    //    round-trip QStash เรียงกัน). allSettled ไม่ใช่ all: endpoint หนึ่งล้ม
+    //    ต้องไม่ทำให้ตัวที่เหลือถูกข้าม (partial fan-out ของ loop เดิม)
+    const results = await Promise.allSettled(
+      endpoints.map(async (endpoint) => {
+        // tenantId ถูก inject โดย extension → cast ผ่าน Omit; ใช้ scalar endpointId
+        // ห้าม { endpoint: { connect } } (extension reject relation-connect)
+        const data: Omit<
+          Prisma.WebhookDeliveryUncheckedCreateInput,
+          "tenantId"
+        > = {
           endpointId: endpoint.id,
           eventType: input.eventType,
           eventId,
@@ -118,14 +124,27 @@ export async function dispatchWebhookEvent(
           status: WebhookDeliveryStatus.PENDING,
           attemptCount: 0,
         };
-      const delivery = await db.webhookDelivery.create({
-        data: data as Prisma.WebhookDeliveryUncheckedCreateInput,
-        select: { id: true },
-      });
+        const delivery = await db.webhookDelivery.create({
+          data: data as Prisma.WebhookDeliveryUncheckedCreateInput,
+          select: { id: true },
+        });
 
-      // 6. ส่งต่อให้ worker ยิงจริง (job ผอม — worker โหลดจาก DB เอง)
-      await publishWebhookDeliveryJob({ tenantId, deliveryId: delivery.id });
-    }
+        // 6. ส่งต่อให้ worker ยิงจริง (job ผอม — worker โหลดจาก DB เอง)
+        await publishWebhookDeliveryJob({ tenantId, deliveryId: delivery.id });
+      })
+    );
+
+    // 7. log เฉพาะตัวที่ล้ม — ระบุ endpoint.id เท่านั้น (ห้าม url/secret/payload)
+    results.forEach((result, i) => {
+      if (result.status === "rejected") {
+        console.error(
+          `[webhook-dispatch] endpoint ${endpoints[i].id} failed:`,
+          result.reason instanceof Error
+            ? result.reason.message
+            : String(result.reason)
+        );
+      }
+    });
   } catch (err) {
     // ⚠️ Tradeoff โดยเจตนา: webhook เป็น side-effect ไม่ใช่ critical path ของการสร้าง/แก้ ticket
     //    → dispatch ล้มต้องไม่ทำให้ request ของ agent พัง (swallow + log)
