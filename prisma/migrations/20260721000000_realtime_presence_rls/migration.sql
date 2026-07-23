@@ -22,11 +22,19 @@
 --   (format cuid/[a-zA-Z0-9-]) ที่ DB layer เพื่อกัน `:` injection ใน prefix โดยตรง.
 --   starts_with เป็น STRICT: claim NULL → prefix NULL → ผลลัพธ์ NULL → RLS deny (fail-closed).
 --
--- Idempotent-safe: ENABLE ROW LEVEL SECURITY ซ้ำเป็น no-op; DROP POLICY IF EXISTS ก่อน CREATE เสมอ.
+-- Idempotent-safe: DROP POLICY IF EXISTS ก่อน CREATE เสมอ.
 -- ไม่มี DROP TABLE / DELETE / TRUNCATE ใด ๆ ในไฟล์นี้.
+--
+-- ⚠️ ไม่มี `alter table realtime.messages enable row level security` โดยเจตนา (อย่าใส่กลับ):
+--   1. Supabase เปิด RLS บน realtime.messages ให้ default อยู่แล้ว — เอกสารระบุตรงตัวว่า
+--      "you don't need to execute ALTER TABLE realtime.messages ENABLE ROW LEVEL SECURITY"
+--      (https://supabase.com/docs/guides/realtime/authorization)
+--   2. ตารางนี้ owner เป็น `supabase_realtime_admin` ไม่ใช่ `postgres` → ALTER TABLE ต้องเป็น owner
+--      จึงล้มด้วย 42501 "must be owner of table messages" ทั้งจาก Prisma และจาก SQL Editor
+--      (พิสูจน์บน prod 2026-07-23) ส่วน CREATE POLICY บนตารางเดิมทำได้ปกติด้วย role postgres
+--   → ผลลัพธ์ปลายทางเท่ากัน แต่ไฟล์นี้ apply ผ่าน `prisma migrate deploy` ได้จริง
 
 -- Supabase Realtime Authorization: RLS บน realtime.messages เป็นตัวตัดสินสิทธิ์ join channel
-alter table realtime.messages enable row level security;
 
 -- SELECT = สิทธิ์ "รับ" presence/broadcast ของ channel (join + receive)
 drop policy if exists "agent receive own-tenant ticket presence" on realtime.messages;
