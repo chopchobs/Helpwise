@@ -68,7 +68,11 @@
 → อ้าง DoD 8 ข้อใน `CLAUDE.md` § Definition of Done — เป็นเกณฑ์ **block** ของ `code-review` / `qa-testing` / `security`
 
 ## ⚠️ ค้าง / ต้องสังเกต
-0. **Migration ค้าง apply บน DB จริง 4 ตัว** (จาก `prisma migrate status` — ตรวจก่อนเสมอ อย่าเชื่อตัวเลขนี้ตรง ๆ): `20260721000000_realtime_presence_rls` (Phase 35 — น่าจะ apply ด้วยมือผ่าน SQL editor จึงไม่ถูกบันทึกใน `_prisma_migrations`), `20260722000000_add_outbound_webhooks`, `20260722010000_add_webhooks_feature_flag`, `20260723000000_webhooks_rls` (RLS ของ 2 ตาราง webhooks — ต้อง apply หลัง `20260722000000` ซึ่ง timestamp เรียงถูกแล้ว). ใครรัน `migrate deploy` จะได้ตัว realtime พ่วงไปด้วย — ตัวมัน idempotent (`drop policy if exists` + `enable rls` ซ้ำ = no-op) แต่ **ต้องรู้ก่อนกด deploy**
+0. **Migration ค้าง apply บน DB จริง 4 ตัว** (จาก `prisma migrate status` — ⚠️ **`migrate status` เชื่อไม่ได้เมื่อมี migration failed**: ตัวที่ failed จะหายจากรายการ pending ทำให้ดูเหมือนเคลียร์แล้ว ต้อง query `_prisma_migrations` ดู `finished_at`/`rolled_back_at` ตรง ๆ): `20260721000000_realtime_presence_rls`, `20260722000000_add_outbound_webhooks`, `20260722010000_add_webhooks_feature_flag`, `20260723000000_webhooks_rls`
+   - 🔴 **ข้อเท็จจริงที่แก้แล้ว (2026-07-23):** ที่เคยเขียนว่า realtime RLS "น่าจะ apply ด้วยมือผ่าน SQL editor" **ผิด** — `pg_policies` บน `realtime.messages` = **0 แถว** แปลว่า **Phase 35 presence/typing ไม่เคยทำงานบน production เลย** (RLS เปิด default + ไม่มี policy = deny ทุก channel แบบเงียบ ๆ)
+   - สาเหตุที่ apply ไม่ได้: บรรทัด `alter table realtime.messages enable row level security` ล้ม **42501** เพราะ owner คือ `supabase_realtime_admin` ไม่ใช่ `postgres` → **ถอดบรรทัดนั้นออกแล้ว** (commit `6dafbef`) เพราะ Supabase เปิด RLS ให้ default อยู่แล้ว ส่วน `CREATE POLICY` ทำได้ปกติ
+   - ลำดับกู้: `migrate resolve --rolled-back 20260721000000_realtime_presence_rls` → `npm run db:deploy` (ได้ทั้ง 4 ตัว) → verify `pg_policies` ต้องได้ **2 แถว** + smoke presence 2 เบราว์เซอร์
+   - รายละเอียดข้อจำกัด schema `realtime` → memory `realtime-messages-rls-supabase`
 1. **ไม่มี Phase ค้าง · LAUNCHED แล้ว** — merge + push ครบทุก branch, deploy live ที่ gethelpwise.xyz (Phase 31-33)
 2. **RLS ยังไม่ active** (`RLS_ENABLED=false`, app ใช้ BYPASSRLS role) — application-enforced isolation เป็นด่านจริง; จะ activate RLS ต้องสลับ DB role + เปิด flag
 3. **Stray duplicate files (iCloud)** — เป็นปัญหาเป็นระยะ ทำ build พัง; ลบทีละไฟล์ (`rm <file>` ไม่ใช่ `rm -rf`) เมื่อพบ
