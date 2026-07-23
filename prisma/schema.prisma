@@ -87,6 +87,24 @@ enum NotificationType {
   SLA_BREACH
 }
 
+// WebhookEventType — event ที่ outbound webhook รองรับ (Phase 36)
+// comment ข้างค่า = wire name ที่ส่งใน payload envelope (field "type")
+enum WebhookEventType {
+  TICKET_CREATED // "ticket.created"
+  TICKET_STATUS_CHANGED // "ticket.status_changed"
+  TICKET_ASSIGNED // "ticket.assigned"
+  TICKET_PRIORITY_CHANGED // "ticket.priority_changed"
+  TICKET_MESSAGE_CREATED // "ticket.message_created" (PUBLIC เท่านั้น — INTERNAL note ห้ามออกนอกระบบ)
+}
+
+// WebhookDeliveryStatus — สถานะการส่งของแต่ละ delivery
+enum WebhookDeliveryStatus {
+  PENDING // enqueue แล้ว ยังไม่สำเร็จ (กำลัง retry ได้)
+  SUCCEEDED // receiver ตอบ 2xx
+  FAILED // attempt ล่าสุดล้ม แต่ยัง retry ได้ (attemptCount < MAX)
+  DEAD // ครบ MAX attempts แล้วยังล้ม = DLQ (replay ด้วยมือได้)
+}
+
 // =============================================================================
 // GLOBAL MODELS (ไม่ใช่ tenant-scoped — ไม่มี tenantId)
 // =============================================================================
@@ -189,6 +207,8 @@ model Tenant {
   tags            Tag[]
   ticketTags      TicketTag[]
   notifications   Notification[]
+  webhookEndpoints  WebhookEndpoint[]
+  webhookDeliveries WebhookDelivery[]
 
   @@index([slug])
 }
@@ -224,6 +244,8 @@ model TenantMember {
   createdCannedResponses CannedResponse[] @relation("CannedResponseCreatedBy")
   // notification ที่ member นี้เป็น recipient (scope การมองเห็น)
   notifications          Notification[]   @relation("NotificationRecipient")
+  // webhook endpoint ที่ member นี้เป็นผู้สร้าง
+  webhookEndpointsCreated WebhookEndpoint[] @relation("WebhookEndpointCreatedBy")
 
   // composite unique: 1 user ใน 1 tenant ได้ครั้งเดียว
   @@unique([tenantId, userId])
@@ -723,4 +745,76 @@ model Notification {
 
   @@index([tenantId, memberId]) // query notification ของ recipient ใน tenant
   @@index([tenantId, memberId, readAt]) // query unread (readAt IS NULL)
+}
+
+// WebhookEndpoint — ปลายทาง outbound webhook ที่ tenant ตั้งเอง (agent-only, OWNER/ADMIN)
+// tenant-scoped: endpoint เป็นของ tenant เดียวเสมอ — query ผ่าน tenantPrisma(ctx.tenantId)
+// url ที่ผู้ใช้ป้อนต้องผ่าน SSRF guard ทั้งตอน create/update และตอนส่งจริงหลัง DNS resolve
+model WebhookEndpoint {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // ชื่อที่ user ตั้งเพื่อแยกแยะ endpoint
+  description String
+  // ปลายทาง — https เท่านั้น, ผ่าน SSRF guard
+  url         String
+  // HMAC signing secret (plaintext "whsec_...") — return ออก API ครั้งเดียวตอน create/rotate
+  // ⚠️ ห้าม return ใน list/get DTO, ห้าม log, ห้ามใส่ใน AuditLog before/after
+  secret      String
+  // event ที่ subscribe — ว่าง = ไม่ส่งอะไรเลย
+  events      WebhookEventType[]
+  // ปิดชั่วคราวโดยไม่ลบ (คง delivery history)
+  enabled     Boolean            @default(true)
+
+  // member ผู้สร้าง endpoint นี้ (nullable เผื่อ member ถูกลบออกจาก tenant ภายหลัง)
+  createdByMemberId String?
+  createdByMember   TenantMember? @relation("WebhookEndpointCreatedBy", fields: [createdByMemberId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveries WebhookDelivery[]
+
+  // composite unique (tenantId, id) — target ของ composite FK จาก WebhookDelivery
+  @@unique([tenantId, id])
+  @@index([tenantId])
+}
+
+// WebhookDelivery — 1 แถว = 1 ครั้งที่ต้องส่ง event หนึ่งไปยัง endpoint หนึ่ง
+// 1 event → หลาย delivery (หลาย endpoint) แต่ใช้ eventId เดียวกัน เพื่อให้ receiver dedupe ได้
+// payload เป็น snapshot ณ เวลา enqueue — retry/replay ใช้ก้อนเดิม ไม่ re-query DB
+model WebhookDelivery {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // composite FK [tenantId, endpointId] -> WebhookEndpoint[tenantId, id]:
+  //   DB บังคับว่า delivery ต้องอยู่ tenant เดียวกับ endpoint (กัน cross-tenant FK — Phase 34)
+  //   tenantId scalar ตัวเดียวใช้ร่วมกับ relation tenant + endpoint (multi-tenant pattern)
+  endpointId String
+  endpoint   WebhookEndpoint @relation(fields: [tenantId, endpointId], references: [tenantId, id], onDelete: Cascade)
+
+  eventType WebhookEventType
+  // id ของ "event" ที่ receiver ใช้ dedupe (idempotency key ฝั่งปลายทาง)
+  eventId   String
+  // payload envelope เต็มที่จะส่ง (snapshot ณ เวลา enqueue)
+  payload   Json
+
+  status        WebhookDeliveryStatus @default(PENDING)
+  attemptCount  Int                   @default(0)
+  lastAttemptAt DateTime?
+  // ผลลัพธ์ attempt ล่าสุด (ไว้ debug ใน UI)
+  responseStatus Int?
+  // ตัด 500 ตัวอักษรก่อนเก็บ (กัน payload ใหญ่/PII เกินจำเป็น)
+  responseBody   String?
+  errorMessage   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, endpointId]) // list delivery ของ endpoint หนึ่ง
+  @@index([tenantId, status]) // DLQ view: WHERE status = 'DEAD'
+  @@index([tenantId, eventId]) // trace ทุก delivery ของ event เดียวกัน
 }

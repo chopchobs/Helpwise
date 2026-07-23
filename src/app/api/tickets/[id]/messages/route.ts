@@ -28,6 +28,7 @@ import { audit } from "@/lib/audit";
 import { MessageVisibility, Prisma, TicketStatus } from "@prisma/client";
 import { createTicketMessage } from "@/lib/tickets";
 import { publishSendEmailJob } from "@/lib/queue";
+import { dispatchWebhookEvent } from "@/lib/webhook-dispatch";
 
 // =============================================================================
 // VALIDATION SCHEMA
@@ -275,6 +276,33 @@ export async function POST(
           error: enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr),
         });
       }
+    }
+
+    // 8. Outbound webhook ticket.message_created (contract § 3)
+    // ⚠️ เฉพาะ PUBLIC — INTERNAL note ห้ามออกนอกระบบทุกช่องทาง รวมถึง webhook
+    if (visibility === "PUBLIC") {
+      await dispatchWebhookEvent(
+        db,
+        ctx.tenantId,
+        {
+          eventType: "TICKET_MESSAGE_CREATED",
+          occurredAt: message.createdAt,
+          ticket: {
+            id: ticket.id,
+            ticketNumber: ticket.ticketNumber,
+            subject: ticket.subject,
+          },
+          message: {
+            id: message.id,
+            visibility: message.visibility,
+            authorType: "agent",
+            authorId: member.id,
+            body: message.body,
+            createdAt: message.createdAt,
+          },
+        },
+        ctx.plan
+      );
     }
 
     return NextResponse.json({ data: message, error: null }, { status: 201 });

@@ -23,6 +23,7 @@ import { tenantPrisma } from "@/lib/tenant";
 import { audit } from "@/lib/audit";
 import { MessageVisibility, TicketStatus } from "@prisma/client";
 import { createTicketMessage } from "@/lib/tickets";
+import { dispatchWebhookEvent } from "@/lib/webhook-dispatch";
 
 // =============================================================================
 // VALIDATION SCHEMA
@@ -101,6 +102,9 @@ export async function POST(
         id: true,
         status: true,
         mergedIntoId: true,
+        // additive: ใช้เฉพาะ envelope ของ webhook (contract § 2) — ไม่ถูก return ใน response
+        ticketNumber: true,
+        subject: true,
       },
     });
 
@@ -159,7 +163,37 @@ export async function POST(
       });
     }
 
-    // 6. Return message พร้อม author info
+    // 6. Outbound webhook ticket.message_created (contract § 3 — portal ก็เป็น trigger point)
+    // ⚠️ INTERNAL NOTE ISOLATION 3 ชั้น: (1) route hardcode PUBLIC ตอน create
+    //    (2) เช็คค่าที่ persist จริงตรงนี้ก่อนยิง (3) dispatcher ตัดทิ้งซ้ำถ้าไม่ใช่ PUBLIC
+    // ⚠️ audience: dispatch เป็น tenant-side side-effect (endpoint เป็นของ tenant ไม่ใช่ของ contact)
+    //    ไม่ได้ให้สิทธิ์/ข้อมูลอะไรเพิ่มกับ contact — guard ด้านบนคงเดิมทุกประการ
+    if (message.visibility === MessageVisibility.PUBLIC) {
+      await dispatchWebhookEvent(
+        db,
+        ctx.tenantId,
+        {
+          eventType: "TICKET_MESSAGE_CREATED",
+          occurredAt: message.createdAt,
+          ticket: {
+            id: ticket.id,
+            ticketNumber: ticket.ticketNumber,
+            subject: ticket.subject,
+          },
+          message: {
+            id: message.id,
+            visibility: message.visibility,
+            authorType: "contact",
+            authorId: contact.id,
+            body: message.body,
+            createdAt: message.createdAt,
+          },
+        },
+        ctx.plan
+      );
+    }
+
+    // 7. Return message พร้อม author info
     // ไม่ return visibility field เพื่อ minimization (มันจะเป็น PUBLIC เสมออยู่แล้ว)
     // สร้าง authorContact จากข้อมูล session.contact ที่รู้อยู่แล้ว
     // (หลีกเลี่ยง type inference ซับซ้อนจาก TenantScopedPrisma extension return type)

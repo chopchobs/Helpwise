@@ -31,6 +31,7 @@ import {
   extractTicketNumberFromSubject,
 } from "@/lib/email/inbound";
 import { createTicketWithNumber, createTicketMessage } from "@/lib/tickets";
+import { dispatchWebhookEvent } from "@/lib/webhook-dispatch";
 
 // =============================================================================
 // TENANT LOOKUP (reuse pattern จาก proxy.ts)
@@ -302,7 +303,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // ดึง ticket status เพื่อตรวจว่าต้อง reopen ไหม
       const existingTicket = await db.ticket.findFirst({
         where: { id: existingTicketId },
-        select: { id: true, status: true, ticketNumber: true },
+        // subject: ใช้ใน webhook envelope ของ ticket.message_created (contract § 2)
+        select: { id: true, status: true, ticketNumber: true, subject: true },
       });
 
       if (!existingTicket) {
@@ -311,7 +313,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       } else {
         // สร้าง message — visibility=PUBLIC เสมอสำหรับ inbound email
         // ห้ามเป็น INTERNAL — inbound จากลูกค้าต้องเห็นได้จากทั้งสองฝ่าย
-        await createTicketMessage(db, {
+        const appendedMessage = await createTicketMessage(db, {
           tenantId,
           ticketId: existingTicketId,
           body: parsed.textBody || "(no text body)",
@@ -360,6 +362,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           after: { messageId: parsed.messageId, contactId: contact.id },
           ticketId: existingTicketId,
         });
+
+        // webhook § 3: inbound ที่ append เข้า ticket เดิม = ticket.message_created
+        // inbound message เป็น PUBLIC เสมอ (สร้างด้านบน) — dispatcher กัน non-PUBLIC ซ้ำอีกชั้น
+        await dispatchWebhookEvent(db, tenantId, {
+          eventType: "TICKET_MESSAGE_CREATED",
+          occurredAt: appendedMessage.createdAt,
+          ticket: {
+            id: existingTicket.id,
+            ticketNumber: existingTicket.ticketNumber,
+            subject: existingTicket.subject,
+          },
+          message: {
+            id: appendedMessage.id,
+            visibility: appendedMessage.visibility,
+            authorType: "contact",
+            authorId: contact.id,
+            body: appendedMessage.body,
+            createdAt: appendedMessage.createdAt,
+          },
+        });
       }
     }
 
@@ -402,6 +424,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           messageId: parsed.messageId,
         },
         ticketId: newTicket.id,
+      });
+
+      // webhook § 3: inbound email ที่สร้าง ticket ใหม่ = ticket.created
+      // ไม่ส่ง tenantPlan (route นี้ไม่มี tenant context จาก middleware) → dispatcher query plan เอง
+      await dispatchWebhookEvent(db, tenantId, {
+        eventType: "TICKET_CREATED",
+        occurredAt: newTicket.createdAt,
+        ticket: {
+          id: newTicket.id,
+          ticketNumber: newTicket.ticketNumber,
+          subject: newTicket.subject,
+          status: newTicket.status,
+          priority: newTicket.priority,
+          assigneeMemberId: newTicket.assigneeId,
+          requesterContactId: newTicket.requesterContactId,
+          channel: newTicket.channel,
+          createdAt: newTicket.createdAt,
+          updatedAt: newTicket.updatedAt,
+        },
       });
     }
 

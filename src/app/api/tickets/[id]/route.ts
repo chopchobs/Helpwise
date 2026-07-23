@@ -22,6 +22,8 @@ import { Prisma, TicketPriority, TicketStatus } from "@prisma/client";
 import { verifyAssigneeMembership } from "@/lib/tickets";
 import { createNotification } from "@/lib/notifications";
 import { NotificationType } from "@prisma/client";
+import { dispatchWebhookEvent } from "@/lib/webhook-dispatch";
+import type { TicketWebhookEventType, WebhookTicketChanges } from "@/types/webhook";
 import { hasFeature, FEATURE_KEYS } from "@/lib/features";
 import {
   parseBusinessHours,
@@ -528,6 +530,38 @@ export async function PATCH(
     // ห้าม log PII (ไม่ log email/ชื่อ/body message)
     const auditPromises: Promise<void>[] = [];
 
+    // webhook § 3: ยิงเฉพาะฟิลด์ที่เปลี่ยนจริง — หลายฟิลด์ใน PATCH เดียว = หลาย event
+    // แยกกัน (คนละ eventId). snapshot ticket ใช้ค่าหลัง update ร่วมกันทุก event (§ 2)
+    // caller ต้อง await (กัน serverless ตัดงานก่อนสร้าง delivery/publish job) —
+    // dispatcher ไม่ throw: feature gate + error handling อยู่ข้างใน
+    const emitTicketWebhook = async (
+      eventType: TicketWebhookEventType,
+      changes: WebhookTicketChanges
+    ): Promise<void> => {
+      await dispatchWebhookEvent(
+        db,
+        ctx.tenantId,
+        {
+          eventType,
+          occurredAt: updatedTicket.updatedAt,
+          ticket: {
+            id: updatedTicket.id,
+            ticketNumber: updatedTicket.ticketNumber,
+            subject: updatedTicket.subject,
+            status: updatedTicket.status,
+            priority: updatedTicket.priority,
+            assigneeMemberId: updatedTicket.assigneeId,
+            requesterContactId: updatedTicket.requesterContactId,
+            channel: updatedTicket.channel,
+            createdAt: updatedTicket.createdAt,
+            updatedAt: updatedTicket.updatedAt,
+          },
+          changes,
+        },
+        ctx.plan
+      );
+    };
+
     if (status !== undefined && status !== existingTicket.status) {
       auditPromises.push(
         audit.log({
@@ -541,6 +575,10 @@ export async function PATCH(
           ticketId: id,
         })
       );
+
+      await emitTicketWebhook("TICKET_STATUS_CHANGED", {
+        status: { from: existingTicket.status, to: status },
+      });
     }
 
     if (priority !== undefined && priority !== existingTicket.priority) {
@@ -556,6 +594,10 @@ export async function PATCH(
           ticketId: id,
         })
       );
+
+      await emitTicketWebhook("TICKET_PRIORITY_CHANGED", {
+        priority: { from: existingTicket.priority, to: priority },
+      });
     }
 
     if (assigneeId !== undefined && assigneeId !== existingTicket.assigneeId) {
@@ -572,6 +614,10 @@ export async function PATCH(
           ticketId: id,
         })
       );
+
+      await emitTicketWebhook("TICKET_ASSIGNED", {
+        assigneeMemberId: { from: existingTicket.assigneeId, to: assigneeId },
+      });
 
       // แจ้งเตือนผู้ถูก assign — เฉพาะ reassign ไปยัง member (assigneeId !== null,
       // null = unassign ไม่ notify) และ skip self-assign (agent ไม่ต้อง notify ตัวเอง

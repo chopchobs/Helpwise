@@ -23,6 +23,7 @@ import {
 } from "@/lib/tickets";
 import { createNotification } from "@/lib/notifications";
 import { NotificationType } from "@prisma/client";
+import { dispatchWebhookEvent } from "@/lib/webhook-dispatch";
 
 // =============================================================================
 // VALIDATION SCHEMAS
@@ -488,6 +489,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         });
       }
     }
+
+    // Outbound webhook ticket.created (contract § 3) — await เพื่อกัน serverless ตัดงานกลางคัน
+    // feature gate + error handling อยู่ใน dispatcher (ไม่ throw → ไม่ทำให้ request ของ agent พัง)
+    await dispatchWebhookEvent(
+      db,
+      ctx.tenantId,
+      {
+        eventType: "TICKET_CREATED",
+        occurredAt: ticket.createdAt,
+        ticket: {
+          id: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          subject: ticket.subject,
+          status: ticket.status,
+          priority: ticket.priority,
+          assigneeMemberId: ticket.assigneeId,
+          requesterContactId: ticket.requesterContactId,
+          channel: ticket.channel,
+          createdAt: ticket.createdAt,
+          updatedAt: ticket.updatedAt,
+        },
+      },
+      ctx.plan
+    );
 
     return NextResponse.json({ data: ticketWithRelations, error: null }, { status: 201 });
   } catch (err) {

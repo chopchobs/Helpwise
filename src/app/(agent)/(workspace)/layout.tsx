@@ -24,6 +24,7 @@ import {
   KeyRound,
   MessageSquareText,
   Tags,
+  Webhook,
 } from "lucide-react";
 import type {
   MeResponse,
@@ -246,6 +247,14 @@ function SidebarNav({ session, pathname }: SidebarNavProps) {
                 icon={<KeyRound size={18} />}
                 label="API Keys"
                 isActive={pathname.startsWith("/settings/api-keys")}
+              />
+            </li>
+            <li>
+              <NavLink
+                href="/settings/webhooks"
+                icon={<Webhook size={18} />}
+                label="Webhooks"
+                isActive={pathname.startsWith("/settings/webhooks")}
               />
             </li>
           </ul>

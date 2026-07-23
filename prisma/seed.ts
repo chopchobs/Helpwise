@@ -106,6 +106,12 @@ const FEATURE_FLAGS = [
     defaultEnabled: false,
     requiredPlan: "pro" as string | null,
   },
+  {
+    key: "webhooks",
+    description: "Outbound webhooks for ticket events",
+    defaultEnabled: false,
+    requiredPlan: "pro" as string | null,
+  },
 ] as const;
 
 async function main(): Promise<void> {
