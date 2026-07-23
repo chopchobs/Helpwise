@@ -1,76 +1,79 @@
 # Helpwise Outbound Webhooks
 
-คู่มือสำหรับนักพัฒนาที่จะเขียน endpoint รับ webhook จาก Helpwise
+A guide for developers who need to build an endpoint that receives webhooks from Helpwise
 
-Outbound webhook คือการที่ Helpwise **ยิง HTTP POST ไปหาระบบของคุณ** ทุกครั้งที่เกิดเหตุการณ์
-กับ ticket ใน workspace ของคุณ (สร้าง ticket ใหม่, เปลี่ยนสถานะ, มีข้อความใหม่ ฯลฯ) — ใช้แทนการ
-poll `GET /api/v1/tickets` เป็นรอบ ๆ เหมาะกับการ sync ข้อมูลเข้าระบบภายใน, ส่งแจ้งเตือนเข้า Slack,
-หรือ trigger automation ของคุณเอง
+Outbound webhooks are how Helpwise **sends an HTTP POST to your system** every time something
+happens to a ticket in your workspace (a new ticket is created, a status changes, a new message
+arrives, and so on) — use them instead of polling `GET /api/v1/tickets` on a schedule. They fit
+well for syncing data into an internal system, pushing notifications into Slack, or triggering
+your own automation.
 
-- **ทิศทาง:** Helpwise → ระบบของคุณ (outbound เท่านั้น — คนละเรื่องกับ inbound email webhook)
-- **Plan ที่ต้องมี:** feature `webhooks` — plan ระดับ **pro** ขึ้นไป
-- **สิทธิ์ที่ใช้ตั้งค่า:** สมาชิก workspace ที่มี role **OWNER** หรือ **ADMIN**
-- **รูปแบบ:** `POST` · `Content-Type: application/json` · body เป็น envelope เดียวกันทุก event
+- **Direction:** Helpwise → your system (outbound only — this is not the inbound email webhook)
+- **Required plan:** the `webhooks` feature — **pro** plan and above
+- **Permission to configure:** a workspace member with the **OWNER** or **ADMIN** role
+- **Format:** `POST` · `Content-Type: application/json` · the body is the same envelope for every event
 
-> ถ้า plan ของ workspace ถูกลดชั้นลงต่ำกว่า pro ระบบจะ **หยุดส่ง webhook ทันที** โดยไม่ลบ endpoint
-> ที่ตั้งไว้ — เมื่ออัปเกรดกลับ ระบบจะเริ่มส่งใหม่ (event ที่เกิดระหว่างนั้นไม่ถูกส่งย้อนหลัง)
-
----
-
-## 1. เริ่มต้นใช้งาน
-
-1. ล็อกอินเข้า agent workspace ของคุณ (`https://{slug}.gethelpwise.xyz`)
-2. ไปที่ **Settings → Webhooks**
-3. กด **Create endpoint** แล้วกรอก
-   - **Description** — ชื่อไว้แยกแยะ endpoint (1–80 ตัวอักษร)
-   - **URL** — ปลายทางที่จะรับ POST ต้องเป็น `https://` และเข้าถึงได้จากอินเทอร์เน็ตสาธารณะ
-     (ดูข้อจำกัดใน [§ 8](#8-ข้อกำหนดของ-url-ปลายทาง))
-   - **Events** — เลือกอย่างน้อย 1 event ที่จะ subscribe
-4. คัดลอก **signing secret** (`whsec_…`) ที่แสดงหลังสร้างเสร็จ
-
-> ⚠️ **Signing secret แสดงให้เห็นเพียงครั้งเดียว** ตอนสร้าง (และตอนกด rotate) เท่านั้น
-> เก็บลง secret manager / env var ของระบบคุณทันที ถ้าทำหาย ให้กด **Rotate secret**
-> เพื่อสร้างค่าใหม่ (ค่าเดิมจะใช้ไม่ได้ทันที)
-
-หลังจากนั้น endpoint จะเริ่มรับ event ทันที ผลการส่งทุกครั้งดูได้ที่หน้า **Settings → Webhooks →
-Deliveries** (มี HTTP status, response body ที่ระบบเก็บไว้ 500 ตัวอักษรแรก, และ error message)
-
-ปิด endpoint ชั่วคราวได้ด้วยการ toggle `enabled` — ระบบจะหยุดส่งแต่ยังเก็บประวัติ delivery ไว้
+> If your workspace plan is downgraded below pro, Helpwise **stops sending webhooks immediately**
+> without deleting the endpoints you configured — once you upgrade again, sending resumes (events
+> that happened in between are not sent retroactively).
 
 ---
 
-## 2. Event ที่ส่งได้
+## 1. Getting started
 
-| Event (`type`) | ยิงเมื่อ |
+1. Log in to your agent workspace (`https://{slug}.gethelpwise.xyz`).
+2. Go to **Settings → Webhooks**.
+3. Click **Create endpoint** and fill in:
+   - **Description** — a name that helps you tell endpoints apart (1–80 characters)
+   - **URL** — the destination that receives the POST. It must be `https://` and reachable from
+     the public internet (see the limits in [§ 8](#8-destination-url-requirements)).
+   - **Events** — select at least one event to subscribe to
+4. Copy the **signing secret** (`whsec_…`) shown after the endpoint is created.
+
+> ⚠️ **The signing secret is shown only once**, at creation time (and when you click rotate).
+> Store it in your secret manager / env var immediately. If you lose it, click **Rotate secret**
+> to generate a new value (the old value stops working immediately).
+
+From then on the endpoint starts receiving events right away. You can review every delivery under
+**Settings → Webhooks → Deliveries** (it shows the HTTP status, the first 500 characters of the
+response body that Helpwise stores, and the error message).
+
+To pause an endpoint, toggle `enabled` — Helpwise stops sending but keeps the delivery history.
+
+---
+
+## 2. Events
+
+| Event (`type`) | Sent when |
 | --- | --- |
-| `ticket.created` | มี ticket ใหม่ (agent สร้าง, ลูกค้าเปิดผ่าน portal, สร้างผ่าน `POST /api/v1/tickets`, หรือ inbound email สร้าง ticket ใหม่) |
-| `ticket.status_changed` | สถานะของ ticket เปลี่ยนจริง |
-| `ticket.assigned` | ผู้รับผิดชอบ (assignee) ของ ticket เปลี่ยนจริง |
-| `ticket.priority_changed` | ความสำคัญ (priority) ของ ticket เปลี่ยนจริง |
-| `ticket.message_created` | มีข้อความสาธารณะใหม่ในเธรด — จาก agent ที่ตอบใน workspace, ลูกค้าตอบผ่าน portal, หรือจากอีเมลขาเข้าของลูกค้า **เฉพาะ `visibility: PUBLIC`** |
+| `ticket.created` | A new ticket is created (by an agent, by a customer through the portal, through `POST /api/v1/tickets`, or by an inbound email that opens a new ticket) |
+| `ticket.status_changed` | The status of a ticket actually changes |
+| `ticket.assigned` | The assignee of a ticket actually changes |
+| `ticket.priority_changed` | The priority of a ticket actually changes |
+| `ticket.message_created` | A new public message is added to the thread — from an agent replying in the workspace, a customer replying through the portal, or an inbound customer email. **Only `visibility: PUBLIC`** |
 
-หมายเหตุสำคัญ
+Important notes
 
-- ช่องทางที่ยิง event ครบทุกทาง: agent workspace · portal ของลูกค้า · `POST /api/v1/tickets` · อีเมลขาเข้า
-  ใช้ `channel` ใน payload (`portal` / `email` / `api` / `agent`) แยกที่มาได้ และใช้ `message.authorType`
-  (`agent` / `contact`) แยกว่าใครเป็นคนเขียนข้อความ
-- ถ้าแก้หลายฟิลด์ในการอัปเดตครั้งเดียว (เช่น เปลี่ยนทั้ง status และ priority) จะได้ **หลาย event
-  แยกกัน คนละ `id`** ไม่ใช่ event เดียวรวมทุกการเปลี่ยนแปลง
-- event จะถูกส่งไปยัง endpoint ที่ `enabled = true` และ subscribe event นั้นไว้เท่านั้น
-- ค่า enum ของ `status` / `priority` ตรงกับ [Public API Reference](./api.md#enums):
-  `NEW | OPEN | PENDING | ON_HOLD | SOLVED | CLOSED` และ `LOW | NORMAL | HIGH | URGENT`
+- Every channel emits events: the agent workspace · the customer portal · `POST /api/v1/tickets` ·
+  inbound email. Use `channel` in the payload (`portal` / `email` / `api` / `agent`) to tell where
+  the event came from, and `message.authorType` (`agent` / `contact`) to tell who wrote the message.
+- If you change several fields in a single update (for example both status and priority), you get
+  **several separate events, each with its own `id`** — not one event that bundles every change.
+- Events are sent only to endpoints that have `enabled = true` and subscribe to that event.
+- The enum values for `status` / `priority` match the [Public API Reference](./api.md#enums):
+  `NEW | OPEN | PENDING | ON_HOLD | SOLVED | CLOSED` and `LOW | NORMAL | HIGH | URGENT`
 
 ### Envelope
 
-ทุก event ใช้โครงเดียวกัน โดย `data` ต่างกันตาม `type`
+Every event uses the same structure; only `data` differs by `type`.
 
-| Field | Type | คำอธิบาย |
+| Field | Type | Description |
 | --- | --- | --- |
-| `id` | string | Event ID — ใช้เป็น **idempotency key** (ตรงกับ header `X-Helpwise-Event-Id`) |
-| `type` | string | ชื่อ event ตามตารางด้านบน |
-| `createdAt` | string | ISO 8601 UTC — เวลาที่ event เกิดขึ้น |
-| `tenantId` | string | ID ของ workspace เจ้าของ event |
-| `data` | object | รายละเอียดของ event |
+| `id` | string | Event ID — use it as your **idempotency key** (matches the `X-Helpwise-Event-Id` header) |
+| `type` | string | The event name from the table above |
+| `createdAt` | string | ISO 8601 UTC — when the event happened |
+| `tenantId` | string | ID of the workspace that owns the event |
+| `data` | object | The event details |
 
 ### `ticket.created`
 
@@ -97,9 +100,9 @@ Deliveries** (มี HTTP status, response body ที่ระบบเก็�
 }
 ```
 
-`channel` บอกช่องทางที่ ticket เข้ามา เช่น `portal`, `email`, `api`, `agent`
-`assigneeMemberId` เป็น `null` ได้เมื่อยังไม่มีคนรับผิดชอบ
-`ticket.created` **ไม่มี** field `changes`
+`channel` tells you how the ticket came in, for example `portal`, `email`, `api`, `agent`.
+`assigneeMemberId` can be `null` while nobody owns the ticket yet.
+`ticket.created` has **no** `changes` field.
 
 ### `ticket.status_changed`
 
@@ -129,7 +132,8 @@ Deliveries** (มี HTTP status, response body ที่ระบบเก็�
 }
 ```
 
-`data.ticket` คือ snapshot **หลัง** การเปลี่ยนแปลง ส่วน `changes` บอกค่าก่อน/หลังของฟิลด์ที่เปลี่ยน
+`data.ticket` is the snapshot **after** the change, while `changes` gives the before/after values
+of the fields that changed.
 
 ### `ticket.assigned`
 
@@ -159,7 +163,7 @@ Deliveries** (มี HTTP status, response body ที่ระบบเก็�
 }
 ```
 
-`assigneeMemberId` คือ ID ของสมาชิก workspace (ไม่ใช่ user ID ระดับ global)
+`assigneeMemberId` is the ID of a workspace member (not a global user ID).
 
 ### `ticket.priority_changed`
 
@@ -215,56 +219,58 @@ Deliveries** (มี HTTP status, response body ที่ระบบเก็�
 }
 ```
 
-- `data.ticket` ของ event นี้เป็นแบบย่อ — มีแค่ `id`, `ticketNumber`, `subject`
-- `message.visibility` เป็น `"PUBLIC"` เสมอ (ดู [§ 9](#9-ข้อมูลที่ระบบไม่ส่งออก))
-- `message.authorType` เป็น `"agent"` หรือ `"contact"` และ `message.authorId` คือ member ID
-  หรือ contact ID ตามค่า `authorType`
+- `data.ticket` in this event is a short form — it only has `id`, `ticketNumber`, `subject`
+- `message.visibility` is always `"PUBLIC"` (see [§ 9](#9-what-helpwise-never-sends))
+- `message.authorType` is either `"agent"` or `"contact"`, and `message.authorId` is the member ID
+  or the contact ID depending on `authorType`
 
 ---
 
-## 3. HTTP headers ที่จะได้รับ
+## 3. HTTP headers you receive
 
-| Header | ค่า |
+| Header | Value |
 | --- | --- |
 | `Content-Type` | `application/json` |
 | `User-Agent` | `Helpwise-Webhooks/1.0` |
-| `X-Helpwise-Event` | ชื่อ event เช่น `ticket.created` (ตรงกับ `type` ใน body) |
-| `X-Helpwise-Event-Id` | Event ID (ตรงกับ `id` ใน body) — ใช้ dedupe |
-| `X-Helpwise-Delivery-Id` | ID ของการส่งครั้งนี้ — ต่างกันในแต่ละ endpoint ที่รับ event เดียวกัน |
-| `X-Helpwise-Attempt` | ลำดับความพยายามส่ง เริ่มที่ `1` สูงสุด `5` |
-| `X-Helpwise-Signature` | ลายเซ็น HMAC รูปแบบ `t=<unixSeconds>,v1=<hexHmac>` |
+| `X-Helpwise-Event` | The event name, for example `ticket.created` (matches `type` in the body) |
+| `X-Helpwise-Event-Id` | Event ID (matches `id` in the body) — use it to dedupe |
+| `X-Helpwise-Delivery-Id` | ID of this delivery — different for each endpoint that receives the same event |
+| `X-Helpwise-Attempt` | Attempt number, starting at `1`, up to `5` |
+| `X-Helpwise-Signature` | HMAC signature in the form `t=<unixSeconds>,v1=<hexHmac>` |
 
 ---
 
-## 4. การตรวจสอบ signature
+## 4. Verifying the signature
 
-**ต้องตรวจทุก request** ก่อนประมวลผล ไม่งั้นใครก็ตามที่รู้ URL ของคุณสามารถปลอม event ได้
+**Verify every request** before you process it. Otherwise anyone who knows your URL can forge events.
 
 ### Scheme
 
 ```
 signedPayload = "{t}.{rawBody}"
-v1            = HMAC_SHA256(secret, signedPayload)   →  hex ตัวพิมพ์เล็ก
+v1            = HMAC_SHA256(secret, signedPayload)   →  lowercase hex
 header        = "t={t},v1={v1}"
 ```
 
-- `t` = unix timestamp (วินาที, จำนวนเต็ม) ที่ระบบเซ็นและส่ง request นี้
-- `rawBody` = request body **ดิบ** ทั้งก้อน byte ต่อ byte
-- `secret` = signing secret ทั้งสตริงรวม prefix `whsec_` (ตีความเป็น UTF-8)
-- `v1` = HMAC-SHA256 เป็น hex ตัวพิมพ์เล็ก 64 ตัวอักษร
+- `t` = the unix timestamp (whole seconds) at which Helpwise signed and sent this request
+- `rawBody` = the **raw** request body, byte for byte
+- `secret` = the whole signing secret string including the `whsec_` prefix (interpreted as UTF-8)
+- `v1` = the HMAC-SHA256 as 64 lowercase hex characters
 
-> ⚠️ **สามข้อที่พลาดกันบ่อยที่สุด**
-> 1. **ต้องใช้ raw body** — อย่า `JSON.parse` แล้ว `JSON.stringify` กลับมาเซ็น ลำดับ key/ช่องว่าง
->    อาจเปลี่ยนไปแม้แต่ byte เดียว ลายเซ็นก็ไม่ตรงแล้ว (ใน Express ต้องใช้ `express.raw()`)
-> 2. **เทียบแบบ constant-time** (`crypto.timingSafeEqual`, `hmac.compare_digest`) ไม่ใช่ `===`
-> 3. **ปฏิเสธ timestamp ที่เก่าเกินไป** — ค่าที่แนะนำคือ **300 วินาที** เพื่อกัน replay attack
+> ⚠️ **The three most common mistakes**
+> 1. **You must use the raw body** — do not `JSON.parse` and then `JSON.stringify` before signing.
+>    Key order or whitespace can change, and a single different byte breaks the signature
+>    (in Express you need `express.raw()`).
+> 2. **Compare in constant time** (`crypto.timingSafeEqual`, `hmac.compare_digest`), not with `===`.
+> 3. **Reject timestamps that are too old** — the recommended value is **300 seconds**, to prevent
+>    replay attacks.
 
-### ตัวอย่าง Node.js / TypeScript
+### Node.js / TypeScript example
 
 ```ts
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-/** ค่าเดียวกับที่ Helpwise แนะนำ — 5 นาที */
+/** The same value Helpwise recommends — 5 minutes */
 const TOLERANCE_SECONDS = 300;
 
 interface ParsedSignature {
@@ -272,7 +278,7 @@ interface ParsedSignature {
   v1: string;
 }
 
-/** แยก header "t=...,v1=..." — คืน null ถ้ารูปแบบผิด */
+/** Parse the "t=...,v1=..." header — returns null when the format is wrong */
 function parseSignatureHeader(header: string): ParsedSignature | null {
   let t: number | null = null;
   let v1: string | null = null;
@@ -283,7 +289,7 @@ function parseSignatureHeader(header: string): ParsedSignature | null {
     const key = part.slice(0, idx).trim();
     const value = part.slice(idx + 1).trim();
     if (key === "t" && /^\d+$/.test(value)) t = Number(value);
-    // v1 ต้องเป็น hex ของ sha256 (64 ตัว) — รูปแบบอื่นถือว่า malformed
+    // v1 must be a sha256 hex digest (64 chars) — anything else is malformed
     else if (key === "v1" && /^[0-9a-f]{64}$/.test(value)) v1 = value;
   }
 
@@ -301,7 +307,7 @@ export function verifyWebhookSignature(
   const parsed = parseSignatureHeader(header);
   if (!parsed) return false;
 
-  // replay window — กันเอา request เก่าที่เซ็นถูกต้องมายิงซ้ำ
+  // replay window — stops an old but correctly signed request from being resent
   if (Math.abs(nowSeconds - parsed.t) > TOLERANCE_SECONDS) return false;
 
   const expected = Buffer.from(
@@ -312,13 +318,14 @@ export function verifyWebhookSignature(
   );
   const actual = Buffer.from(parsed.v1, "utf8");
 
-  // timingSafeEqual throw ถ้าความยาวต่างกัน จึงเช็ค length ก่อน
+  // timingSafeEqual throws when the lengths differ, so check length first
   if (expected.length !== actual.length) return false;
   return timingSafeEqual(expected, actual);
 }
 ```
 
-ตัวอย่างการต่อกับ Express — สังเกต `express.raw()` ที่ทำให้ `req.body` เป็น `Buffer` ไม่ใช่ object
+Here is how to wire it up with Express — note `express.raw()`, which makes `req.body` a `Buffer`
+instead of an object.
 
 ```ts
 import express from "express";
@@ -339,14 +346,14 @@ app.post(
 
     const event = JSON.parse(rawBody);
 
-    // ตอบ 2xx ทันที แล้วค่อยประมวลผลแบบ async (timeout ฝั่ง Helpwise = 10 วินาที)
+    // Respond 2xx right away, then process asynchronously (the Helpwise timeout is 10 seconds)
     res.status(200).send("ok");
     void enqueueForProcessing(event);
   }
 );
 ```
 
-### ตัวอย่าง Python
+### Python example
 
 ```python
 import hashlib
@@ -359,7 +366,7 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def parse_signature_header(header: str):
-    """แยก header 't=...,v1=...' — คืน None ถ้ารูปแบบผิด"""
+    """Parse the 't=...,v1=...' header — returns None when the format is wrong"""
     t = None
     v1 = None
     for part in header.split(","):
@@ -392,7 +399,7 @@ def verify_webhook_signature(secret: str, raw_body: bytes, header: str, now: int
     return hmac.compare_digest(expected, v1)
 ```
 
-ตัวอย่างการใช้กับ Flask (`request.get_data()` คืน raw bytes ก่อน parse JSON)
+Here is how to use it with Flask (`request.get_data()` returns the raw bytes before JSON parsing).
 
 ```python
 import json
@@ -412,7 +419,7 @@ def helpwise_webhook():
         return "invalid signature", 401
 
     event = json.loads(raw_body)
-    enqueue_for_processing(event)   # ประมวลผลนอก request
+    enqueue_for_processing(event)   # process outside the request
     return "ok", 200
 ```
 
@@ -420,157 +427,174 @@ def helpwise_webhook():
 
 ## 5. Idempotency
 
-ระบบรับประกันการส่ง **อย่างน้อยหนึ่งครั้ง (at-least-once)** ไม่ใช่ exactly-once — คุณอาจได้ event
-เดิมซ้ำเมื่อมี retry, เมื่อ endpoint ของคุณตอบช้าจน timeout แต่จริง ๆ ประมวลผลไปแล้ว หรือเมื่อ
-admin กด replay จาก DLQ
+Helpwise guarantees **at-least-once** delivery, not exactly-once — you may receive the same event
+again on a retry, when your endpoint answers so slowly that it times out even though it did process
+the event, or when an admin replays it from the DLQ.
 
-วิธีจัดการ: ใช้ **`id` ของ envelope** (ค่าเดียวกับ header `X-Helpwise-Event-Id`) เป็น idempotency key
+How to handle it: use the envelope's **`id`** (the same value as the `X-Helpwise-Event-Id` header)
+as your idempotency key.
 
-- เก็บ `id` ที่เคยประมวลผลสำเร็จไว้ (ตาราง/Redis ที่มี unique index) — เจอซ้ำให้ตอบ `200` แล้วข้าม
-- **retry ของ event เดิมใช้ `id` เดิมเสมอ** รวมถึงการ replay จาก DLQ
-- ถ้า event เดียวถูกส่งไปหลาย endpoint ทุก endpoint จะได้ `id` **เดียวกัน** แต่
-  `X-Helpwise-Delivery-Id` **ต่างกัน** — ถ้าคุณ dedupe รวมกันหลาย endpoint ให้ใช้คู่
-  `(endpoint ของคุณ, id)` ไม่ใช่ `id` เดี่ยว ๆ
-- ระบบ **ไม่รับประกันลำดับ** ของ event — ให้ใช้ `createdAt` ในการเรียงลำดับเอง และเช็คว่า state
-  ที่คุณมีอยู่ใหม่กว่าหรือไม่ ก่อนเขียนทับ
+- Store every `id` you have processed successfully (in a table / Redis with a unique index) — when
+  you see it again, respond `200` and skip.
+- **A retry of the same event always reuses the same `id`**, including a replay from the DLQ.
+- If one event goes to several endpoints, every endpoint receives the **same** `id` but a
+  **different** `X-Helpwise-Delivery-Id` — if you dedupe across several endpoints together, key on
+  the pair `(your endpoint, id)` rather than on `id` alone.
+- Helpwise **does not guarantee ordering** of events — sort them yourself using `createdAt`, and
+  check whether the state you already have is newer before you overwrite it.
 
 ---
 
-## 6. Retry และ DLQ
+## 6. Retries and the DLQ
 
-| ผลลัพธ์จาก endpoint ของคุณ | ระบบตีความว่า |
+| Result from your endpoint | How Helpwise reads it |
 | --- | --- |
-| `2xx` | สำเร็จ — จบ ไม่ retry |
-| `3xx` | **ล้มเหลว** — ระบบไม่ follow redirect |
-| `4xx` / `5xx` | ล้มเหลว — retry |
-| ไม่ตอบภายใน **10 วินาที** | ล้มเหลว (timeout) — retry |
-| เชื่อมต่อไม่ได้ / TLS ผิดพลาด | ล้มเหลว — retry |
+| `2xx` | Success — done, no retry |
+| `3xx` | **Failure** — Helpwise does not follow redirects |
+| `4xx` / `5xx` | Failure — retried |
+| No response within **10 seconds** | Failure (timeout) — retried |
+| Connection error / TLS error | Failure — retried |
 
-- ส่งสูงสุด **5 ครั้งต่อ delivery** (ครั้งแรก + retry อีก 4 ครั้ง) เว้นระยะแบบ backoff โดยคิวของระบบ
-  ดูลำดับครั้งปัจจุบันได้จาก header `X-Helpwise-Attempt`
-- ครบ 5 ครั้งแล้วยังไม่สำเร็จ → delivery เปลี่ยนสถานะเป็น **`DEAD`** (เข้า dead-letter queue)
-  และหยุด retry อัตโนมัติ
-- delivery ที่ `DEAD` (รวมถึงที่ยัง `FAILED`/`PENDING` ค้างอยู่) **กด Replay ด้วยมือได้** จาก
-  **Settings → Webhooks → Deliveries** ระบบจะส่ง payload เดิมซ้ำ (snapshot ณ เวลาที่ event เกิด
-  ไม่ query ข้อมูลใหม่) ด้วย `id` เดิม แต่ลายเซ็นและ `t` จะเป็นของรอบใหม่
+- Helpwise sends at most **5 attempts per delivery** (the first attempt plus 4 retries), spaced by
+  the backoff of the internal queue. Check the current attempt number in the `X-Helpwise-Attempt`
+  header.
+- After 5 attempts without success, the delivery moves to the **`DEAD`** status (it enters the
+  dead-letter queue) and automatic retries stop.
+- A `DEAD` delivery (as well as one still stuck in `FAILED`/`PENDING`) **can be replayed manually**
+  from **Settings → Webhooks → Deliveries**. Helpwise resends the original payload (the snapshot
+  taken when the event happened — it does not re-query the data) with the same `id`, but the
+  signature and `t` belong to the new attempt.
 
-> 💡 **ตอบ 2xx ให้เร็วที่สุด** — timeout อยู่ที่ 10 วินาที ควรตรวจ signature → บันทึก event ลงคิว
-> ของคุณ → ตอบ `200` ทันที แล้วประมวลผลจริงแบบ async งานหนัก (เรียก API ต่อ, เขียน DB หลายตาราง)
-> ที่ทำในคำขอตรง ๆ เสี่ยง timeout จนกลายเป็น retry ซ้ำโดยไม่จำเป็น
+> 💡 **Respond 2xx as fast as you can** — the timeout is 10 seconds. Verify the signature, push the
+> event onto your own queue, respond `200` immediately, then do the real processing asynchronously.
+> Heavy work (calling other APIs, writing to several tables) done inline risks a timeout, which
+> turns into unnecessary retries.
 >
-> ถ้าคุณตั้งใจจะ "ทิ้ง" event ที่ไม่สนใจ ให้ตอบ `200` ไม่ใช่ `4xx` — `4xx` จะถูกนับเป็นความล้มเหลว
-> และไล่ retry จนเข้า DLQ
+> If you deliberately want to "drop" an event you do not care about, respond `200`, not `4xx` —
+> a `4xx` counts as a failure and is retried until it lands in the DLQ.
 
 ---
 
-## 7. จัดการ endpoint ผ่าน API
+## 7. Managing endpoints through the API
 
-นอกจากหน้า Settings ยัง จัดการผ่าน REST API ได้ — API ชุดนี้ใช้ **session ของ agent** (ไม่ใช่
-Bearer API key แบบ [`/api/v1`](./api.md#authentication)) และจำกัดเฉพาะ role **OWNER**/**ADMIN**
-ที่ plan มี feature `webhooks` ทุก response ใช้รูปแบบ `{ data, error }` เหมือน API อื่นของ Helpwise
+Besides the Settings page, you can manage endpoints through a REST API. This API uses your **agent
+session** (not the Bearer API key of [`/api/v1`](./api.md#authentication)) and is restricted to the
+**OWNER**/**ADMIN** roles on a plan that includes the `webhooks` feature. Every response uses the
+`{ data, error }` shape, like the rest of the Helpwise API.
 
-| Method + path | หน้าที่ |
+| Method + path | Purpose |
 | --- | --- |
-| `GET /api/webhook-endpoints` | list endpoint ทั้งหมด (**ไม่คืน** signing secret) |
-| `POST /api/webhook-endpoints` | สร้าง endpoint — คืน `{ endpoint, plaintextSecret }` ครั้งเดียว |
-| `PATCH /api/webhook-endpoints/{id}` | แก้ description / url / events / enabled |
-| `DELETE /api/webhook-endpoints/{id}` | ลบ endpoint พร้อมประวัติ delivery |
-| `POST /api/webhook-endpoints/{id}/rotate-secret` | หมุน secret — คืนค่าใหม่ครั้งเดียว |
-| `GET /api/webhook-deliveries?endpointId=&status=` | ดูประวัติการส่ง (DLQ = `status=DEAD`) |
-| `POST /api/webhook-deliveries/{id}/replay` | ส่ง delivery ที่ยังไม่สำเร็จซ้ำ |
+| `GET /api/webhook-endpoints` | List every endpoint (**does not return** the signing secret) |
+| `POST /api/webhook-endpoints` | Create an endpoint — returns `{ endpoint, plaintextSecret }` once |
+| `PATCH /api/webhook-endpoints/{id}` | Update description / url / events / enabled |
+| `DELETE /api/webhook-endpoints/{id}` | Delete an endpoint together with its delivery history |
+| `POST /api/webhook-endpoints/{id}/rotate-secret` | Rotate the secret — returns the new value once |
+| `GET /api/webhook-deliveries?endpointId=&status=` | Review the delivery history (DLQ = `status=DEAD`) |
+| `POST /api/webhook-deliveries/{id}/replay` | Resend a delivery that has not succeeded |
 
-Error code ที่พบบ่อย
+Common error codes
 
-| Status | `error.code` | ความหมาย |
+| Status | `error.code` | Meaning |
 | --- | --- | --- |
-| 400 | `VALIDATION_ERROR` | ข้อมูลใน body ไม่ผ่าน validation (เช่น ไม่ได้เลือก event) |
-| 400 | `INVALID_WEBHOOK_URL` | URL ปลายทางไม่ผ่านข้อกำหนดใน § 8 |
-| 403 | `FEATURE_LOCKED` | plan ปัจจุบันไม่มี feature `webhooks` |
-| 409 | `ALREADY_SUCCEEDED` | สั่ง replay delivery ที่ส่งสำเร็จไปแล้ว |
+| 400 | `VALIDATION_ERROR` | The body failed validation (for example, no event was selected) |
+| 400 | `INVALID_WEBHOOK_URL` | The destination URL does not meet the requirements in § 8 |
+| 403 | `FEATURE_LOCKED` | The current plan does not include the `webhooks` feature |
+| 409 | `ALREADY_SUCCEEDED` | You tried to replay a delivery that already succeeded |
 
-> `/api/webhooks/*` เป็นเส้นทางของ **inbound** webhook (Stripe, inbound email) ที่ Helpwise เป็นผู้รับ
-> — คนละชุดกับ outbound webhook ในเอกสารนี้ อย่าสับสน
-
----
-
-## 8. ข้อกำหนดของ URL ปลายทาง
-
-Helpwise เป็นฝ่ายยิง HTTP ไปยัง URL ที่คุณกรอก จึงต้องมีการป้องกัน SSRF อย่างเข้มงวด — URL ปลายทางต้อง
-
-- ใช้ scheme **`https`** เท่านั้น และพอร์ต **443** (หรือไม่ระบุพอร์ต)
-- ชี้ไปยัง host **สาธารณะ** ที่ resolve ได้จากอินเทอร์เน็ต
-
-URL ที่ถูกปฏิเสธเสมอ
-
-- IP หรือชื่อโฮสต์ที่ชี้ไปยังเครือข่ายภายใน: `127.0.0.0/8`, `0.0.0.0/8`, `10.0.0.0/8`,
-  `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (รวม cloud metadata `169.254.169.254`),
-  `100.64.0.0/10`
-- IPv6 ภายใน: `::1`, `fc00::/7`, `fe80::/10` และรูปแบบ IPv4-mapped ของช่วงข้างบน
-- ชื่อโฮสต์ `localhost`, `*.localhost`, `*.internal`, `metadata.google.internal`
-
-การตรวจเกิดขึ้น **2 จุด**: ตอนสร้าง/แก้ endpoint และ **ทุกครั้งก่อนส่งจริงหลัง resolve DNS**
-(กัน DNS rebinding) ถ้าโดเมนของคุณถูกเปลี่ยนให้ชี้ไป IP ภายในภายหลัง delivery นั้นจะถูก mark เป็น
-**`DEAD` ทันทีโดยไม่ retry** พร้อม error `blocked_destination`
-
-ข้อจำกัดอื่นที่ควรรู้
-
-- **ไม่ follow redirect** — ตอบ `3xx` ถือว่าล้มเหลว ให้ตั้ง URL ปลายทางสุดท้ายไว้ตั้งแต่ต้น
-- ตั้ง custom header เองไม่ได้ — ใช้ค่า secret ในการ authenticate ผ่าน signature แทน
-  (ถ้าต้องการโทเคนเพิ่ม ใส่ไว้ใน path ของ URL ได้)
-- ใบรับรอง TLS ต้อง valid
+> `/api/webhooks/*` is the route group for **inbound** webhooks (Stripe, inbound email) that
+> Helpwise receives — a different set from the outbound webhooks in this document. Do not mix them up.
 
 ---
 
-## 9. ข้อมูลที่ระบบไม่ส่งออก
+## 8. Destination URL requirements
 
-- **Internal note ไม่เคยถูกส่งผ่าน webhook เด็ดขาด** — event `ticket.message_created` ยิงเฉพาะ
-  ข้อความที่ `visibility: PUBLIC` เท่านั้น (ระบบกรองทั้งตอนสร้าง event และตรวจซ้ำอีกครั้งก่อนส่งจริง;
-  ถ้าเจอข้อความที่ไม่ใช่ PUBLIC ระบบจะยกเลิก delivery ทิ้งแทนที่จะส่ง)
-- **ไม่มี PII ของ contact ใน payload** — ไม่มีอีเมล, ชื่อ, หรือเบอร์โทรของผู้แจ้ง มีเพียง
-  `requesterContactId` / `authorId` ให้คุณนำไป lookup ต่อผ่าน [Public API](./api.md) ถ้าจำเป็น
-- **ไม่มี attachment** — payload ไม่มีไฟล์แนบหรือ URL ของไฟล์แนบ
-- **ไม่มีข้อมูลของ workspace อื่น** — endpoint ของคุณได้รับเฉพาะ event ของ `tenantId` ตัวเอง
-- payload ไม่มี API key, secret หรือข้อมูล credential ใด ๆ
+Helpwise is the party sending HTTP requests to the URL you enter, so it enforces strict SSRF
+protection. Your destination URL must:
+
+- use the **`https`** scheme only, on port **443** (or with no port specified)
+- point at a **public** host that resolves from the internet
+
+URLs that are always rejected
+
+- IPs or hostnames that point at an internal network: `127.0.0.0/8`, `0.0.0.0/8`, `10.0.0.0/8`,
+  `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (including the cloud metadata address
+  `169.254.169.254`), `100.64.0.0/10`
+- Internal IPv6: `::1`, `fc00::/7`, `fe80::/10`, and the IPv4-mapped forms of the ranges above
+- The hostnames `localhost`, `*.localhost`, `*.internal`, `metadata.google.internal`
+
+The check runs at **2 points**: when you create or update the endpoint, and **before every actual
+send, after DNS resolution** (to stop DNS rebinding). If your domain is later repointed at an
+internal IP, that delivery is marked **`DEAD` immediately with no retry**, with the error
+`blocked_destination`.
+
+Other limits worth knowing
+
+- **Redirects are not followed** — a `3xx` response counts as a failure, so configure the final
+  destination URL from the start.
+- You cannot set custom headers — authenticate using the secret through the signature instead
+  (if you need an extra token, you can put it in the URL path).
+- The TLS certificate must be valid.
+
+---
+
+## 9. What Helpwise never sends
+
+- **Internal notes are never sent through a webhook, under any circumstances** — the
+  `ticket.message_created` event fires only for messages with `visibility: PUBLIC` (Helpwise filters
+  when it builds the event and checks again right before the actual send; if it finds a message that
+  is not PUBLIC, it cancels the delivery instead of sending it).
+- **No contact PII in the payload** — no email address, name, or phone number of the requester, only
+  `requesterContactId` / `authorId` so you can look them up through the [Public API](./api.md) if
+  you need to.
+- **No attachments** — the payload contains no attached files and no attachment URLs.
+- **No data from other workspaces** — your endpoint receives only events for its own `tenantId`.
+- The payload contains no API keys, secrets, or credentials of any kind.
 
 ---
 
 ## 10. Troubleshooting
 
-**ตรวจ signature ไม่ผ่านทุก request**
+**Signature verification fails on every request**
 
-1. เช็คว่าใช้ **raw body** จริงไหม — สาเหตุอันดับหนึ่งคือ framework parse JSON ไปแล้ว
-   (Express ต้อง `express.raw({ type: "application/json" })` และต้องมาก่อน `express.json()`
-   สำหรับ path นี้; Next.js route handler ใช้ `await request.text()` ไม่ใช่ `await request.json()`)
-2. เช็คว่าใช้ `t` **จากใน header** มาต่อเป็น `"{t}.{rawBody}"` ไม่ใช่เวลาปัจจุบันของเครื่องคุณ
-3. เช็คว่า secret ที่ใช้รวม prefix `whsec_` ครบ และไม่มีช่องว่าง/ขึ้นบรรทัดใหม่ติดมาจากการ copy
-4. ถ้าเคยกด **Rotate secret** ค่าเดิมใช้ไม่ได้แล้ว — ต้องอัปเดต secret ในระบบคุณ
+1. Check that you really use the **raw body** — the number one cause is a framework that already
+   parsed the JSON (Express needs `express.raw({ type: "application/json" })`, placed before
+   `express.json()` for this path; a Next.js route handler needs `await request.text()`, not
+   `await request.json()`).
+2. Check that you take `t` **from the header** to build `"{t}.{rawBody}"`, not the current time of
+   your own machine.
+3. Check that the secret you use includes the full `whsec_` prefix and has no whitespace or newline
+   picked up while copying.
+4. If you clicked **Rotate secret**, the old value no longer works — update the secret in your system.
 
-**Signature เคยผ่าน แต่บางครั้งไม่ผ่าน**
+**The signature used to pass but sometimes fails**
 
-นาฬิกาของเซิร์ฟเวอร์คุณอาจเพี้ยน ทำให้ `|now - t|` เกิน 300 วินาที — เปิด NTP sync
+Your server clock may have drifted, pushing `|now - t|` past 300 seconds — enable NTP sync.
 
-**ไม่ได้รับ event เลย**
+**No events arrive at all**
 
-1. endpoint ถูกปิด (`enabled = false`) หรือถูกลบไปแล้ว
-2. ไม่ได้ subscribe event ชนิดนั้นไว้ตอนสร้าง — แก้ได้ที่ Settings → Webhooks
-3. plan ของ workspace ต่ำกว่า **pro** — ระบบจะเงียบทันทีโดยไม่มี delivery ถูกสร้างเลย
-4. เหตุการณ์นั้นไม่เข้าเงื่อนไข เช่น PATCH ที่ส่งค่าเดิม (ไม่มีการเปลี่ยนแปลงจริง) จะไม่ยิง event
-   และข้อความที่เป็น internal note จะไม่ยิง `ticket.message_created`
+1. The endpoint is disabled (`enabled = false`) or has been deleted.
+2. You did not subscribe to that event type when you created it — fix it under Settings → Webhooks.
+3. The workspace plan is below **pro** — Helpwise goes silent immediately and no delivery is created
+   at all.
+4. The change did not qualify. For example, a PATCH that sends the same values (no real change) does
+   not fire an event, and a message that is an internal note does not fire `ticket.message_created`.
 
-**Delivery ขึ้นสถานะ `DEAD`**
+**A delivery shows the `DEAD` status**
 
-ดู `responseStatus` / `errorMessage` ในหน้า Deliveries
+Check `responseStatus` / `errorMessage` on the Deliveries page.
 
-| `errorMessage` | สาเหตุ |
+| `errorMessage` | Cause |
 | --- | --- |
-| `http_4xx` / `http_5xx` | endpoint ตอบ non-2xx ครบ 5 ครั้ง — ดู response body ที่ระบบเก็บไว้ |
-| `http_3xx` | endpoint redirect ไปที่อื่น (ระบบไม่ follow) — ตั้ง URL ปลายทางสุดท้ายแทน |
-| `blocked_destination:*` | URL resolve ไปยัง IP ภายใน หรือ resolve DNS ไม่ได้ (§ 8) |
-| ข้อความ timeout/network | endpoint ตอบช้าเกิน 10 วินาที หรือเชื่อมต่อไม่ได้ |
-| `internal_note_blocked` | ระบบยกเลิกการส่งเพราะข้อความไม่ใช่ `PUBLIC` — ปลอดภัยตามที่ออกแบบ ไม่ต้องดำเนินการใด ๆ |
+| `http_4xx` / `http_5xx` | The endpoint returned non-2xx for all 5 attempts — check the response body Helpwise stored |
+| `http_3xx` | The endpoint redirects elsewhere (Helpwise does not follow) — configure the final destination URL instead |
+| `blocked_destination:*` | The URL resolves to an internal IP, or DNS resolution failed (§ 8) |
+| A timeout/network message | The endpoint took longer than 10 seconds to respond, or was unreachable |
+| `internal_note_blocked` | Helpwise cancelled the send because the message was not `PUBLIC` — this is safe and by design, no action needed |
 
-แก้ต้นเหตุแล้วกด **Replay** เพื่อส่ง delivery นั้นซ้ำได้ (ระบบจะใช้ `id` เดิม ระบบของคุณจึง dedupe ได้)
+Once you fix the root cause, click **Replay** to resend that delivery (Helpwise reuses the same
+`id`, so your system can still dedupe).
 
 ---
 
-**ดูเพิ่ม:** [Helpwise Public API Reference](./api.md) — สำหรับดึงรายละเอียด ticket เพิ่มเติมหลังได้รับ event
+**See also:** [Helpwise Public API Reference](./api.md) — for pulling extra ticket details after you
+receive an event
