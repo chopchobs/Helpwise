@@ -46,7 +46,7 @@
 | 30 | Portfolio Demo Readiness — landing page + demo seed (acme/globex) + one-click demo-login + AI rate-limit fail-closed | `phase-30/portfolio-demo` | ✅ done | ✅ |
 | 34 | Tenant-isolation fuzz suite (37 case/8 axis) + ปิด XT-WRITE-05 (composite tenant FK) | (บน main โดยตรง) | ✅ done | ✅ |
 | 35 | Real-time presence/collision (Supabase Realtime) — token/RLS/presence/typing/collision; qa PASS-with-conditions | `feature/phase-35-realtime-presence` | ✅ done | ✅ |
-| 36 | Outbound webhooks — HMAC signing + SSRF guard + QStash retry/DLQ + replay (Portfolio #2); qa PASS-with-conditions (ปิดครบแล้ว) · **security audit ยังไม่ได้รัน** | `feature/phase-36-outbound-webhooks` | 🔄 รอ security gate | ❌ |
+| 36 | Outbound webhooks — HMAC signing + SSRF guard + QStash retry/DLQ + replay (Portfolio #2); qa PASS-with-conditions (ปิดครบ) · security PASS (MEDIUM-1 rate-limit/cap + MEDIUM-2 RLS ปิดก่อน merge) · docs แปลอังกฤษแล้ว | `feature/phase-36-outbound-webhooks` | ✅ done | ✅ PR #16 (`af79bff`) |
 
 > *Phase 20 = decision เชิงลบ (บันทึกว่า nonce CSP ใช้กับ `proxy.ts` ไม่ได้ — คง `unsafe-inline`) ไม่ใช่ feature ใหม่
 > **Chore branches** (merged, ไม่ใช่ phase): `chore/db-init-seed`, `fix/proxy-host-header`, `chore/theme-warm-palette`
@@ -68,7 +68,7 @@
 → อ้าง DoD 8 ข้อใน `CLAUDE.md` § Definition of Done — เป็นเกณฑ์ **block** ของ `code-review` / `qa-testing` / `security`
 
 ## ⚠️ ค้าง / ต้องสังเกต
-0. **Migration ค้าง apply บน DB จริง 3 ตัว** (จาก `prisma migrate status`): `20260721000000_realtime_presence_rls` (Phase 35 — น่าจะ apply ด้วยมือผ่าน SQL editor จึงไม่ถูกบันทึกใน `_prisma_migrations`), `20260722000000_add_outbound_webhooks`, `20260722010000_add_webhooks_feature_flag`. ใครรัน `migrate deploy` จะได้ตัว realtime พ่วงไปด้วย — ตัวมัน idempotent (`drop policy if exists` + `enable rls` ซ้ำ = no-op) แต่ **ต้องรู้ก่อนกด deploy**
+0. **Migration ค้าง apply บน DB จริง 4 ตัว** (จาก `prisma migrate status` — ตรวจก่อนเสมอ อย่าเชื่อตัวเลขนี้ตรง ๆ): `20260721000000_realtime_presence_rls` (Phase 35 — น่าจะ apply ด้วยมือผ่าน SQL editor จึงไม่ถูกบันทึกใน `_prisma_migrations`), `20260722000000_add_outbound_webhooks`, `20260722010000_add_webhooks_feature_flag`, `20260723000000_webhooks_rls` (RLS ของ 2 ตาราง webhooks — ต้อง apply หลัง `20260722000000` ซึ่ง timestamp เรียงถูกแล้ว). ใครรัน `migrate deploy` จะได้ตัว realtime พ่วงไปด้วย — ตัวมัน idempotent (`drop policy if exists` + `enable rls` ซ้ำ = no-op) แต่ **ต้องรู้ก่อนกด deploy**
 1. **ไม่มี Phase ค้าง · LAUNCHED แล้ว** — merge + push ครบทุก branch, deploy live ที่ gethelpwise.xyz (Phase 31-33)
 2. **RLS ยังไม่ active** (`RLS_ENABLED=false`, app ใช้ BYPASSRLS role) — application-enforced isolation เป็นด่านจริง; จะ activate RLS ต้องสลับ DB role + เปิด flag
 3. **Stray duplicate files (iCloud)** — เป็นปัญหาเป็นระยะ ทำ build พัง; ลบทีละไฟล์ (`rm <file>` ไม่ใช่ `rm -rf`) เมื่อพบ
