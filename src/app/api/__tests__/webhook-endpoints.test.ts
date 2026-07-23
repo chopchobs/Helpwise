@@ -11,28 +11,33 @@
  *   - `secret` ห้ามหลุด: ไม่อยู่ใน select ของ list, ไม่อยู่ใน response DTO, ไม่อยู่ใน audit
  *   - plaintextSecret คืนครั้งเดียวตอน create/rotate
  *   - endpoint ของ tenant อื่น (tenantPrisma scope → findFirst null) → 404
+ *   - create: rate-limit ต่อ tenant → 429 · cap 10 endpoint/tenant → 409 ENDPOINT_LIMIT_REACHED
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextResponse } from "next/server";
 import { defaultCtx, makeNextRequest } from "@/app/api/__tests__/_helpers";
 
-const { fakeDb, requireAgentMock, hasFeatureMock, auditLogMock } = vi.hoisted(() => {
-  const fakeDb = {
-    webhookEndpoint: {
-      findMany: vi.fn(),
-      findFirst: vi.fn(),
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-  return {
-    fakeDb,
-    requireAgentMock: vi.fn(),
-    hasFeatureMock: vi.fn(),
-    auditLogMock: vi.fn(),
-  };
-});
+const { fakeDb, requireAgentMock, hasFeatureMock, auditLogMock, checkRateLimitMock } =
+  vi.hoisted(() => {
+    const fakeDb = {
+      webhookEndpoint: {
+        findMany: vi.fn(),
+        findFirst: vi.fn(),
+        count: vi.fn(),
+        create: vi.fn(),
+        update: vi.fn(),
+        delete: vi.fn(),
+      },
+    };
+    return {
+      fakeDb,
+      requireAgentMock: vi.fn(),
+      hasFeatureMock: vi.fn(),
+      auditLogMock: vi.fn(),
+      checkRateLimitMock: vi.fn(),
+    };
+  });
 
 vi.mock("@/lib/tenant", () => ({
   getTenantContext: vi.fn(),
@@ -46,6 +51,16 @@ vi.mock("@/lib/features", () => ({
 
 vi.mock("@/lib/audit", () => ({
   audit: { log: (...args: unknown[]) => auditLogMock(...args) },
+}));
+
+vi.mock("@/lib/rate-limit", () => ({
+  checkRateLimit: (...args: unknown[]) => checkRateLimitMock(...args),
+  rateLimitKey: (scope: string, id: string) => `ratelimit:${scope}:${id}`,
+  rateLimitResponse: (retryAfterSeconds: number) =>
+    NextResponse.json(
+      { data: null, error: { code: "RATE_LIMITED", message: "คำขอบ่อยเกินไป" } },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+    ),
 }));
 
 // mock เฉพาะ requireAgent — ใช้ toAuthErrorResponse จริงจาก @/lib/auth
@@ -82,6 +97,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   requireAgentMock.mockResolvedValue(SESSION);
   hasFeatureMock.mockResolvedValue(true);
+  checkRateLimitMock.mockResolvedValue({ allowed: true, remaining: 19, retryAfterSeconds: 0 });
+  // default: ยังไม่มี endpoint (ต่ำกว่า cap)
+  fakeDb.webhookEndpoint.count.mockResolvedValue(0);
 });
 
 describe("GET /api/webhook-endpoints", () => {
@@ -172,6 +190,41 @@ describe("POST /api/webhook-endpoints", () => {
     expect(res.status).toBe(403);
     expect(json.error.code).toBe("FEATURE_LOCKED");
     expect(fakeDb.webhookEndpoint.create).not.toHaveBeenCalled();
+  });
+
+  it("rate-limit เกิน → 429 RATE_LIMITED และไม่ create (key scope ด้วย tenantId)", async () => {
+    checkRateLimitMock.mockResolvedValue({ allowed: false, remaining: 0, retryAfterSeconds: 900 });
+
+    const res = await POST(makeReq(VALID_BODY));
+    const json = await res.json();
+
+    expect(res.status).toBe(429);
+    expect(json.error.code).toBe("RATE_LIMITED");
+    expect(fakeDb.webhookEndpoint.create).not.toHaveBeenCalled();
+    expect(checkRateLimitMock.mock.calls[0][0].key).toContain(SESSION.ctx.tenantId);
+  });
+
+  it("มี endpoint ครบ cap (10) แล้ว → 409 ENDPOINT_LIMIT_REACHED และไม่ create", async () => {
+    fakeDb.webhookEndpoint.count.mockResolvedValue(10);
+
+    const res = await POST(makeReq(VALID_BODY));
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.error.code).toBe("ENDPOINT_LIMIT_REACHED");
+    expect(json.error.message).toContain("10");
+    expect(fakeDb.webhookEndpoint.create).not.toHaveBeenCalled();
+    expect(auditLogMock).not.toHaveBeenCalled();
+  });
+
+  it("ยังไม่ถึง cap (9 ตัว) → สร้างได้ปกติ 201", async () => {
+    fakeDb.webhookEndpoint.count.mockResolvedValue(9);
+    fakeDb.webhookEndpoint.create.mockResolvedValue(ENDPOINT_ROW);
+
+    const res = await POST(makeReq(VALID_BODY));
+
+    expect(res.status).toBe(201);
+    expect(fakeDb.webhookEndpoint.create).toHaveBeenCalledTimes(1);
   });
 
   it("events ว่าง → 400 VALIDATION_ERROR", async () => {

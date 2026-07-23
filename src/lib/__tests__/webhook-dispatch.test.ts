@@ -29,6 +29,7 @@ vi.mock("@/lib/features", () => ({
 
 import {
   dispatchWebhookEvent,
+  MAX_ENDPOINTS_PER_TENANT,
   type DispatchWebhookEventInput,
 } from "@/lib/webhook-dispatch";
 import type { TenantScopedPrisma } from "@/lib/tenant";
@@ -119,6 +120,21 @@ describe("dispatchWebhookEvent", () => {
     };
     expect(arg.where.enabled).toBe(true);
     expect(arg.where.events.has).toBe("TICKET_CREATED");
+  });
+
+  it("fan-out cap: findMany ใส่ take = MAX_ENDPOINTS_PER_TENANT + orderBy createdAt asc (กันข้อมูลเก่าเกิน cap แบบ deterministic)", async () => {
+    db.webhookEndpoint.findMany.mockResolvedValue([]);
+
+    await dispatchWebhookEvent(asScoped(db), TENANT_ID, ticketInput());
+
+    const arg = db.webhookEndpoint.findMany.mock.calls[0][0] as {
+      take: number;
+      orderBy: { createdAt: string };
+    };
+    expect(arg.take).toBe(MAX_ENDPOINTS_PER_TENANT);
+    expect(MAX_ENDPOINTS_PER_TENANT).toBe(10);
+    // ชุดที่ถูกตัดตอนชนเพดานต้องคงที่ ไม่สลับไปมาแต่ละ event
+    expect(arg.orderBy).toEqual({ createdAt: "asc" });
   });
 
   it("endpoint 2 ตัว → 2 delivery + publish 2 job แต่ eventId เดียวกัน", async () => {

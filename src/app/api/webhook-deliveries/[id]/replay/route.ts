@@ -15,9 +15,15 @@ import { tenantPrisma } from "@/lib/tenant";
 import { hasFeature, FEATURE_KEYS } from "@/lib/features";
 import { audit } from "@/lib/audit";
 import { publishWebhookDeliveryJob } from "@/lib/queue";
+import { checkRateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 
 const FEATURE_LOCKED_MESSAGE =
   "Outbound webhooks ไม่รวมอยู่ใน plan ปัจจุบัน กรุณาอัปเกรด plan";
+
+// rate-limit: 30 ครั้ง / 5 นาที ต่อ tenant — replay 1 ครั้ง = QStash job ที่ยิงปลายทางได้ถึง 5 attempts
+// (พอสำหรับ admin ไล่ replay DLQ เป็นชุดหลังแก้ปลายทาง แต่กัน loop ยิง third-party รัว ๆ)
+const RATE_LIMIT = 30;
+const RATE_WINDOW_SECONDS = 5 * 60;
 
 export async function POST(
   _request: NextRequest,
@@ -42,6 +48,19 @@ export async function POST(
         },
         { status: 403 }
       );
+    }
+
+    // rate-limit หลัง auth/role/feature gate — คนที่ไม่มีสิทธิ์ปั่น counter ของ tenant ไม่ได้
+    // failClosed: replay มี cost จริงต่อ request (QStash job + outbound POST ถึง 5 ครั้ง)
+    // → Redis ล่มต้องไม่กลายเป็นช่องยิงไม่จำกัด (ยอมให้ replay ใช้ไม่ได้ชั่วคราว)
+    const rl = await checkRateLimit({
+      key: rateLimitKey("webhook-replay", ctx.tenantId),
+      limit: RATE_LIMIT,
+      windowSeconds: RATE_WINDOW_SECONDS,
+      failClosed: true,
+    });
+    if (!rl.allowed) {
+      return rateLimitResponse(rl.retryAfterSeconds);
     }
 
     const db = tenantPrisma(ctx.tenantId);

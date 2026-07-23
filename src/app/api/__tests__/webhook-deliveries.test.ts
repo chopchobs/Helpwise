@@ -7,29 +7,38 @@
  *   - feature webhooks ปิด → 403 FEATURE_LOCKED (ไม่แตะ DB / ไม่ publish job)
  *   - list: ไม่ return `payload` และไม่แตะ endpoint.secret · take clamp ≤ 50 · status นอก enum → 400
  *   - replay: delivery ต่าง tenant → 404 · SUCCEEDED → 409 ALREADY_SUCCEEDED
+ *     · rate-limit ต่อ tenant เกิน → 429 RATE_LIMITED (ไม่ publish job)
  *     · success → reset สถานะ + publish job + audit
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextResponse } from "next/server";
 import { defaultCtx, makeNextRequest } from "@/app/api/__tests__/_helpers";
 
-const { fakeDb, requireAgentMock, hasFeatureMock, auditLogMock, publishJobMock } =
-  vi.hoisted(() => {
-    const fakeDb = {
-      webhookDelivery: {
-        findMany: vi.fn(),
-        findFirst: vi.fn(),
-        update: vi.fn(),
-      },
-    };
-    return {
-      fakeDb,
-      requireAgentMock: vi.fn(),
-      hasFeatureMock: vi.fn(),
-      auditLogMock: vi.fn(),
-      publishJobMock: vi.fn(),
-    };
-  });
+const {
+  fakeDb,
+  requireAgentMock,
+  hasFeatureMock,
+  auditLogMock,
+  publishJobMock,
+  checkRateLimitMock,
+} = vi.hoisted(() => {
+  const fakeDb = {
+    webhookDelivery: {
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+      update: vi.fn(),
+    },
+  };
+  return {
+    fakeDb,
+    requireAgentMock: vi.fn(),
+    hasFeatureMock: vi.fn(),
+    auditLogMock: vi.fn(),
+    publishJobMock: vi.fn(),
+    checkRateLimitMock: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/tenant", () => ({
   getTenantContext: vi.fn(),
@@ -47,6 +56,16 @@ vi.mock("@/lib/audit", () => ({
 
 vi.mock("@/lib/queue", () => ({
   publishWebhookDeliveryJob: (...args: unknown[]) => publishJobMock(...args),
+}));
+
+vi.mock("@/lib/rate-limit", () => ({
+  checkRateLimit: (...args: unknown[]) => checkRateLimitMock(...args),
+  rateLimitKey: (scope: string, id: string) => `ratelimit:${scope}:${id}`,
+  rateLimitResponse: (retryAfterSeconds: number) =>
+    NextResponse.json(
+      { data: null, error: { code: "RATE_LIMITED", message: "คำขอบ่อยเกินไป" } },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+    ),
 }));
 
 // mock เฉพาะ requireAgent — ใช้ toAuthErrorResponse จริงจาก @/lib/auth
@@ -87,6 +106,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   requireAgentMock.mockResolvedValue(SESSION);
   hasFeatureMock.mockResolvedValue(true);
+  checkRateLimitMock.mockResolvedValue({ allowed: true, remaining: 29, retryAfterSeconds: 0 });
 });
 
 describe("GET /api/webhook-deliveries", () => {
@@ -229,6 +249,21 @@ describe("POST /api/webhook-deliveries/:id/replay", () => {
     expect(json.error.code).toBe("FEATURE_LOCKED");
     expect(fakeDb.webhookDelivery.update).not.toHaveBeenCalled();
     expect(publishJobMock).not.toHaveBeenCalled();
+  });
+
+  it("rate-limit เกิน → 429 RATE_LIMITED, ไม่ update และไม่ publish job", async () => {
+    checkRateLimitMock.mockResolvedValue({ allowed: false, remaining: 0, retryAfterSeconds: 120 });
+    fakeDb.webhookDelivery.findFirst.mockResolvedValue({ id: "dlv-1", status: "DEAD" });
+
+    const res = await call("dlv-1");
+    const json = await res.json();
+
+    expect(res.status).toBe(429);
+    expect(json.error.code).toBe("RATE_LIMITED");
+    expect(fakeDb.webhookDelivery.update).not.toHaveBeenCalled();
+    expect(publishJobMock).not.toHaveBeenCalled();
+    // key ต้อง scope ด้วย tenantId (ไม่ใช่ global counter)
+    expect(checkRateLimitMock.mock.calls[0][0].key).toContain(SESSION.ctx.tenantId);
   });
 
   it("delivery ของ tenant อื่น (scope ไม่เจอ) → 404", async () => {

@@ -29,6 +29,16 @@ import {
 import type { WebhookEnvelope } from "@/types/webhook";
 
 // =============================================================================
+// LIMITS
+// =============================================================================
+
+/**
+ * เพดานจำนวน endpoint ต่อ tenant — 1 event = 1 delivery + 1 QStash job ต่อ endpoint
+ * ใช้ 2 ที่: cap ตอน create (POST /api/webhook-endpoints) + `take` ของ fan-out ด้านล่าง
+ */
+export const MAX_ENDPOINTS_PER_TENANT = 10;
+
+// =============================================================================
 // INPUT TYPES — eventId/tenantId เป็นของ dispatcher ไม่ใช่ของ caller
 // =============================================================================
 
@@ -90,9 +100,15 @@ export async function dispatchWebhookEvent(
     }
 
     // 3. endpoint ที่เปิดอยู่ + subscribe event นี้ (tenant-scoped ผ่าน db)
+    //    take = เพดานเดียวกับ cap ตอน create — ด่านสุดท้ายกัน fan-out ระเบิด
+    //    กรณีข้อมูลเก่า/race ที่มี endpoint เกิน cap อยู่แล้ว
+    //    orderBy ทำให้ชุดที่ถูกเลือกตอนชนเพดาน deterministic (เก่าสุดชนะเสมอ)
+    //    ไม่งั้น Postgres คืนลำดับไม่การันตี → endpoint ขาด event สลับไปมา debug ยาก
     const endpoints = await db.webhookEndpoint.findMany({
       where: { enabled: true, events: { has: input.eventType } },
       select: { id: true },
+      orderBy: { createdAt: "asc" },
+      take: MAX_ENDPOINTS_PER_TENANT,
     });
     // ไม่มีใคร subscribe → ไม่สร้าง delivery, ไม่ publish
     if (endpoints.length === 0) return;
