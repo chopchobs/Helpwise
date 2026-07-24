@@ -1,6 +1,8 @@
 # Handoff: Phase 36 — Outbound Webhooks (merged) + Realtime RLS recovery
 Date: 2026-07-24
-Next focus: **helpwise-phase36-merged-realtime-rls-live-on-prod** — ยืนยัน realtime presence live บน prod จริง (Phase 35 ไม่เคย active), ปิด migration recovery, แล้วเลือก Phase ถัดไป
+Next focus: **helpwise-phase36-merged-realtime-rls-live-on-prod** — Phase 36 + migration recovery จบครบแล้ว; เหลือ smoke presence + เปิด FeatureFlag แล้วเลือก Phase ถัดไป
+
+> ✅ **migration recovery DONE (Dev รันเอง 2026-07-23, Claudy verify จาก prod DB แล้ว):** probe DIRECT_URL (CREATE POLICY ผ่าน, current_user=postgres) → `migrate resolve --rolled-back 20260721000000` (rolled_back_at=2026-07-23T17:02:31) → `db:deploy` "All migrations successfully applied" 4 ตัว. **Verified prod:** realtime.messages = **2 policy** (INSERT send/SELECT receive) → **presence LIVE บน prod แล้ว (ครั้งแรก)** · WebhookEndpoint+WebhookDelivery relrowsecurity+relforcerowsecurity=true · FeatureFlag webhooks/false/pro · `_prisma_migrations` 4 ตัวใหม่ applied=true
 
 ## Git State
 Base branch: main (HEAD: `d5b2d9b`) — **ahead of origin/main 1 commit (ต้อง push)**
@@ -16,9 +18,11 @@ Working state:
 - Verified: 830 tests pass · `tsc` 0 error (กรอง `.next/types/* 2.ts` iCloud) · build สำเร็จ · main CI เขียว
 
 ⚠️ ต้อง verify ก่อนเริ่ม context ถัดไป:
-- [ ] `git rev-list --count origin/main..main` = 0 (ยืนยัน push แล้ว — ตอน handoff = 1)
-- [ ] **prod migration apply สำเร็จจริง** — query `_prisma_migrations`: 4 ตัวล่าสุด `finished_at` ไม่ null (ห้ามเชื่อ `migrate status` เพราะ failed migration หายจาก pending list)
-- [ ] **realtime presence live** — `pg_policies` บน `realtime.messages` = **2 แถว** (ตอน handoff = 0 = feature dead) + smoke 2 เบราว์เซอร์
+- [ ] `git rev-list --count origin/main..main` = 0 (ยืนยัน push แล้ว — ตอน handoff = 3 commit ค้าง)
+- [x] ~~prod migration apply~~ **DONE + verified** (4 ตัว applied=true, ดู block บนสุด)
+- [x] ~~realtime presence 2 policy~~ **DONE + verified** (2 policy บน prod แล้ว)
+- [ ] **smoke presence จริง** — เปิด ticket เดียวกัน 2 เบราว์เซอร์ ยืนยัน presence/typing แสดงผล (DB พร้อมแล้ว เหลือ verify ฝั่ง UX)
+- [ ] **เปิด FeatureFlag `webhooks`** ให้ tenant ที่ต้องการ (default false → ตอนนี้ยังไม่มี tenant ไหนเปิด)
 
 ## Carried Forward
 ### Decisions
@@ -41,19 +45,18 @@ Working state:
 ## Session Summary
 ### เสร็จแล้ว
 - Phase 36 ปิดครบ: security gate PASS (MEDIUM-1 rate-limit/cap + MEDIUM-2 RLS ปิด, LOW `orderBy` ปิด) · docs แปลอังกฤษ · merge PR #16 · CI เขียว
-- ค้นพบ+เริ่มแก้: **Phase 35 realtime presence ไม่เคยทำงานบน prod** (0 policy บน realtime.messages) — แก้ migration แล้ว รอ apply
+- ค้นพบ+แก้จบ: **Phase 35 realtime presence ไม่เคยทำงานบน prod** (0 policy) → แก้ migration + Dev apply สำเร็จ → **presence LIVE + prod migration ครบ 4 ตัว (verified)**
 
 ### ค้างอยู่ / Open Questions
-- [ ] **Dev รัน migration recovery ให้จบ** (คำสั่งเต็มอยู่ในบทสนทนา session นี้): probe DIRECT_URL → `migrate resolve --rolled-back 20260721000000_realtime_presence_rls` → `npm run db:deploy` → verify 2 policy + smoke presence
-- [ ] **เปิด FeatureFlag `webhooks`** ให้ tenant ที่ต้องการ (default false, requiredPlan pro) — ไม่เปิด = dispatcher เงียบ
+- [ ] **smoke presence 2 เบราว์เซอร์** (DB พร้อม เหลือ verify UX) + **เปิด FeatureFlag `webhooks`** ให้ tenant ที่ต้องการ (ไม่เปิด = dispatcher เงียบ)
 - [ ] Backlog Phase 36 (LOW audit-url/payload-retention/route-rate-limit · doc bug `http_5xx`→`http_<status>` · error code ใหม่ยังไม่ใน docs + UI ไม่ handle 409/429) → บันทึกใน `.claude/handoffs/phase-36-outbound-webhooks-2026-07-22.md` § Backlog
 - **Open Q:** เพิ่ม post-merge "verify migration apply บน prod จริง" เข้า DoD ไหม (Phase 35 ผ่านทุก gate ทั้งที่ feature dead — gate ตรวจแค่ code+mock DB) — รอ Dev ตัดสิน
 
 ## Next Session
 ### เริ่มต้นด้วย
-1. อ่าน `.claude/project-plan.md` (§ ⚠️ ค้าง ข้อ 0 = migration recovery)
-2. `git log --oneline main` + `git rev-list --count origin/main..main` verify push
-3. ตรวจ ⚠️ 3 ข้อด้านบน (push · migration finished_at · 2 policy) ก่อนเริ่มงานใหม่
+1. อ่าน `.claude/project-plan.md` (§ ⚠️ ค้าง ข้อ 0 — migration recovery DONE แล้ว, อัปเดต plan ให้ตรงถ้ายังเขียนว่าค้าง)
+2. `git rev-list --count origin/main..main` verify push (ตอน handoff = 3 commit ค้าง)
+3. เหลือแค่ smoke presence + เปิด FeatureFlag (migration/RLS verified แล้ว ไม่ต้องตรวจซ้ำ)
 
 ### Phase ถัดไป
 - ยังไม่เลือก — Portfolio #1 fuzz / #2 webhooks / #3 realtime ทำครบแล้ว. เสนอ options จาก project-plan backlog ให้ Dev เลือก

@@ -68,11 +68,10 @@
 → อ้าง DoD 8 ข้อใน `CLAUDE.md` § Definition of Done — เป็นเกณฑ์ **block** ของ `code-review` / `qa-testing` / `security`
 
 ## ⚠️ ค้าง / ต้องสังเกต
-0. **Migration ค้าง apply บน DB จริง 4 ตัว** (จาก `prisma migrate status` — ⚠️ **`migrate status` เชื่อไม่ได้เมื่อมี migration failed**: ตัวที่ failed จะหายจากรายการ pending ทำให้ดูเหมือนเคลียร์แล้ว ต้อง query `_prisma_migrations` ดู `finished_at`/`rolled_back_at` ตรง ๆ): `20260721000000_realtime_presence_rls`, `20260722000000_add_outbound_webhooks`, `20260722010000_add_webhooks_feature_flag`, `20260723000000_webhooks_rls`
-   - 🔴 **ข้อเท็จจริงที่แก้แล้ว (2026-07-23):** ที่เคยเขียนว่า realtime RLS "น่าจะ apply ด้วยมือผ่าน SQL editor" **ผิด** — `pg_policies` บน `realtime.messages` = **0 แถว** แปลว่า **Phase 35 presence/typing ไม่เคยทำงานบน production เลย** (RLS เปิด default + ไม่มี policy = deny ทุก channel แบบเงียบ ๆ)
-   - สาเหตุที่ apply ไม่ได้: บรรทัด `alter table realtime.messages enable row level security` ล้ม **42501** เพราะ owner คือ `supabase_realtime_admin` ไม่ใช่ `postgres` → **ถอดบรรทัดนั้นออกแล้ว** (commit `6dafbef`) เพราะ Supabase เปิด RLS ให้ default อยู่แล้ว ส่วน `CREATE POLICY` ทำได้ปกติ
-   - ลำดับกู้: `migrate resolve --rolled-back 20260721000000_realtime_presence_rls` → `npm run db:deploy` (ได้ทั้ง 4 ตัว) → verify `pg_policies` ต้องได้ **2 แถว** + smoke presence 2 เบราว์เซอร์
-   - รายละเอียดข้อจำกัด schema `realtime` → memory `realtime-messages-rls-supabase`
+0. ✅ **Migration prod ครบแล้ว 4 ตัว (2026-07-23, verified จาก `_prisma_migrations` applied=true):** `20260721000000_realtime_presence_rls`, `20260722000000_add_outbound_webhooks`, `20260722010000_add_webhooks_feature_flag`, `20260723000000_webhooks_rls`
+   - 🔴 **ข้อเท็จจริงที่แก้แล้ว:** ที่เคยเขียนว่า realtime RLS "apply ด้วยมือผ่าน SQL editor" **ผิด** — `pg_policies` = **0 แถว** = Phase 35 presence/typing **ไม่เคยทำงานบน prod** จนถึง 2026-07-23. สาเหตุ: `alter table realtime.messages enable RLS` ล้ม **42501** (owner=`supabase_realtime_admin`) → ถอดบรรทัดออก (commit `6dafbef`), Supabase เปิด RLS default + `CREATE POLICY` ทำได้. กู้ด้วย `migrate resolve --rolled-back` → `db:deploy`. **ตอนนี้ realtime.messages = 2 policy = presence LIVE บน prod แล้ว**
+   - ⚠️ บทเรียนถาวร (memory `realtime-messages-rls-supabase`): Prisma migration ถือกรรมสิทธิ์เฉพาะ schema `public`; `migrate status` เชื่อไม่ได้เมื่อมี failed migration (query `_prisma_migrations` ตรง ๆ)
+   - เหลือ: smoke presence 2 เบราว์เซอร์ + เปิด FeatureFlag `webhooks`
 1. **ไม่มี Phase ค้าง · LAUNCHED แล้ว** — merge + push ครบทุก branch, deploy live ที่ gethelpwise.xyz (Phase 31-33)
 2. **RLS ยังไม่ active** (`RLS_ENABLED=false`, app ใช้ BYPASSRLS role) — application-enforced isolation เป็นด่านจริง; จะ activate RLS ต้องสลับ DB role + เปิด flag
 3. **Stray duplicate files (iCloud)** — เป็นปัญหาเป็นระยะ ทำ build พัง; ลบทีละไฟล์ (`rm <file>` ไม่ใช่ `rm -rf`) เมื่อพบ
