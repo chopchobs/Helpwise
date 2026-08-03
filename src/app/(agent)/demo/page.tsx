@@ -3,16 +3,19 @@
  * เข้าถึงได้โดยไม่ต้อง login เพราะ (agent)/layout.tsx เป็น plain wrapper ไม่มี auth gate
  *   (auth gate อยู่ที่ (workspace)/layout.tsx ซึ่งไม่ครอบ route นี้)
  *
- * Server component: อ่าน agent session จาก cookie เพื่อตัดสินโหมดของ client child
+ * Server component: อ่าน agent session จาก cookie เพื่อตัดสินโหมด (ดู resolveDemoEntryMode)
  *   - ยังไม่มี session → auto-POST /api/auth/demo/login แล้ว redirect (พฤติกรรมเดิม)
- *   - มี session อยู่แล้ว → หน้ายืนยันก่อน (กัน cookie clobber ทับ session ของ visitor เอง)
+ *   - persona ที่ขอ = persona ของ session อยู่แล้ว → redirect เงียบฝั่ง server (0 คลิก 0 flash)
+ *   - จะทับ session ของคนอื่น/ของจริง → หน้ายืนยันก่อน (กัน cookie clobber)
  *
  * ⚠️ ไม่แตะ route auth ใด ๆ — อ่าน session ผ่าน requireAgent() ที่มีอยู่แล้วเท่านั้น
  * ⚠️ ส่งลง client ได้แค่ persona key + name — ห้ามส่ง credential (DEMO_PASSWORD อยู่ใน
  *   src/lib/demo.ts ซึ่งเป็น server-only และห้าม import จาก client)
  */
 
+import { redirect } from "next/navigation";
 import { requireAgent } from "@/lib/auth";
+import { resolveDemoEntryMode } from "@/lib/demo-persona-ui";
 import {
   DEMO_PERSONAS,
   isDemoPersonaKey,
@@ -65,6 +68,18 @@ export default async function DemoEntryPage({ searchParams }: DemoPageProps) {
 
   const session = await readAgentSessionSafe();
 
+  const entry = resolveDemoEntryMode({
+    requestedPersona: persona,
+    sessionPersona: session?.persona?.key ?? null,
+    hasSession: session !== null,
+    nextParam,
+  });
+
+  // session ที่ขอมีอยู่แล้ว → ไม่ต้อง POST ไม่ต้องยืนยัน (ไม่มีอะไรถูกทับ)
+  if (entry.mode === "redirect") {
+    redirect(entry.destination);
+  }
+
   // ชื่อ persona ปลายทางของ tenant เดียวกับ session ปัจจุบัน (ไม่ข้าม tenant)
   const targetName =
     session?.persona
@@ -77,7 +92,7 @@ export default async function DemoEntryPage({ searchParams }: DemoPageProps) {
     <DemoLoginClient
       persona={persona}
       nextParam={nextParam}
-      hasSession={session !== null}
+      mode={entry.mode}
       currentName={session?.displayName ?? null}
       targetName={targetName}
     />

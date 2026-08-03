@@ -6,6 +6,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveDemoNext,
+  resolveDemoEntryMode,
   buildDemoPersonaUrl,
   demoBannerDismissKey,
   shouldShowDemoPersonaBanner,
@@ -127,5 +128,115 @@ describe("shouldShowDemoPersonaBanner", () => {
         isDismissed: true,
       })
     ).toBe(false);
+  });
+});
+
+// ตารางพฤติกรรมของ /demo (Dev กำหนด) — guard มีไว้กัน "การสลับ" เท่านั้น
+describe("resolveDemoEntryMode", () => {
+  it("ไม่มี session + /demo → auto-login primary ไป /dashboard", () => {
+    expect(
+      resolveDemoEntryMode({
+        requestedPersona: "primary",
+        sessionPersona: null,
+        hasSession: false,
+        nextParam: null,
+      })
+    ).toEqual({ mode: "auto", destination: "/dashboard" });
+  });
+
+  it("ไม่มี session + persona=secondary&next=/tickets/X → auto-login ไป /tickets/X", () => {
+    expect(
+      resolveDemoEntryMode({
+        requestedPersona: "secondary",
+        sessionPersona: null,
+        hasSession: false,
+        nextParam: "/tickets/X",
+      })
+    ).toEqual({ mode: "auto", destination: "/tickets/X" });
+  });
+
+  it("primary อยู่แล้ว + /demo → redirect เงียบ ไม่ POST", () => {
+    expect(
+      resolveDemoEntryMode({
+        requestedPersona: "primary",
+        sessionPersona: "primary",
+        hasSession: true,
+        nextParam: null,
+      })
+    ).toEqual({ mode: "redirect", destination: "/dashboard" });
+  });
+
+  it("secondary อยู่แล้ว + persona=secondary&next=/tickets/X → redirect เงียบไป ticket ใบเดิม", () => {
+    expect(
+      resolveDemoEntryMode({
+        requestedPersona: "secondary",
+        sessionPersona: "secondary",
+        hasSession: true,
+        nextParam: "/tickets/X",
+      })
+    ).toEqual({ mode: "redirect", destination: "/tickets/X" });
+  });
+
+  it("primary อยู่แล้ว + ขอ secondary → หน้ายืนยัน (จะทับ session จริง)", () => {
+    expect(
+      resolveDemoEntryMode({
+        requestedPersona: "secondary",
+        sessionPersona: "primary",
+        hasSession: true,
+        nextParam: "/tickets/X",
+      })
+    ).toEqual({ mode: "confirm", destination: "/tickets/X" });
+  });
+
+  it("secondary อยู่แล้ว + ขอ primary → หน้ายืนยัน", () => {
+    expect(
+      resolveDemoEntryMode({
+        requestedPersona: "primary",
+        sessionPersona: "secondary",
+        hasSession: true,
+        nextParam: null,
+      })
+    ).toEqual({ mode: "confirm", destination: "/dashboard" });
+  });
+
+  it("agent จริง (sessionPersona = null) → หน้ายืนยันเสมอ ห้าม auto-login ทับ session จริง", () => {
+    expect(
+      resolveDemoEntryMode({
+        requestedPersona: "primary",
+        sessionPersona: null,
+        hasSession: true,
+        nextParam: null,
+      })
+    ).toEqual({ mode: "confirm", destination: "/dashboard" });
+    expect(
+      resolveDemoEntryMode({
+        requestedPersona: "secondary",
+        sessionPersona: null,
+        hasSession: true,
+        nextParam: "/tickets/X",
+      })
+    ).toEqual({ mode: "confirm", destination: "/tickets/X" });
+  });
+
+  it("cookie พัง/ไม่ใช่ member → ถือว่าไม่มี session = auto (fail-open เดิม)", () => {
+    expect(
+      resolveDemoEntryMode({
+        requestedPersona: "secondary",
+        sessionPersona: null,
+        hasSession: false,
+        nextParam: "/tickets/X",
+      })
+    ).toEqual({ mode: "auto", destination: "/tickets/X" });
+  });
+
+  it("เส้นที่ข้าม POST ยังต้อง validate next (ค่าอันตราย → /dashboard)", () => {
+    expect(
+      resolveDemoEntryMode({
+        requestedPersona: "secondary",
+        sessionPersona: "secondary",
+        hasSession: true,
+        nextParam: "//evil.com",
+      })
+    ).toEqual({ mode: "redirect", destination: DEMO_NEXT_FALLBACK });
   });
 });

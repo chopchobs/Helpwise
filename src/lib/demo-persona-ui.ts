@@ -36,6 +36,44 @@ export function resolveDemoNext(raw: string | null): string {
   return raw;
 }
 
+/** โหมดของหน้า /demo: auto-POST · หน้ายืนยันก่อนทับ session · redirect เงียบ (ไม่ POST) */
+export type DemoEntryMode = "auto" | "confirm" | "redirect";
+
+export interface DemoEntryDecision {
+  mode: DemoEntryMode;
+  /** ปลายทางที่ validate แล้วเสมอ — ใช้ทั้งตอน redirect และเป็นลิงก์ "ใช้บัญชีเดิมต่อ" */
+  destination: string;
+}
+
+/**
+ * ตัดสินว่า /demo ต้องทำอะไร — guard มีไว้กัน "การสลับ" เท่านั้น ถ้าไม่มีการสลับก็ไม่ต้องกัน
+ *
+ *   - ไม่มี session                        → "auto"     (พฤติกรรมเดิม 0 คลิก)
+ *   - persona ที่ขอ = persona ของ session   → "redirect" (session ที่ต้องการมีอยู่แล้ว ไม่ต้อง POST ซ้ำ)
+ *   - นอกนั้น (รวม agent จริงที่ไม่ใช่ demo persona) → "confirm" (POST จะทับ session ของเขา)
+ *
+ * ⚠️ ทุกเส้นใช้ resolveDemoNext() เป็นปลายทางเสมอ — เส้นที่ข้าม POST ก็ต้อง honor `next`
+ *   (คนที่เป็น secondary อยู่แล้ว paste ลิงก์จาก banner ซ้ำ ต้องถึง ticket ใบเดิม)
+ */
+export function resolveDemoEntryMode(input: {
+  requestedPersona: DemoPersonaKey;
+  /** persona ของ session ปัจจุบัน — null = agent จริง (ไม่ใช่ demo persona) */
+  sessionPersona: DemoPersonaKey | null;
+  hasSession: boolean;
+  nextParam: string | null;
+}): DemoEntryDecision {
+  const destination = resolveDemoNext(input.nextParam);
+
+  if (!input.hasSession) return { mode: "auto", destination };
+  if (
+    input.sessionPersona !== null &&
+    input.sessionPersona === input.requestedPersona
+  ) {
+    return { mode: "redirect", destination };
+  }
+  return { mode: "confirm", destination };
+}
+
 /**
  * URL ที่ให้ visitor copy ไปเปิดใน incognito → login เป็น agent คนที่ 2 แล้วเด้งเข้า ticket ใบเดิม
  * `origin` ต้องมาจาก window.location.origin เท่านั้น (ห้ามประกอบจาก input/env/searchParams)

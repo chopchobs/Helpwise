@@ -3,10 +3,11 @@
 /**
  * DemoLoginClient — ส่วน client ของหน้า /demo
  *
- * 2 โหมด (server page เป็นคนตัดสินจาก cookie):
- *   - hasSession = false → auto-POST /api/auth/demo/login ทันที (พฤติกรรมเดิม 0 คลิก)
- *   - hasSession = true  → render หน้ายืนยันก่อน ไม่ auto-POST
- *     (กัน cookie clobber: visitor ที่ login อยู่แล้วเผลอกดลิงก์ persona แล้ว session ตัวเองถูกทับ)
+ * 2 โหมด (server page เป็นคนตัดสินจาก cookie ผ่าน resolveDemoEntryMode):
+ *   - mode = "auto"    → auto-POST /api/auth/demo/login ทันที (พฤติกรรมเดิม 0 คลิก)
+ *   - mode = "confirm" → render หน้ายืนยันก่อน ไม่ auto-POST
+ *     (กัน cookie clobber: การ POST จะทับ session ที่ visitor ใช้อยู่)
+ *   (โหมด "redirect" ไม่ถึงไฟล์นี้ — server page redirect ไปก่อนแล้ว)
  *
  * Redirect strategy: window.location.assign (full navigation) ไม่ใช่ router.push
  *   เพราะ workspace layout อ่าน cookie ฝั่ง server — soft nav อาจไม่ re-run server
@@ -18,7 +19,7 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Loader2 } from "lucide-react";
-import { resolveDemoNext } from "@/lib/demo-persona-ui";
+import { resolveDemoNext, type DemoEntryMode } from "@/lib/demo-persona-ui";
 import type { DemoPersonaKey } from "@/lib/demo-personas";
 
 // =============================================================================
@@ -38,8 +39,8 @@ interface DemoLoginClientProps {
   persona: DemoPersonaKey;
   /** ค่าดิบของ param `next` — validate ที่จุด redirect จริงด้วย resolveDemoNext */
   nextParam: string | null;
-  /** true = มี agent session อยู่แล้ว → ต้องยืนยันก่อนทับ */
-  hasSession: boolean;
+  /** "confirm" = การ login จะทับ session ที่ใช้อยู่ → ต้องให้ผู้ใช้ยืนยันก่อน */
+  mode: Exclude<DemoEntryMode, "redirect">;
   /** ชื่อ (หรืออีเมล) ของ session ปัจจุบัน — ใช้บอกว่ากำลังจะทับใคร */
   currentName: string | null;
   /** ชื่อ persona ปลายทาง — null ถ้าไม่รู้จัก (เช่นไม่ใช่ demo tenant) */
@@ -53,7 +54,7 @@ interface DemoLoginClientProps {
 export default function DemoLoginClient({
   persona,
   nextParam,
-  hasSession,
+  mode,
   currentName,
   targetName,
 }: DemoLoginClientProps) {
@@ -98,14 +99,14 @@ export default function DemoLoginClient({
   // ใช้ startTransition เพื่อหลีกเลี่ยง cascading render ตาม react-hooks/set-state-in-effect
   // startTransition เป็น stable reference — ไม่ต้องใส่ใน deps
   useEffect(() => {
-    // มี session อยู่แล้ว → รอผู้ใช้ยืนยัน ห้าม auto-POST (จะทับ cookie ของเขา)
-    if (hasSession) return;
+    // จะทับ session ที่ใช้อยู่ → รอผู้ใช้ยืนยัน ห้าม auto-POST
+    if (mode === "confirm") return;
     startTransition(() => {
       void runDemoLogin();
     });
-  }, [hasSession, runDemoLogin]);
+  }, [mode, runDemoLogin]);
 
-  const showConfirm = hasSession && !isSwitching && !hasError;
+  const showConfirm = mode === "confirm" && !isSwitching && !hasError;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
