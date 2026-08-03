@@ -49,5 +49,10 @@ jobs:
       - name: Build
         run: npm run build
 
+      # กัน server-only secret หลุดเข้า client bundle — ตรวจ artifact จริง ไม่ใช่ source
+      # (tsc/eslint บังคับกฎ "client ห้าม import ไฟล์ไหน" ไม่ได้ ดู scripts/scan-client-bundle.ts)
+      - name: Scan client bundle for server-only secrets
+        run: npm run scan:bundle
+
       - name: Audit dependencies (report only)
         run: npm audit --audit-level=high || true
