@@ -67,7 +67,21 @@ validate ที่จุดเดียวกับที่ redirect จริ�
 `src/app/(agent)/demo/page.tsx` (+ client child ใหม่) · `src/app/(agent)/(workspace)/tickets/[id]/page.tsx` (จุด mount) ·
 component banner ใหม่ (เช่น `src/components/ui/DemoPersonaBanner.tsx`) · `src/lib/landing-links.ts` (comment ข้อ C เท่านั้น) · tests
 
-## F. ⚠️ Open decision (ต้องให้ Dev ตัดสินก่อน frontend เริ่ม)
+## F. ✅ RESOLVED — Dev เลือก (B): `demoPersona` มาจาก server
+
+`GET /api/auth/agent/me` คืน field เพิ่ม **`demoPersona: "primary" | "secondary" | null`** (slice 1b)
+banner อ่านจาก session ไม่ต้องเทียบ email เอง → **client ไม่ต้องรู้จัก email ของ persona เลย**
+
+เหตุผลของ Dev: (A) ทำให้ client กลายเป็นผู้ตัดสินว่าใครเป็นใคร และวันที่มีคนแก้ email มันจะเงียบ —
+การจำแนกตัวตนควรอยู่ฝั่ง server (ประเด็นไม่ใช่ว่า email ลับไหม — มันไม่ลับ)
+ส่วนข้อกังวลเรื่องขยาย surface: `/me` เป็น read-only session info คนละชั้นกับ mint path ของ demo-login
+
+กฎของ (B): derive จาก `DEMO_PERSONAS` ตัวเดียวกับ slice 1 (ห้ามมี list ที่สอง) · tenant ไม่ใช่ demo → `null`
+(ไม่ throw ไม่ 403) · ห้าม return email/password · **additive field เท่านั้น response shape เดิมห้ามเปลี่ยน**
+
+> frontend เริ่ม slice 2 ได้เมื่อ slice 1b merge แล้วเท่านั้น
+
+### (เก็บไว้เป็นบันทึก) ทางเลือกที่ไม่ได้เลือก
 
 Banner ต้องรู้ว่า **session ปัจจุบันเป็น primary หรือ secondary** แต่ ticket detail page เป็น client component ทั้งไฟล์
 → วิธีเดียวที่ทำฝั่ง client ได้คือเทียบ **email** ของ session กับ persona list = ต้องมี email ของ persona ใน client bundle
