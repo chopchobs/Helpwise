@@ -119,3 +119,24 @@ Banner ต้องรู้ว่า **session ปัจจุบันเป�
 
 - **(A)** ยอมให้ persona **email** (ไม่ใช่ password) อยู่ใน client bundle — email demo โชว์อยู่แล้วใน user menu ของ demo เอง (`(workspace)/layout.tsx:476`) จึงไม่ใช่ข้อมูลลับ · ไม่ต้องแตะ backend
 - **(B)** เพิ่ม `demoPersona: "primary" | "secondary" | null` ใน `/api/auth/agent/me` แล้ว banner อ่านจาก session — client bundle สะอาด แต่**ขยาย scope กลับไปที่ backend (slice 1b)**
+
+---
+
+## G. บทเรียนที่ต้องยกเข้า handoff ตอนปิดเฟส (Dev สั่งจด)
+
+1. **Trailing-newline bypass ของ `$` ใน JS regex** — `$` ยัง match ก่อน newline ตัวสุดท้ายได้
+   (`/^\/tickets\/\w+$/.test("/tickets/abc\n")` = **true**) → ค่าที่มี newline หลุดไปเป็นปลายทาง redirect ได้
+   วิธีปิด: ใช้ `(?![\s\S])` แทน `$` (ดู `src/lib/demo-persona-ui.ts` → `TICKET_PATH_PATTERN`)
+   **ไม่ได้อยู่ใน spec — `frontend` agent จับได้เอง**. ใช้กับทุก validator ที่ตรวจ path/URL จาก input
+
+2. **พิสูจน์ "ห้ามหลุด client bundle" ที่ระดับ artifact ไม่ใช่ระดับ source** — grep หา secret ใน build output จริง:
+   ```
+   npx next build
+   grep -rl "<ค่า secret>"    .next/static/     # ต้องว่าง
+   grep -rl "<persona email>" .next/static/     # ต้องว่าง
+   ```
+   การ grep source ว่า "ไม่มี import" พิสูจน์ได้แค่เจตนา — ตัว bundler เท่านั้นที่บอกความจริง
+   ควรเป็นขั้นตอนมาตรฐานทุกครั้งที่มีกฎ server-only/client-safe ในเฟสนั้น
+
+3. **Bug class เดียวกันซ้ำรอบที่ 2:** Story 1 (`resolveDemoUrl`) กับ `next` param ของเฟสนี้ = *"อย่าประกอบ URL
+   ปลายทางจาก input ที่ client คุมได้"* — รอบนี้กันไว้ตั้งแต่ออกแบบ (§ B) ไม่ได้มาแก้ทีหลัง
