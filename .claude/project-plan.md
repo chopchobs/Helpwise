@@ -46,7 +46,7 @@
 | 30 | Portfolio Demo Readiness — landing page + demo seed (acme/globex) + one-click demo-login + AI rate-limit fail-closed | `phase-30/portfolio-demo` | ✅ done | ✅ |
 | 34 | Tenant-isolation fuzz suite (37 case/8 axis) + ปิด XT-WRITE-05 (composite tenant FK) | (บน main โดยตรง) | ✅ done | ✅ |
 | 35 | Real-time presence/collision (Supabase Realtime) — token/RLS/presence/typing/collision; qa PASS-with-conditions | `feature/phase-35-realtime-presence` | ✅ done | ✅ |
-| 37 | Demo personas — visitor login เป็น agent คนที่ 2 (ไม่ใช้ password) + banner ชวนเปิด incognito ให้เห็น real-time presence จริง; security PASS · qa PASS-with-conditions · L-1/L-2 ปิดแล้ว · +166 tests (846→1012) | `feature/phase-37-demo-personas` | ✅ done (code) | ❌ **ยังไม่ merge/push** |
+| 37 | Demo personas — visitor login เป็น agent คนที่ 2 (ไม่ใช้ password) + banner ชวนเปิด incognito ให้เห็น real-time presence จริง; security PASS · qa PASS-with-conditions · L-1/L-2 ปิดแล้ว · +166 tests (846→1012) | `feature/phase-37-demo-personas` | ✅ done (code) · ⏳ Gate 2 ยังไม่รัน | ✅ `68ad2e1` — **ยังไม่ push** |
 | 36 | Outbound webhooks — HMAC signing + SSRF guard + QStash retry/DLQ + replay (Portfolio #2); qa PASS-with-conditions (ปิดครบ) · security PASS (MEDIUM-1 rate-limit/cap + MEDIUM-2 RLS ปิดก่อน merge) · docs แปลอังกฤษแล้ว | `feature/phase-36-outbound-webhooks` | ✅ done | ✅ PR #16 (`af79bff`) |
 
 > *Phase 20 = decision เชิงลบ (บันทึกว่า nonce CSP ใช้กับ `proxy.ts` ไม่ได้ — คง `unsafe-inline`) ไม่ใช่ feature ใหม่
@@ -87,8 +87,11 @@
    - `Tenant.settings` ถูกทับทั้งก้อน (branding จาก UI หาย) · `Subscription` ถูกทับ (status/price/period reset จาก now — ทับ Stripe sync)
    - ไม่มี dry-run flag · ไม่มี `delete` (upsert ล้วน จึงไม่ลบ junk ให้)
    - **Fix ที่ควรทำ (backlog):** เปลี่ยนเป็น `ticketCounter: Math.max(existing, maxTicketNumber)` · `settings` merge แทน replace หรือ update เฉพาะตอน create · เพิ่ม `--dry-run` flag. รายละเอียดเต็ม → memory `seed-demo-idempotency-acme-cruft`
-7. 🔴 **Phase 37 ยังไม่ merge/push** — โค้ดเสร็จ+verify ครบบน `feature/phase-37-demo-personas` (11 commit, 1012 tests เขียว) Dev merge เอง
-   - **post-merge gate 2 ข้อ (ปิดเฟสไม่ได้จนกว่าผ่าน):** (1) read-only SQL ยืนยัน Alex/Dana + demo persona มีจริงบน prod (role=AGENT, active) — ถ้าไม่ครบ **ห้าม re-seed ทั้งก้อน** ใช้ one-off upsert (ดูข้อ 6 กับระเบิด `ticketCounter`) (2) เดิน `.claude/specs/phase-37-manual-checklist.md` กอง C + B-7
-   - ⚠️ **R-1:** persona `secondary` login ได้โดยไม่มี credential → ข้อมูลใน acme/globex = public ทั้งหมด **ต้อง cleanup + ยืนยันว่าไม่มีบัญชี/ข้อมูลจริงใน 2 tenant นี้ก่อนเปิดใช้จริง**
+7. 🟡 **Phase 37 merge แล้ว (`68ad2e1`) — ยังไม่ push · Gate 2 ยังไม่รัน** (`main...origin/main [ahead 17]`) · 1012 tests เขียว
+   - ✅ **Gate 1 ผ่าน** (SQL audit บน prod 2026-08-03, read-only): persona **4/4 OK** (User+TenantMember role=AGENT active) · contact/ticket นอก seed = **0** · **ApiKey/WebhookEndpoint/Attachment = 0** ทั้ง 2 tenant · `ticketCounter` ตรง `MAX(ticketNumber)` พอดี (acme 1007 · globex 1006) → **ไม่ต้อง re-seed**
+   - ⏳ **Gate 2 ยังไม่รัน** — push → รอ Vercel deploy → เดิน `.claude/specs/phase-37-manual-checklist.md` **กอง C (8 ข้อ) + B-7** เป็นขั้นต่ำ · **ปิดเฟสไม่ได้จนกว่าผ่าน**
+   - ⚠️ **R-1 ยังมีผลเชิงนโยบาย:** persona `secondary` login ได้โดยไม่มี credential → ข้อมูลใน acme/globex = **public ทั้งหมด** (ตอนนี้ข้อมูลสะอาดแล้ว แต่กฎคือ **ห้ามเอาของจริงเข้า 2 tenant นี้อีก**)
+   - 🟡 **open item:** `owner@acme.test` (OWNER, active, created 2026-05-31, สร้างมือผ่าน signup ไม่อยู่ในโค้ด) ยังอยู่ใน acme — ไม่ใช่ช่องโหว่ (demo-login บังคับ `role === "AGENT"` → OWNER ได้ 403) แต่เป็น standing risk **Dev ตัดสินทีหลัง อย่าเพิ่งแตะ**
+   - บันทึกเหตุผลการตัดสินใจ 11 บท → `docs/phase-37-decision-log.md`
    - รายละเอียดเต็ม → `.claude/handoffs/phase-37-demo-personas-2026-08-03.md`
 8. นี่คือ plan/handoff ครั้งแรกของ project — ก่อนหน้านี้ไม่มี `project-plan.md`

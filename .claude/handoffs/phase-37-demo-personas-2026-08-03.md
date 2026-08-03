@@ -1,18 +1,22 @@
 # Handoff: Phase 37 — Demo personas (visitor-facing multi-agent presence)
 Date: 2026-08-03
-Next focus: **helpwise-phase37-merge-and-prod-verify** — โค้ดเสร็จ+verify ครบบน branch แล้ว เหลือ Dev merge → push → เดิน post-merge gate บน prod
+Next focus: **helpwise-phase37-push-and-gate2** — merge เข้า main แล้ว · **ยังไม่ push** · **Gate 2 (smoke) ยังไม่รัน**
 
 > 🎯 **ทำไมมีเฟสนี้:** Phase 35 มี real-time presence/collision แต่ **ไม่มีใครในโลกเห็นได้ในเดโม่** เพราะ demo มี account เดียว
 > เฟสนี้เพิ่ม "agent คนที่ 2" ให้ visitor เปิด 2 เบราว์เซอร์แล้วเห็น collision เอง — ไม่ต้องเชื่อคำอธิบาย
 
 ## Git State
 
-Branch: **`feature/phase-37-demo-personas`** — **ยังไม่ merge · ยังไม่ push** (Dev ทำเอง context หน้า)
-Base: `main` @ `9ceddde` · branch นำหน้า main **11 commit** · ไม่มี uncommitted (working tree clean)
+**สถานะ ณ 2026-08-03 (verified จาก git จริง ไม่ใช่จากคำบอกเล่า):**
+- ✅ **merge แล้ว** — `main` = **`68ad2e1`** (merge commit `--no-ff`, 25 files `+3078/-179`)
+- ❌ **ยังไม่ push** — `main...origin/main [ahead 17]` (Dev ทำเอง)
+- ❌ **Gate 2 (smoke กอง C + B-7) ยังไม่รัน**
+- working tree clean · branch `feature/phase-37-demo-personas` merge เข้า main แล้ว (ลบได้ถ้าต้องการ)
+- 🆕 `30ac63a` — **`docs/phase-37-decision-log.md`** (Dev เขียนเอง, 304 บรรทัด, บันทึกการตัดสินใจ 11 บท) = บันทึก **เหตุผล** ของเฟส คู่กับไฟล์นี้ที่เป็น **สถานะ/ปฏิบัติการ**
 
 | Phase | Branch | Status | Merged |
 |-------|--------|--------|--------|
-| 37 | `feature/phase-37-demo-personas` | ✅ done (security PASS · qa PASS-with-conditions · L-1/L-2 ปิดแล้ว) | ❌ **ยังไม่ merge** |
+| 37 | `feature/phase-37-demo-personas` | ✅ done (security PASS · qa PASS-with-conditions · L-1/L-2 ปิดแล้ว) · ⏳ Gate 2 ยังไม่รัน | ✅ `68ad2e1` — **ยังไม่ push** |
 
 Commit บน branch (เก่า→ใหม่):
 ```
@@ -37,8 +41,9 @@ d4b1fd3 test(demo)  qa gate +114 tests + manual checklist
 - L-1 fix: รัน test ใหม่กับโค้ดเก่า → **fail 7 เคส**, กับโค้ดใหม่ → **pass 23** (พิสูจน์ว่า test จับบั๊กจริง)
 
 ⚠️ ต้อง verify ก่อนเริ่ม context ถัดไป:
-- [ ] `git log --oneline main..feature/phase-37-demo-personas | wc -l` = 11 (ถ้า 0 = merge แล้ว)
-- [ ] `git rev-list --count origin/main..main` = 0 (ยืนยัน push แล้ว)
+- [ ] `git rev-list --count origin/main..main` → ตอนเขียน handoff = **17** · ถ้าได้ **0** = push แล้ว
+- [ ] `git log --oneline -1 main` → ควรเป็น `68ad2e1` หรือใหม่กว่า
+- [ ] **Gate 2 รันหรือยัง** (ดู § แผนเดินต่อ ข้อ 3) — **ยังไม่รัน ณ ตอนเขียน**
 
 ## สิ่งที่เฟสนี้ทำ
 
@@ -80,14 +85,11 @@ d4b1fd3 test(demo)  qa gate +114 tests + manual checklist
 
 ## แผนเดินต่อของ Dev (สั่งได้ทันที)
 
-### 1. Merge + push
-```bash
-git checkout main
-git merge --no-ff feature/phase-37-demo-personas -m "Merge Phase 37: demo personas (visitor-facing multi-agent presence)"
-git push origin main
-# ถ้าอยากผ่าน PR แทน:  gh pr create --base main --head feature/phase-37-demo-personas
+### 1. ~~Merge~~ ✅ เสร็จแล้ว (`68ad2e1`) → เหลือ **push อย่างเดียว**
 ```
-CI ต้องเขียวทั้ง lint / tsc / test (1012) / build / **scan:bundle** (step ใหม่)
+git push origin main          # ahead 17 commit
+```
+หลัง push ดู CI ต้องเขียวครบ: lint / tsc / test (**1012**) / build / **scan:bundle** (step ใหม่ของเฟสนี้ — ถ้าแดงที่ step นี้แปลว่ามี secret หลุด client bundle)
 
 ### 2. Deploy
 Vercel auto-deploy จาก `main` — **ไม่มี migration ในเฟสนี้** ไม่ต้องรัน `db:deploy`
@@ -156,6 +158,7 @@ where u.email in ('alex@acme.helpwise.com','dana@globex.helpwise.com',
 - **Open Q:** R-2 (XFF spoof → rate-limit ไม่จริง) เป็น pre-existing ระดับ project — จะทำเป็นเฟสของตัวเองไหม
 
 ## References
+- **Decision log (เหตุผล 11 บท):** `docs/phase-37-decision-log.md` (`30ac63a`)
 - Master plan: `.claude/project-plan.md` (§ ⚠️ ค้าง ข้อ 6 = กับระเบิด seed-demo)
 - Spec + บทเรียน: `.claude/specs/phase-37-slice-2-demo-persona-banner.md` (§ G)
 - Manual checklist: `.claude/specs/phase-37-manual-checklist.md`
