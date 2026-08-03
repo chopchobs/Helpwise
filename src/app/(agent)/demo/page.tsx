@@ -15,6 +15,7 @@
 
 import { redirect } from "next/navigation";
 import { requireAgent } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { resolveDemoEntryMode } from "@/lib/demo-persona-ui";
 import {
   DEMO_PERSONAS,
@@ -36,20 +37,47 @@ function firstValue(value: string | string[] | undefined): string | null {
 
 interface CurrentSession {
   displayName: string;
+  /** slug ของ tenant ปัจจุบัน — null = lookup ไม่สำเร็จ (จำแนก persona ไม่ได้) */
+  tenantSlug: string | null;
   persona: DemoPersona | null;
 }
 
 /**
  * อ่าน session แบบไม่ throw — ไม่มี cookie / verify ไม่ผ่าน / ไม่ใช่ member = ถือว่า "ยังไม่มี session"
  * (fail-open ไปทางพฤติกรรมเดิม: auto-login ตามปกติ)
+ *
+ * ⚠️ persona ต้อง match `email + tenantSlug` คู่กันเสมอ (เหมือน /api/auth/agent/me และ demo-login):
+ *   email อย่างเดียวไม่พอ — user คนเดียวเป็น member ได้หลาย tenant ถ้าจำแนกด้วย email ล้วน
+ *   persona ของ tenant อื่นจะถูกนับเป็น persona ของ tenant ปัจจุบัน (cross-tenant)
  */
 async function readAgentSessionSafe(): Promise<CurrentSession | null> {
   try {
     const session = await requireAgent();
+
+    // tenantId มาจาก context ที่ middleware verify แล้วเท่านั้น (ห้ามรับจาก client)
+    // lookup ล้มเหลว → slug = null → จำแนก persona ไม่ได้ → ตกไป confirm (ปลอดภัยไว้ก่อน)
+    let tenantSlug: string | null = null;
+    try {
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: session.ctx.tenantId },
+        select: { slug: true },
+      });
+      tenantSlug = tenant?.slug ?? null;
+    } catch (err) {
+      console.error(
+        "[demo:page] tenant lookup failed:",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+
     return {
       displayName: session.user.name ?? session.user.email,
-      // ใช้ persona ของ session ปัจจุบันเพื่อรู้ว่าอยู่ demo tenant ไหน (ไม่ต้อง query เพิ่ม)
-      persona: DEMO_PERSONAS.find((p) => p.email === session.user.email) ?? null,
+      tenantSlug,
+      persona: tenantSlug
+        ? DEMO_PERSONAS.find(
+            (p) => p.tenantSlug === tenantSlug && p.email === session.user.email
+          ) ?? null
+        : null,
     };
   } catch {
     return null;
@@ -80,13 +108,12 @@ export default async function DemoEntryPage({ searchParams }: DemoPageProps) {
     redirect(entry.destination);
   }
 
-  // ชื่อ persona ปลายทางของ tenant เดียวกับ session ปัจจุบัน (ไม่ข้าม tenant)
-  const targetName =
-    session?.persona
-      ? DEMO_PERSONAS.find(
-          (p) => p.key === persona && p.tenantSlug === session.persona?.tenantSlug
-        )?.name ?? null
-      : null;
+  // ชื่อ persona ปลายทางของ "tenant ปัจจุบัน" เท่านั้น — ไม่ใช่ tenant ที่ session เคยผูกไว้
+  const currentSlug = session?.tenantSlug ?? null;
+  const targetName = currentSlug
+    ? DEMO_PERSONAS.find((p) => p.key === persona && p.tenantSlug === currentSlug)
+        ?.name ?? null
+    : null;
 
   return (
     <DemoLoginClient
