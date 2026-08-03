@@ -241,3 +241,13 @@ const tickets = await db.ticket.findMany()
 - [ ] inbound email / Stripe webhook idempotent + verify signature
 - [ ] เช็ค permission/role + `hasFeature()` (ไม่ hardcode plan)
 - [ ] บันทึก `AuditLog` สำหรับ action สำคัญ
+
+#### Post-merge gate (เฉพาะ phase ที่มี migration หรือ external resource)
+
+> ปิด phase ไม่ได้จนกว่าข้อนี้ผ่าน — **gate ก่อน merge ตรวจแค่ code + mock DB จึงไม่จับ feature ที่ตายบน prod**
+> (บทเรียนจริง: Phase 35 realtime presence ผ่านทุก gate แต่ RLS policy ไม่เคย apply บน prod → feature dead 1 เดือน)
+
+- [ ] **verify migration apply บน prod จริง** — query `_prisma_migrations` ตรง ๆ ว่า `finished_at` ไม่ null / `rolled_back_at` เป็น null ทุกตัวของ phase นั้น. **ห้ามเชื่อ `prisma migrate status`** (รายงานผิดเมื่อมี failed migration)
+- [ ] **verify effect ของ migration บน prod** ไม่ใช่แค่แถวใน `_prisma_migrations` — เช่น policy → `pg_policies`, ตาราง/คอลัมน์ใหม่ → `information_schema`, RLS → `relrowsecurity`/`relforcerowsecurity`
+- [ ] **external resource ที่ feature ต้องใช้ provision แล้ว** — FeatureFlag เปิดให้ tenant ที่ต้องใช้ · storage bucket · queue/cron · provider key ใน env prod
+- [ ] **smoke ของจริงบน prod** อย่างน้อย 1 path ของ feature นั้น (ไม่ใช่ local/CI)

@@ -67,11 +67,15 @@
 ## Definition of Done
 → อ้าง DoD 8 ข้อใน `CLAUDE.md` § Definition of Done — เป็นเกณฑ์ **block** ของ `code-review` / `qa-testing` / `security`
 
+**+ Post-merge gate (2026-08-03)** — เฉพาะ phase ที่มี migration / external resource: verify migration apply บน prod จริง (query `_prisma_migrations` ตรง ๆ, ห้ามเชื่อ `migrate status`) · verify effect จริง (`pg_policies` / `information_schema` / `relrowsecurity`) · external resource provision แล้ว (FeatureFlag, bucket, cron, env) · smoke 1 path บน prod. **phase ยังปิดไม่ได้จนกว่าผ่าน** → รายละเอียดใน `CLAUDE.md` § Post-merge gate
+
 ## ⚠️ ค้าง / ต้องสังเกต
 0. ✅ **Migration prod ครบแล้ว 4 ตัว (2026-07-23, verified จาก `_prisma_migrations` applied=true):** `20260721000000_realtime_presence_rls`, `20260722000000_add_outbound_webhooks`, `20260722010000_add_webhooks_feature_flag`, `20260723000000_webhooks_rls`
    - 🔴 **ข้อเท็จจริงที่แก้แล้ว:** ที่เคยเขียนว่า realtime RLS "apply ด้วยมือผ่าน SQL editor" **ผิด** — `pg_policies` = **0 แถว** = Phase 35 presence/typing **ไม่เคยทำงานบน prod** จนถึง 2026-07-23. สาเหตุ: `alter table realtime.messages enable RLS` ล้ม **42501** (owner=`supabase_realtime_admin`) → ถอดบรรทัดออก (commit `6dafbef`), Supabase เปิด RLS default + `CREATE POLICY` ทำได้. กู้ด้วย `migrate resolve --rolled-back` → `db:deploy`. **ตอนนี้ realtime.messages = 2 policy = presence LIVE บน prod แล้ว**
    - ⚠️ บทเรียนถาวร (memory `realtime-messages-rls-supabase`): Prisma migration ถือกรรมสิทธิ์เฉพาะ schema `public`; `migrate status` เชื่อไม่ได้เมื่อมี failed migration (query `_prisma_migrations` ตรง ๆ)
    - เหลือ: smoke presence 2 เบราว์เซอร์ + เปิด FeatureFlag `webhooks`
+   - ✅ **Open Q ปิดแล้ว (2026-08-03, Dev อนุมัติ):** เพิ่ม **Post-merge gate** เข้า DoD (`CLAUDE.md` § Post-merge gate) — phase ที่มี migration/external resource ต้อง verify บน prod จริงก่อนปิด phase
+   - 🔶 **ผลย้อนหลัง:** Phase 35 + 36 ยังไม่ผ่าน post-merge gate ครบ (migration ✅ verified แต่ smoke presence prod ✗ · FeatureFlag `webhooks` ยังไม่เปิดให้ tenant ใด ✗) → นับเป็น **done-with-open-gate** จนกว่า Dev ทำ 2 ข้อนี้
 1. **ไม่มี Phase ค้าง · LAUNCHED แล้ว** — merge + push ครบทุก branch, deploy live ที่ gethelpwise.xyz (Phase 31-33)
 2. **RLS ยังไม่ active** (`RLS_ENABLED=false`, app ใช้ BYPASSRLS role) — application-enforced isolation เป็นด่านจริง; จะ activate RLS ต้องสลับ DB role + เปิด flag
 3. **Stray duplicate files (iCloud)** — เป็นปัญหาเป็นระยะ ทำ build พัง; ลบทีละไฟล์ (`rm <file>` ไม่ใช่ `rm -rf`) เมื่อพบ
