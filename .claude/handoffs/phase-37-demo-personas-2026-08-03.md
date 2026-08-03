@@ -135,8 +135,22 @@ where u.email in ('alex@acme.helpwise.com','dana@globex.helpwise.com',
 - gate: **security PASS** (ไม่มี Critical/High; fuzz `resolveDemoNext` 31 payload คัดมือ + random 300k เคส ไม่มี bypass) · **qa PASS-with-conditions** (+114 tests, manual checklist 34 ข้อ)
 - CI ได้ step ใหม่ที่ generalize ได้: `scan:bundle` (ค่าต้องห้ามดึงจาก source of truth ไม่ hardcode ซ้ำ)
 
+### ✅ Gate 1 ผ่านแล้ว (Dev รัน SQL audit เอง 2026-08-03 — read-only)
+- **persona ครบ 4 แถว verdict = OK** (`demo@acme` / `alex@acme` / `demo@globex` / `dana@globex` — User + TenantMember role=AGENT, active ทั้งคู่) → **persona `secondary` ใช้งานได้จริงบน prod ไม่ต้อง re-seed**
+- **R-1 data audit สะอาด:** contact นอก seed = 0 · ticket นอก seed = 0 · **ApiKey = 0 · WebhookEndpoint = 0 · Attachment = 0** ทั้ง acme และ globex
+- **`ticketCounter` ตรง `MAX(ticketNumber)` พอดี** (acme 1007/1007 · globex 1006/1006) → กับระเบิด re-seed ยังไม่ทำงาน แต่กฎในข้อ 6 ของ project-plan ยังมีผลถ้าจะ re-seed ในอนาคต
+
+### 🟡 Open item — `owner@acme.test` (Dev ตัดสินทีหลัง, **อย่าเพิ่งแตะ**)
+`owner@acme.test` เป็น `TenantMember(OWNER, active)` ของ **acme** สร้างเมื่อ 2026-05-31 · Dev grep แล้ว **ไม่มีในโค้ด/seed เลย** = สร้างมือผ่าน signup
+
+- **ไม่ใช่ช่องโหว่:** visitor เข้าไม่ถึง — demo-login บังคับ `role === "AGENT"` (OWNER → 403) และ persona allowlist ไม่มี email นี้ · `demoPersona` ของมัน = `null`
+- **แต่เป็น standing risk:** เป็นบัญชี OWNER ที่ยังมีสิทธิ์เต็มใน tenant ที่ตอนนี้ **public โดยสมบูรณ์** (ใครก็ login เป็น AGENT ได้) ถ้า password ของมันอ่อน/รั่ว = ได้สิทธิ์ OWNER ของ acme
+- ทางเลือกเมื่อจะตัดสิน: ปล่อยไว้ (ยอมรับ) / ตั้ง `isActive = false` / ลด role เป็น AGENT / ถอด membership ออก — **ทั้งหมดต้องเช็คก่อนว่าไม่มีอะไรผูกกับ member row นี้ (assignee ของ ticket, ผู้เขียน message, AuditLog actor)**
+- 💡 ใช้ประโยชน์ได้ก่อนตัดสินใจ: บัญชีนี้คือ **subject ที่เหมาะที่สุดสำหรับ B-7** (agent ที่ `demoPersona = null` บน demo tenant → ต้องเห็นหน้ายืนยันเสมอ ห้าม auto-login ทับ) โดยไม่ต้องมี tenant จริงบน prod
+
 ### ค้างอยู่ / Open Questions
-- [ ] **Dev: merge → push → deploy → Gate 1 + Gate 2** (ยังไม่ทำทั้งหมด)
+- [x] ~~Gate 1~~ **ผ่านแล้ว** (ดูด้านบน) · [ ] Dev: push → รอ Vercel deploy → **Gate 2 (smoke กอง C + B-7)**
+- [ ] **ตัดสินใจเรื่อง `owner@acme.test`** (open item ด้านบน)
 - [ ] **R-1 cleanup acme/globex** ก่อนเปิดให้คนนอกใช้จริง
 - [ ] Backlog เดิมที่ยังค้าง: smoke presence Phase 35 (จะถูกกลืนโดยกอง C ของเฟสนี้พอดี) · เปิด FeatureFlag `webhooks` ให้ tenant · Backlog Phase 36 (LOW) · seed-demo hardening (`ticketCounter` เป็น `max()`, `settings` merge, `--dry-run`)
 - **Open Q:** R-2 (XFF spoof → rate-limit ไม่จริง) เป็น pre-existing ระดับ project — จะทำเป็นเฟสของตัวเองไหม
