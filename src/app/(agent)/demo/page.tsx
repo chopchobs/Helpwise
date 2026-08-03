@@ -1,134 +1,85 @@
-"use client";
-
 /**
  * หน้า Demo Entry — one-click demo login สำหรับ portfolio demo
  * เข้าถึงได้โดยไม่ต้อง login เพราะ (agent)/layout.tsx เป็น plain wrapper ไม่มี auth gate
  *   (auth gate อยู่ที่ (workspace)/layout.tsx ซึ่งไม่ครอบ route นี้)
  *
- * Flow: visitor ถูกส่งมาที่ /demo บน demo subdomain (full page load) →
- *   on mount auto-POST /api/auth/demo/login (same-origin, มี tenant context) →
- *   server set agent cookie → redirect เข้า /dashboard
+ * Server component: อ่าน agent session จาก cookie เพื่อตัดสินโหมดของ client child
+ *   - ยังไม่มี session → auto-POST /api/auth/demo/login แล้ว redirect (พฤติกรรมเดิม)
+ *   - มี session อยู่แล้ว → หน้ายืนยันก่อน (กัน cookie clobber ทับ session ของ visitor เอง)
  *
- * Redirect strategy: ใช้ window.location.assign (full navigation) ไม่ใช่ router.push
- *   เพราะ workspace layout อ่าน cookie ฝั่ง server — soft nav อาจไม่ re-run server
- *   auth ด้วย cookie ที่เพิ่ง set; full navigation ทำให้ server เห็น cookie ใหม่แน่นอน
+ * ⚠️ ไม่แตะ route auth ใด ๆ — อ่าน session ผ่าน requireAgent() ที่มีอยู่แล้วเท่านั้น
+ * ⚠️ ส่งลง client ได้แค่ persona key + name — ห้ามส่ง credential (DEMO_PASSWORD อยู่ใน
+ *   src/lib/demo.ts ซึ่งเป็น server-only และห้าม import จาก client)
  */
 
-import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { requireAgent } from "@/lib/auth";
+import {
+  DEMO_PERSONAS,
+  isDemoPersonaKey,
+  type DemoPersona,
+  type DemoPersonaKey,
+} from "@/lib/demo-personas";
+import DemoLoginClient from "./DemoLoginClient";
 
-// =============================================================================
-// TYPES
-// =============================================================================
-
-interface DemoLoginResponse {
-  data: {
-    user: { id: string; email: string; name: string | null };
-    role: string;
-  } | null;
-  error: { code: string; message: string } | null;
+interface DemoPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-// =============================================================================
-// COMPONENT
-// =============================================================================
+/** searchParam ซ้ำกันได้ (?next=a&next=b) — ใช้ค่าแรกเสมอ ไม่เดารวมกัน */
+function firstValue(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
 
-export default function DemoEntryPage() {
-  // error = true เมื่อ login ไม่สำเร็จ — ไม่เก็บ error detail (กัน leak)
-  const [hasError, setHasError] = useState(false);
+interface CurrentSession {
+  displayName: string;
+  persona: DemoPersona | null;
+}
 
-  useEffect(() => {
-    // กัน double-run / state update หลัง redirect
-    let cancelled = false;
-
-    async function runDemoLogin() {
-      try {
-        const res = await fetch("/api/auth/demo/login", {
-          method: "POST",
-          // credentials: "include" สำหรับ same-origin cookie (subdomain ถือว่า same-site)
-          credentials: "include",
-        });
-
-        const json = (await res.json()) as DemoLoginResponse;
-
-        if (!res.ok || json.error) {
-          if (!cancelled) setHasError(true);
-          return;
-        }
-
-        // cookie ถูก set โดย server แล้ว — full navigation ให้ server เห็น cookie ใหม่
-        window.location.assign("/dashboard");
-      } catch {
-        if (!cancelled) setHasError(true);
-      }
-    }
-
-    void runDemoLogin();
-
-    return () => {
-      cancelled = true;
+/**
+ * อ่าน session แบบไม่ throw — ไม่มี cookie / verify ไม่ผ่าน / ไม่ใช่ member = ถือว่า "ยังไม่มี session"
+ * (fail-open ไปทางพฤติกรรมเดิม: auto-login ตามปกติ)
+ */
+async function readAgentSessionSafe(): Promise<CurrentSession | null> {
+  try {
+    const session = await requireAgent();
+    return {
+      displayName: session.user.name ?? session.user.email,
+      // ใช้ persona ของ session ปัจจุบันเพื่อรู้ว่าอยู่ demo tenant ไหน (ไม่ต้อง query เพิ่ม)
+      persona: DEMO_PERSONAS.find((p) => p.email === session.user.email) ?? null,
     };
-  }, []);
-
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
-      <div className="flex flex-col items-center text-center">
-        {hasError ? (
-          <DemoError onRetry={() => window.location.reload()} />
-        ) : (
-          <DemoLoading />
-        )}
-      </div>
-    </div>
-  );
+  } catch {
+    return null;
+  }
 }
 
-// =============================================================================
-// SUB-COMPONENTS
-// =============================================================================
+export default async function DemoEntryPage({ searchParams }: DemoPageProps) {
+  const params = await searchParams;
 
-function DemoLoading() {
-  return (
-    <>
-      <Loader2
-        size={32}
-        className="animate-spin text-primary"
-        aria-hidden="true"
-      />
-      <p className="mt-4 text-base font-medium text-foreground">
-        กำลังเข้าสู่ demo workspace…
-      </p>
-      <p className="mt-1 text-sm text-secondary">
-        กรุณารอสักครู่ ระบบกำลังเตรียมข้อมูลตัวอย่างให้คุณ
-      </p>
-    </>
-  );
-}
+  // persona จาก client ได้แค่ "ชื่อ key" ที่ผ่าน strict enum — ค่าอื่น = primary (พฤติกรรมเดิม)
+  const rawPersona = firstValue(params.persona);
+  const persona: DemoPersonaKey = isDemoPersonaKey(rawPersona) ? rawPersona : "primary";
 
-function DemoError({ onRetry }: { onRetry: () => void }) {
+  // ส่งค่าดิบลงไป — validate ที่จุด redirect จริงใน client child (resolveDemoNext)
+  const nextParam = firstValue(params.next);
+
+  const session = await readAgentSessionSafe();
+
+  // ชื่อ persona ปลายทางของ tenant เดียวกับ session ปัจจุบัน (ไม่ข้าม tenant)
+  const targetName =
+    session?.persona
+      ? DEMO_PERSONAS.find(
+          (p) => p.key === persona && p.tenantSlug === session.persona?.tenantSlug
+        )?.name ?? null
+      : null;
+
   return (
-    <>
-      <h1 className="text-xl font-semibold text-foreground">
-        เข้าสู่ demo ไม่สำเร็จ
-      </h1>
-      <p className="mt-2 max-w-sm text-sm text-secondary">
-        ขออภัย ระบบ demo ยังไม่พร้อมในขณะนี้ กรุณาลองอีกครั้ง
-      </p>
-      <div className="mt-5 flex items-center gap-4">
-        <button
-          type="button"
-          onClick={onRetry}
-          className="rounded-lg bg-primary-strong px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-strong-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-        >
-          ลองอีกครั้ง
-        </button>
-        <a
-          href="/login"
-          className="text-sm font-medium text-primary-ink hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-        >
-          ไปหน้า login
-        </a>
-      </div>
-    </>
+    <DemoLoginClient
+      persona={persona}
+      nextParam={nextParam}
+      hasSession={session !== null}
+      currentName={session?.displayName ?? null}
+      targetName={targetName}
+    />
   );
 }

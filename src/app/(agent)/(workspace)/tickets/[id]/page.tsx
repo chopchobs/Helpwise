@@ -37,6 +37,7 @@ import AttachmentList from "@/components/ui/AttachmentList";
 import TagChip from "@/components/ui/TagChip";
 import PresenceBar from "@/components/ui/PresenceBar";
 import CollisionBanner from "@/components/ui/CollisionBanner";
+import DemoPersonaBanner from "@/components/ui/DemoPersonaBanner";
 import { useTicketPresence } from "@/hooks/useTicketPresence";
 import { uploadAttachment } from "@/lib/attachment-upload";
 import {
@@ -61,6 +62,7 @@ import type {
   MemberRole,
   ApiError,
 } from "@/types/ticket";
+import type { DemoPersonaKey } from "@/lib/demo-personas";
 import type {
   CannedResponseDTO,
   CannedResponseListResponse,
@@ -1271,6 +1273,11 @@ export default function AgentTicketDetailPage() {
     memberId: string;
     name: string;
   } | null>(null);
+  // ข้อมูล demo ของ session — ใช้ตัดสินว่าจะชวนเปิด agent คนที่ 2 ไหม (null จนกว่า me โหลดเสร็จ)
+  const [demoContext, setDemoContext] = useState<{
+    demoPersona: DemoPersonaKey | null;
+    tenantSlug: string;
+  } | null>(null);
   const [isMergeDialogOpen, setIsMergeDialogOpen] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
   const [mergeError, setMergeError] = useState<string | null>(null);
@@ -1341,6 +1348,11 @@ export default function AgentTicketDetailPage() {
             tenantId: json.data.tenant.id,
             memberId: json.data.member.id,
             name: json.data.user.name ?? json.data.user.email,
+          });
+          // demoPersona จำแนกฝั่ง server เท่านั้น — client ไม่เทียบ email เอง
+          setDemoContext({
+            demoPersona: json.data.demoPersona,
+            tenantSlug: json.data.tenant.slug,
           });
         }
       } catch {
@@ -1619,6 +1631,15 @@ export default function AgentTicketDetailPage() {
           <div className="mb-4 min-h-[1.5rem]">
             <PresenceBar others={presence.others} typing={presence.typing} />
           </div>
+
+          {/* Demo เท่านั้น: ชวนเปิด agent คนที่ 2 ใน incognito เพื่อให้เห็น presence ด้านบนจริง */}
+          {demoContext && (
+            <DemoPersonaBanner
+              ticketId={ticket.id}
+              demoPersona={demoContext.demoPersona}
+              tenantSlug={demoContext.tenantSlug}
+            />
+          )}
 
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-secondary">
             <span>
