@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import fc from "fast-check";
 import {
   resolveDemoNext,
   resolveDemoEntryMode,
@@ -49,6 +50,75 @@ describe("resolveDemoNext", () => {
   });
 });
 
+// เพิ่มโดย qa-testing (Phase 37 gate) — boundary/property ที่ตารางเดิมยังไม่ครอบ
+describe("resolveDemoNext — boundary เพิ่มเติม", () => {
+  it.each([
+    ["null byte ต่อท้าย", "/tickets/abc\u0000"],
+    ["null byte แทรกกลาง", "/tickets/ab\u0000c"],
+    ["tab ต่อท้าย", "/tickets/abc\t"],
+    ["form feed", "/tickets/abc\f"],
+    ["vertical tab", "/tickets/abc\v"],
+    ["space ต่อท้าย", "/tickets/abc "],
+    ["unicode line separator", "/tickets/abc\u2028"],
+    ["emoji ใน id", "/tickets/abc😀"],
+    ["thai ใน id", "/tickets/ตั๋ว"],
+    ["double slash หลัง /tickets", "/tickets//abc"],
+    ["uppercase path", "/Tickets/abc"],
+    ["จุดใน id", "/tickets/abc.def"],
+    ["dot segment เดี่ยว", "/tickets/."],
+    ["dot-dot", "/tickets/.."],
+    ["semicolon param", "/tickets/abc;jsessionid=1"],
+    ["prefix ที่ดูคล้าย", "/ticketsX/abc"],
+    ["ซ้อน /demo ต่อ", "/tickets/abc/demo"],
+    ["nested path", "/tickets/abc/messages"],
+    ["url-encoded newline", "/tickets/abc%0a"],
+  ])("fallback เมื่อ %s", (_label, raw) => {
+    expect(resolveDemoNext(raw)).toBe(DEMO_NEXT_FALLBACK);
+  });
+
+  it("ผ่าน: id ที่มี - และ _ และตัวพิมพ์ใหญ่", () => {
+    expect(resolveDemoNext("/tickets/A-b_C123")).toBe("/tickets/A-b_C123");
+  });
+
+  it("ผ่าน: id ยาวมาก (ไม่มี length cap โดยตั้งใจ)", () => {
+    const long = `/tickets/${"a".repeat(4096)}`;
+    expect(resolveDemoNext(long)).toBe(long);
+  });
+
+  it("ผ่าน: cuid จริงจาก DB (รูปแบบที่ใช้จริงในระบบ)", () => {
+    expect(resolveDemoNext("/tickets/clx3k9q2v0001abcd1234efgh")).toBe(
+      "/tickets/clx3k9q2v0001abcd1234efgh"
+    );
+  });
+
+  it("property: output เป็น fallback หรือ /tickets/<safe-id> เสมอ (ไม่มีทางเป็น absolute/มี control char)", () => {
+    fc.assert(
+      fc.property(fc.string({ maxLength: 60 }), (raw) => {
+        const out = resolveDemoNext(raw);
+        if (out === DEMO_NEXT_FALLBACK) return true;
+        // ถ้าไม่ fallback ต้องเป็น relative path ของ ticket เท่านั้น
+        return (
+          out === raw &&
+          out.startsWith("/tickets/") &&
+          !out.startsWith("//") &&
+          /^\/tickets\/[A-Za-z0-9_-]+$/.test(out)
+        );
+      }),
+      { numRuns: 500 }
+    );
+  });
+
+  it("property: output ที่ผ่าน resolve แล้ว ต้อง resolve ซ้ำได้ค่าเดิม (idempotent)", () => {
+    fc.assert(
+      fc.property(fc.string({ maxLength: 60 }), (raw) => {
+        const once = resolveDemoNext(raw);
+        return resolveDemoNext(once) === once;
+      }),
+      { numRuns: 300 }
+    );
+  });
+});
+
 describe("buildDemoPersonaUrl", () => {
   it("เป็น absolute URL + persona=secondary + พาไป ticket ใบเดิม", () => {
     expect(buildDemoPersonaUrl("https://acme.gethelpwise.xyz", "ckt123abc")).toBe(
@@ -60,6 +130,25 @@ describe("buildDemoPersonaUrl", () => {
     const url = buildDemoPersonaUrl("https://acme.gethelpwise.xyz", "ckt123abc");
     const nextParam = new URL(url).searchParams.get("next");
     expect(resolveDemoNext(nextParam)).toBe("/tickets/ckt123abc");
+  });
+
+  // เพิ่มโดย qa-testing: ticketId มาจาก DB (cuid) เสมอ แต่ถ้าโดน inject ค่าแปลก
+  // ปลายทางต้อง degrade เป็น /dashboard ไม่ใช่หลุดออกนอก origin
+  it.each([
+    ["path traversal", "../../settings"],
+    ["absolute url", "https://evil.com"],
+    ["protocol relative", "//evil.com"],
+    ["newline", "abc\nx"],
+  ])("ticketId ที่ผิดรูป (%s) → next ที่ได้ต้องไม่ผ่าน validation", (_label, ticketId) => {
+    const url = buildDemoPersonaUrl("https://acme.gethelpwise.xyz", ticketId);
+    const raw = url.slice(url.indexOf("&next=") + "&next=".length);
+    expect(resolveDemoNext(raw)).toBe(DEMO_NEXT_FALLBACK);
+  });
+
+  it("คง origin ที่ส่งเข้ามาเสมอ (ไม่ประกอบ host เอง)", () => {
+    expect(buildDemoPersonaUrl("http://localhost:3000", "t1")).toBe(
+      "http://localhost:3000/demo?persona=secondary&next=/tickets/t1"
+    );
   });
 });
 
@@ -238,5 +327,75 @@ describe("resolveDemoEntryMode", () => {
         nextParam: "//evil.com",
       })
     ).toEqual({ mode: "redirect", destination: DEMO_NEXT_FALLBACK });
+  });
+});
+
+// เพิ่มโดย qa-testing: ตารางพฤติกรรมครบทุกช่อง (2 requested × 3 session-persona × 2 hasSession)
+// = 12 combination — ล็อกไว้ทั้งตารางกันใครแก้ logic แล้วช่องใดช่องหนึ่งเปลี่ยนเงียบ ๆ
+describe("resolveDemoEntryMode — ตารางเต็ม (exhaustive)", () => {
+  const requested = ["primary", "secondary"] as const;
+  const sessions = ["primary", "secondary", null] as const;
+  const hasSessionValues = [true, false] as const;
+
+  function expectedMode(
+    req: (typeof requested)[number],
+    sess: (typeof sessions)[number],
+    hasSession: boolean
+  ): "auto" | "confirm" | "redirect" {
+    if (!hasSession) return "auto";
+    if (sess !== null && sess === req) return "redirect";
+    return "confirm";
+  }
+
+  const cases = requested.flatMap((req) =>
+    sessions.flatMap((sess) =>
+      hasSessionValues.map(
+        (hasSession) => [req, sess, hasSession, expectedMode(req, sess, hasSession)] as const
+      )
+    )
+  );
+
+  it("ครอบทุก combination ที่เป็นไปได้ (12 ช่อง)", () => {
+    expect(cases).toHaveLength(12);
+  });
+
+  it.each(cases)(
+    "requested=%s session=%s hasSession=%s → mode=%s",
+    (req, sess, hasSession, mode) => {
+      expect(
+        resolveDemoEntryMode({
+          requestedPersona: req,
+          sessionPersona: sess,
+          hasSession,
+          nextParam: "/tickets/T1",
+        })
+      ).toEqual({ mode, destination: "/tickets/T1" });
+    }
+  );
+
+  it.each(cases)(
+    "ทุกโหมดต้อง validate next เหมือนกัน (requested=%s session=%s hasSession=%s)",
+    (req, sess, hasSession) => {
+      const decision = resolveDemoEntryMode({
+        requestedPersona: req,
+        sessionPersona: sess,
+        hasSession,
+        nextParam: "https://evil.com/tickets/x",
+      });
+      expect(decision.destination).toBe(DEMO_NEXT_FALLBACK);
+    }
+  );
+
+  it("agent จริง (persona=null) ที่มี session → ไม่มีทางได้ auto/redirect (ห้ามทับ session เงียบ)", () => {
+    for (const req of requested) {
+      expect(
+        resolveDemoEntryMode({
+          requestedPersona: req,
+          sessionPersona: null,
+          hasSession: true,
+          nextParam: null,
+        }).mode
+      ).toBe("confirm");
+    }
   });
 });

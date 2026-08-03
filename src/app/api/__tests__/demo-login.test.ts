@@ -331,6 +331,134 @@ describe("POST /api/auth/demo/login", () => {
     expect(issueAgentTokenMock).not.toHaveBeenCalled();
   });
 
+  // ---- เพิ่มโดย qa-testing (Phase 37 gate) ----
+
+  it("(ณ) cross-tenant: context=globex + persona=primary → demo@globex เท่านั้น (ไม่ใช่ demo@acme)", async () => {
+    prismaMock.tenant.findUnique.mockResolvedValue({ slug: "globex" });
+    mockUsersByEmail([
+      DEMO_USER,
+      ALEX_USER,
+      DANA_USER,
+      {
+        id: "user-demo-globex",
+        email: "demo@globex.helpwise.com",
+        name: "Demo Agent",
+        passwordHash: "$2a$12$hash",
+        isActive: true,
+      },
+    ]);
+
+    const res = await demoLogin(makeReq({ persona: "primary" }));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.user.email).toBe("demo@globex.helpwise.com");
+    expect(prismaMock.user.findUnique).toHaveBeenCalledTimes(1);
+    expect(prismaMock.user.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { email: "demo@globex.helpwise.com" } })
+    );
+    expect(issueAgentTokenMock).toHaveBeenCalledWith("user-demo-globex");
+  });
+
+  it("(ด) ไม่รับ tenantId/email/password จาก client — body ที่แนบมาต้องถูกเมินทั้งหมด", async () => {
+    mockUsersByEmail([DEMO_USER, ALEX_USER, DANA_USER]);
+
+    const res = await demoLogin(
+      makeReq({
+        persona: "secondary",
+        tenantId: "tenant-ของคนอื่น",
+        email: "dana@globex.helpwise.com",
+        password: "อะไรก็ได้",
+        role: "OWNER",
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    // ใช้ tenant จาก context (acme) → ได้ Alex ไม่ใช่ Dana; role มาจาก DB ไม่ใช่ body
+    expect(json.data.user.email).toBe("alex@acme.helpwise.com");
+    expect(json.data.role).toBe("AGENT");
+    expect(getTenantContextMock).toHaveBeenCalled();
+    expect(prismaMock.tenant.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: DEFAULT_TENANT_ID } })
+    );
+  });
+
+  it.each([
+    ["array body", [1, 2, 3]],
+    ["string body", "secondary"],
+    ["number body", 42],
+    ["null body", null],
+    ["boolean body", true],
+  ])("(ต) body ที่ไม่ใช่ JSON object (%s) → fallback เป็น primary", async (_label, body) => {
+    mockUsersByEmail([DEMO_USER, ALEX_USER]);
+
+    const res = await demoLogin(makeReq(body));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.user.email).toBe("demo@acme.helpwise.com");
+    expect(verifyPasswordMock).toHaveBeenCalled();
+  });
+
+  it("(ถ) body เป็น JSON พัง (ไม่ใช่ JSON เลย) → fallback เป็น primary ไม่ throw", async () => {
+    mockUsersByEmail([DEMO_USER, ALEX_USER]);
+
+    const req = new Request("https://acme.helpwise.com/api/auth/demo/login", {
+      method: "POST",
+      body: "{ ไม่ใช่ json",
+      headers: { "content-type": "application/json" },
+    });
+    const res = await demoLogin(req);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.user.email).toBe("demo@acme.helpwise.com");
+  });
+
+  it("(ท) primary ที่ user ไม่มี passwordHash → 503 (ห้าม bypass password ผ่าน hash ว่าง)", async () => {
+    mockUsersByEmail([{ ...DEMO_USER, passwordHash: null } as unknown as typeof DEMO_USER]);
+
+    const res = await demoLogin(makeReq({ persona: "primary" }));
+
+    expect(res.status).toBe(503);
+    expect(verifyPasswordMock).not.toHaveBeenCalled();
+    expect(issueAgentTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("(ธ) secondary: membership query ต้องผ่าน tenantPrisma และกรอง isActive", async () => {
+    mockUsersByEmail([DEMO_USER, ALEX_USER]);
+
+    await demoLogin(makeReq({ persona: "secondary" }));
+
+    expect(fakeDb.tenantMember.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: "user-alex", isActive: true }),
+      })
+    );
+  });
+
+  it("(น) audit.log พังไม่ทำให้ login พัง (soft-fail) — ยังได้ 200 + cookie", async () => {
+    mockUsersByEmail([DEMO_USER, ALEX_USER]);
+    auditLogMock.mockRejectedValue(new Error("audit ล่ม"));
+
+    const res = await demoLogin(makeReq({ persona: "secondary" }));
+
+    expect(res.status).toBe(200);
+    expect(setAgentCookieMock).toHaveBeenCalledWith("jwt-token-xyz");
+  });
+
+  it("(บ) ไม่มี response ไหน leak passwordHash / DEMO_PASSWORD", async () => {
+    mockUsersByEmail([DEMO_USER, ALEX_USER]);
+
+    for (const body of [undefined, { persona: "primary" }, { persona: "secondary" }]) {
+      const res = await demoLogin(makeReq(body));
+      const text = JSON.stringify(await res.json());
+      expect(text).not.toContain("$2a$12$");
+      expect(text).not.toContain("demo-helpwise-2026");
+    }
+  });
+
   it("(ฉ) rate-limit เกิน → 429, ไม่แตะ tenant lookup/login", async () => {
     checkRateLimitMock.mockResolvedValue({ allowed: false, remaining: 0, retryAfterSeconds: 60 });
 

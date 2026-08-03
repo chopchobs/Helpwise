@@ -114,6 +114,66 @@ describe("GET /api/auth/agent/me — demoPersona", () => {
     expect(json.data.demoPersona).toBeNull();
   });
 
+  // ---- เพิ่มโดย qa-testing (Phase 37 gate) ----
+
+  it("(ช) globex: demo@globex → 'primary', dana@globex → 'secondary'", async () => {
+    prismaMock.tenant.findUnique.mockResolvedValue({
+      ...ACME_TENANT,
+      id: "tenant-2",
+      name: "Globex",
+      slug: "globex",
+    });
+
+    requireAgentMock.mockResolvedValue(session("demo@globex.helpwise.com"));
+    expect((await (await getMe()).json()).data.demoPersona).toBe("primary");
+
+    requireAgentMock.mockResolvedValue(session("dana@globex.helpwise.com"));
+    expect((await (await getMe()).json()).data.demoPersona).toBe("secondary");
+  });
+
+  it("(ซ) cross-tenant ทิศกลับ: dana (globex) บน tenant acme → null", async () => {
+    requireAgentMock.mockResolvedValue(session("dana@globex.helpwise.com"));
+
+    const json = await (await getMe()).json();
+    expect(json.data.demoPersona).toBeNull();
+  });
+
+  it.each([
+    ["ตัวพิมพ์ใหญ่", "DEMO@acme.helpwise.com"],
+    ["มีช่องว่างท้าย", "demo@acme.helpwise.com "],
+    ["subdomain ปลอม", "demo@acme.helpwise.com.evil.com"],
+    ["prefix ใกล้เคียง", "xdemo@acme.helpwise.com"],
+  ])(
+    "(ฌ) email ที่ไม่ตรงเป๊ะ (%s) → null (match แบบ exact เท่านั้น)",
+    async (_label, email) => {
+      requireAgentMock.mockResolvedValue(session(email));
+
+      const json = await (await getMe()).json();
+      expect(json.data.demoPersona).toBeNull();
+    }
+  );
+
+  it("(ญ) tenant ไม่พบ → 404 และไม่มี demoPersona ใน payload (พฤติกรรมเดิมคงอยู่)", async () => {
+    prismaMock.tenant.findUnique.mockResolvedValue(null);
+
+    const res = await getMe();
+    const json = await res.json();
+
+    expect(res.status).toBe(404);
+    expect(json.error.code).toBe("TENANT_NOT_FOUND");
+    expect(json.data).toBeNull();
+  });
+
+  it("(ฎ) requireAgent throw (ไม่ได้ login) → ไม่ 200 และไม่คืน demoPersona", async () => {
+    requireAgentMock.mockRejectedValue(new Error("UNAUTHORIZED"));
+
+    const res = await getMe();
+    const json = await res.json();
+
+    expect(res.status).not.toBe(200);
+    expect(json.data).toBeNull();
+  });
+
   it("(ฉ) ไม่ leak email/password ของ persona ตัวอื่น + ไม่มี DB query เพิ่ม", async () => {
     const res = await getMe();
     const body = JSON.stringify(await res.json());
