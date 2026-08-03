@@ -1,5 +1,6 @@
 // ลิงก์ปลายทางของ landing — env override ได้, มี fallback ที่ใช้งานได้จริง (ไม่มี dead "#")
-// acme = demo tenant (hardcode ตรงนี้ ไม่ import จาก src/lib/demo.ts เพราะมี server-only code ห้ามเข้า client bundle)
+// acme = demo tenant (hardcode ตรงนี้ ไม่ import จาก src/lib/demo.ts เพราะไฟล์นั้นมี DEMO_PASSWORD
+// ซึ่งเป็น server-only ห้ามเข้า client bundle — ฝั่ง client ใช้ src/lib/demo-personas.ts แทน)
 const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "gethelpwise.xyz";
 
 export const GITHUB_URL = "https://github.com/chopchobs/Helpwise";

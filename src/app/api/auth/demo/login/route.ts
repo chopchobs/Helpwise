@@ -5,11 +5,23 @@
  *
  * Route นี้อยู่บน tenant subdomain — ต้องมี tenant context
  *
+ * รองรับ 2 persona ต่อ tenant (ให้ visitor เปิด 2 เบราว์เซอร์เห็น real-time presence จริง):
+ *   - "primary"   → login ด้วย DEMO_PASSWORD (พฤติกรรมเดิม)
+ *   - "secondary" → ไม่มี password สาธารณะ: resolve identity จาก allowlist ฝั่ง server
+ *     (DEMO_PERSONAS) แล้วข้าม verifyPassword เท่านั้น — ด่านอื่นครบเหมือนเดิมทุกด่าน
+ *   body: { persona?: "primary" | "secondary" } — ไม่ส่ง/body ว่าง = "primary" (backward-compat)
+ *
  * Security / กันการ abuse:
  *   - ⚠️ ทำงาน "เฉพาะ demo tenant" (slug ∈ DEMO_TENANT_SLUGS) เท่านั้น — บน tenant จริง = 404
  *   - ⚠️ Defense-in-depth: ยืนยัน member.role === "AGENT" เสมอ — creds เป็น public
  *     ห้ามให้ session ที่ role สูงกว่า AGENT (OWNER/ADMIN) หลุดออกไป แม้ seed ตั้ง AGENT แล้ว
- *   - ไม่รับ tenantId / credentials จาก client — tenant จาก context, creds จาก src/lib/demo.ts
+ *   - ⚠️ ทำไม secondary ข้าม password ถึงยังปลอดภัย: DEMO_PASSWORD เป็น public อยู่แล้ว
+ *     (อยู่ใน repo) → password ไม่ใช่ด่านจริงตั้งแต่แรก. ด่านจริงคือ demo-slug guard +
+ *     membership active + role === AGENT. การ "ไม่" ใส่ hash ของ password สาธารณะให้ secondary
+ *     กลับแคบกว่าเดิม เพราะ secondary login ผ่าน /api/auth/agent/login ปกติไม่ได้
+ *   - persona มาจาก client ได้แค่ "ชื่อ key" ที่ validate เป็น strict enum แล้ว (ไม่ใช่ index)
+ *     และต้อง resolve คู่กับ tenantSlug ของ context เสมอ — ห้ามข้าม tenant
+ *   - ไม่รับ tenantId / credentials / email จาก client — tenant จาก context, identity จาก src/lib/demo.ts
  *   - Rate limit ตาม IP (fail-open เหมือน agent-login — login ไม่ใช่ cost-bearing)
  *   - reuse login logic เดียวกับ /api/auth/agent/login (verifyPassword, membership, token, cookie)
  */
@@ -21,10 +33,29 @@ import { verifyPassword } from "@/lib/password";
 import { issueAgentToken, setAgentCookie, toAuthErrorResponse } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { checkRateLimit, getClientIp, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
-import { DEMO_AGENTS, DEMO_PASSWORD, DEMO_TENANT_SLUGS } from "@/lib/demo";
+import {
+  DEMO_PASSWORD,
+  DEMO_PERSONAS,
+  DEMO_TENANT_SLUGS,
+  isDemoPersonaKey,
+  type DemoPersonaKey,
+} from "@/lib/demo";
 
 // error เดียวสำหรับทุกกรณีที่ login ไม่สำเร็จ (เช่น ยังไม่ seed) — ไม่ leak รายละเอียด
 const DEMO_LOGIN_ERROR = "ไม่สามารถเข้าสู่ระบบ demo ได้ในขณะนี้";
+
+// อ่าน field `persona` จาก body — body ว่าง/ไม่ใช่ JSON object = undefined (= primary)
+async function readPersonaField(request: Request): Promise<unknown> {
+  try {
+    const body: unknown = await request.json();
+    if (body !== null && typeof body === "object" && !Array.isArray(body)) {
+      return (body as Record<string, unknown>).persona;
+    }
+  } catch {
+    // body ว่าง/ไม่ใช่ JSON → ใช้ค่า default
+  }
+  return undefined;
+}
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
@@ -57,42 +88,71 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    // 4. หา demo agent creds ของ tenant นี้ (จาก single source of truth — ไม่รับจาก client)
-    const demoAgent = DEMO_AGENTS.find((a) => a.tenantSlug === tenant.slug);
-    if (!demoAgent) {
-      console.warn("[demo:login] no demo agent configured for slug", { slug: tenant.slug });
+    // 4. validate persona จาก client เป็น strict enum (หลัง demo guard — บน tenant จริงยังเป็น 404 เสมอ)
+    const rawPersona = await readPersonaField(request);
+    let personaKey: DemoPersonaKey = "primary";
+    if (rawPersona !== undefined) {
+      if (!isDemoPersonaKey(rawPersona)) {
+        return NextResponse.json(
+          { data: null, error: { code: "INVALID_PERSONA", message: "persona ไม่ถูกต้อง" } },
+          { status: 400 }
+        );
+      }
+      personaKey = rawPersona;
+    }
+
+    // 5. resolve persona ของ tenant นี้ (จาก allowlist ฝั่ง server) — ผูกกับ tenantSlug เสมอ
+    //    ห้าม resolve จาก key อย่างเดียว มิฉะนั้น persona ของ tenant อื่นจะหลุดข้าม tenant
+    const persona = DEMO_PERSONAS.find(
+      (p) => p.key === personaKey && p.tenantSlug === tenant.slug
+    );
+    if (!persona) {
+      console.warn("[demo:login] no demo persona configured", { slug: tenant.slug, personaKey });
       return NextResponse.json(
         { data: null, error: { code: "DEMO_LOGIN_FAILED", message: DEMO_LOGIN_ERROR } },
         { status: 503 }
       );
     }
 
-    // 5. หา User ของ demo agent (global model — ใช้ prisma ไม่ใช่ tenantPrisma)
+    // 6. หา User ของ persona (global model — ใช้ prisma ไม่ใช่ tenantPrisma)
     const user = await prisma.user.findUnique({
-      where: { email: demoAgent.email },
+      where: { email: persona.email },
       select: { id: true, email: true, name: true, passwordHash: true, isActive: true },
     });
 
-    // ยังไม่ seed / ไม่มี passwordHash → ไม่ leak (503 — config/seed ฝั่ง server ไม่พร้อม)
-    if (!user || !user.passwordHash) {
-      console.warn("[demo:login] fail:no_user_or_no_password_hash", { tenantId: ctx.tenantId });
+    // ยังไม่ seed → ไม่ leak (503 — config/seed ฝั่ง server ไม่พร้อม)
+    if (!user) {
+      console.warn("[demo:login] fail:no_user", { tenantId: ctx.tenantId, personaKey });
       return NextResponse.json(
         { data: null, error: { code: "DEMO_LOGIN_FAILED", message: DEMO_LOGIN_ERROR } },
         { status: 503 }
       );
     }
 
-    // 6. ตรวจ password (จาก DEMO_PASSWORD — public-by-design) + User.isActive
-    const passwordValid = await verifyPassword(DEMO_PASSWORD, user.passwordHash);
-    if (!passwordValid || !user.isActive) {
-      console.warn("[demo:login] fail:invalid_password_or_inactive", { tenantId: ctx.tenantId, userId: user.id });
+    // 7. persona แบบ password → ตรวจ DEMO_PASSWORD (public-by-design)
+    //    persona แบบ "persona" → ข้ามเฉพาะขั้นนี้ (ไม่มี password สาธารณะ ดู header comment)
+    if (persona.auth === "password") {
+      const passwordValid =
+        !!user.passwordHash && (await verifyPassword(DEMO_PASSWORD, user.passwordHash));
+      if (!passwordValid) {
+        console.warn("[demo:login] fail:invalid_password", { tenantId: ctx.tenantId, userId: user.id });
+        return NextResponse.json(
+          { data: null, error: { code: "DEMO_LOGIN_FAILED", message: DEMO_LOGIN_ERROR } },
+          { status: 503 }
+        );
+      }
+    }
+
+    // 8. User.isActive (บังคับทุก persona)
+    if (!user.isActive) {
+      console.warn("[demo:login] fail:inactive_user", { tenantId: ctx.tenantId, userId: user.id });
       return NextResponse.json(
         { data: null, error: { code: "DEMO_LOGIN_FAILED", message: DEMO_LOGIN_ERROR } },
         { status: 503 }
       );
     }
 
-    // 7. ตรวจ membership ของ tenant นี้ (tenantPrisma inject tenantId อัตโนมัติ — tenant scope)
+    // 9. ตรวจ membership ของ tenant นี้ (tenantPrisma inject tenantId อัตโนมัติ — tenant scope)
     const db = tenantPrisma(ctx.tenantId);
     const member = await db.tenantMember.findFirst({
       where: { userId: user.id, isActive: true },
@@ -107,7 +167,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    // 8. ⚠️ Defense-in-depth: ยืนยัน role === "AGENT" เท่านั้น — creds เป็น public
+    // 10. ⚠️ Defense-in-depth: ยืนยัน role === "AGENT" เท่านั้น — creds เป็น public
     //    ถ้า seed/DB ผิดพลาดเป็น role สูงกว่า → ปฏิเสธ ไม่ออก session ที่ privilege เกิน
     if (member.role !== "AGENT") {
       console.warn("[demo:login] fail:role_not_agent", { tenantId: ctx.tenantId, userId: user.id, role: member.role });
@@ -117,11 +177,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    // 9. ออก JWT + set cookie (เหมือน agent-login)
+    // 11. ออก JWT + set cookie (เหมือน agent-login)
     const token = await issueAgentToken(user.id);
     await setAgentCookie(token);
 
-    // 10. Audit log (soft-fail — ไม่ block response; ห้าม log password/token)
+    // 12. Audit log (soft-fail — ไม่ block response; ห้าม log password/token)
     try {
       await audit.log({
         tenantId: ctx.tenantId,
@@ -129,13 +189,13 @@ export async function POST(request: Request): Promise<NextResponse> {
         targetType: "user",
         targetId: user.id,
         action: "agent.login",
-        metadata: { demo: true, memberId: member.id, role: member.role },
+        metadata: { demo: true, persona: persona.key, memberId: member.id, role: member.role },
       });
     } catch (auditErr) {
       console.error("[demo:login] audit.log failed:", auditErr instanceof Error ? auditErr.message : String(auditErr));
     }
 
-    // 11. Return user info + role (ไม่ return passwordHash หรือ sensitive fields)
+    // 13. Return user info + role (ไม่ return passwordHash หรือ sensitive fields)
     return NextResponse.json(
       {
         data: {

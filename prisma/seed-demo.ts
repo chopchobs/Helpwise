@@ -28,7 +28,7 @@ import {
 import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
 // credentials เป็น single source of truth — import แบบ relative (tsx resolve alias @/ ไม่ได้)
-import { DEMO_AGENTS, DEMO_PASSWORD } from "../src/lib/demo";
+import { DEMO_AGENTS, DEMO_PASSWORD, DEMO_PERSONAS } from "../src/lib/demo";
 
 // cost factor 12 — ต้องตรงกับ src/lib/password.ts (BCRYPT_COST_FACTOR)
 // hash จาก plaintext เสมอ (ห้าม hardcode hash) เพื่อให้ demo-login (ใช้ plaintext เดียวกัน) verify ผ่าน
@@ -97,9 +97,7 @@ interface DemoTenantDef {
   slug: string;
   name: string;
   settings: Prisma.InputJsonValue;
-  // อีเมล demo agent คนที่ 2 (assignee variety) — agent หลักมาจาก DEMO_AGENTS
-  agent2Email: string;
-  agent2Name: string;
+  // agent ทั้ง 2 คนมาจาก DEMO_PERSONAS (single source of truth) — ไม่นิยามซ้ำที่นี่
   tags: DemoTagDef[];
   contacts: DemoContactDef[];
   tickets: DemoTicketDef[];
@@ -128,8 +126,6 @@ const TENANTS: DemoTenantDef[] = [
         accentColor: "#C4652A",
       },
     },
-    agent2Email: "alex@acme.helpwise.com",
-    agent2Name: "Alex Rivera",
     tags: [
       { key: "billing", name: "billing", color: "AMBER" },
       { key: "bug", name: "bug", color: "SIENNA" },
@@ -378,8 +374,6 @@ const TENANTS: DemoTenantDef[] = [
       businessHours: BUSINESS_HOURS,
       // globex ใช้ default branding (ไม่ตั้ง logo/accent custom)
     },
-    agent2Email: "dana@globex.helpwise.com",
-    agent2Name: "Dana Wu",
     tags: [
       { key: "billing", name: "billing", color: "AMBER" },
       { key: "bug", name: "bug", color: "SIENNA" },
@@ -612,6 +606,14 @@ async function main(): Promise<void> {
         throw new Error(`DEMO_AGENTS ไม่มี entry สำหรับ slug "${t.slug}"`);
       }
 
+      // map slug → agent คนที่ 2 (persona "secondary" — จาก source เดียวกับ demo-login route)
+      const agent2 = DEMO_PERSONAS.find(
+        (p) => p.key === "secondary" && p.tenantSlug === t.slug
+      );
+      if (!agent2) {
+        throw new Error(`DEMO_PERSONAS ไม่มี persona "secondary" สำหรับ slug "${t.slug}"`);
+      }
+
       // ---- Tenant ----
       const tenant = await db.tenant.upsert({
         where: { slug: t.slug },
@@ -678,13 +680,14 @@ async function main(): Promise<void> {
         },
       });
 
-      // ---- Agent คนที่ 2 (assignee variety) — ไม่ใช่ demo-login (password สุ่ม) ----
+      // ---- Agent คนที่ 2 (assignee variety + persona "secondary" ของ demo-login) ----
+      //    login ผ่าน persona branch เท่านั้น (ไม่มี password สาธารณะ) → hash สุ่มเหมือนเดิม
       const agent2User = await db.user.upsert({
-        where: { email: t.agent2Email },
-        update: { name: t.agent2Name, isActive: true },
+        where: { email: agent2.email },
+        update: { name: agent2.name, isActive: true },
         create: {
-          email: t.agent2Email,
-          name: t.agent2Name,
+          email: agent2.email,
+          name: agent2.name,
           // ไม่ใช่ login account สาธารณะ → hash password สุ่ม (ไม่มีใครรู้ plaintext)
           passwordHash: await bcrypt.hash(`${t.slug}-agent2-${Date.now()}`, BCRYPT_COST_FACTOR),
           isActive: true,
@@ -700,7 +703,7 @@ async function main(): Promise<void> {
           isActive: true,
         },
       });
-      console.log(`  [ok] Agents (demo=${demoAgent.email}, agent2=${t.agent2Email})`);
+      console.log(`  [ok] Agents (demo=${demoAgent.email}, agent2=${agent2.email})`);
 
       // map "agent"/"agent2" → memberId
       const memberByKey: Record<"agent" | "agent2", string> = {
