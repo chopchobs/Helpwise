@@ -8,12 +8,19 @@
  *     (PK คือ id) — แต่ tenantId ที่ใช้ query มาจาก middleware context ที่ verify แล้ว ปลอดภัย
  *
  * Audience: requireAgent() — เฉพาะ agent ที่เป็นสมาชิก tenant นี้เท่านั้น
+ *
+ * demoPersona: บอกว่า session นี้เป็น demo persona ตัวไหน ("primary"/"secondary")
+ *   - จำแนกฝั่ง server จาก DEMO_PERSONAS (source เดียวกับ /api/auth/demo/login)
+ *   - match ด้วย email ของ session + slug ของ tenant context คู่กันเสมอ (ห้ามข้าม tenant)
+ *   - tenant จริง / user ที่ไม่ใช่ persona → null (ไม่ throw, ไม่ 403)
+ *   - ไม่มี query DB เพิ่ม — ใช้ข้อมูลที่ query อยู่แล้ว (route นี้ถูกเรียกทุกครั้งที่ mount)
  */
 
 import { NextResponse } from "next/server";
 import { requireAgent, toAuthErrorResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { parseBranding } from "@/lib/branding";
+import { DEMO_PERSONAS, type DemoPersonaKey } from "@/lib/demo-personas";
 import type { MemberRole } from "@prisma/client";
 
 // =============================================================================
@@ -45,6 +52,8 @@ interface AgentMeData {
   user: AgentMeUser;
   member: AgentMeMember;
   tenant: AgentMeTenant;
+  // demo persona ของ session นี้ (null = ไม่ใช่ demo tenant / ไม่ใช่ persona)
+  demoPersona: DemoPersonaKey | null;
 }
 
 // =============================================================================
@@ -86,7 +95,13 @@ export async function GET(): Promise<NextResponse> {
     // 3. Parse + validate branding จาก settings Json ผ่าน shared helper (https-only, hex-only)
     const { logoUrl, accentColor } = parseBranding(tenant.settings);
 
-    // 4. Compose response — เลือกเฉพาะ field ที่ nav shell ต้องการ
+    // 4. จำแนก demo persona ฝั่ง server — จับคู่ email ของ session กับ slug ของ tenant นี้
+    //    (ห้าม match email อย่างเดียว มิฉะนั้น persona ของ tenant อื่นจะถูกนับข้าม tenant)
+    const demoPersona =
+      DEMO_PERSONAS.find((p) => p.tenantSlug === tenant.slug && p.email === user.email)?.key ??
+      null;
+
+    // 5. Compose response — เลือกเฉพาะ field ที่ nav shell ต้องการ
     //    ไม่ return passwordHash, isActive, createdAt หรือ field sensitive อื่น ๆ
     const data: AgentMeData = {
       user: {
@@ -107,6 +122,8 @@ export async function GET(): Promise<NextResponse> {
         logoUrl,
         accentColor,
       },
+      // คืนแค่ key — ห้าม expose email/password ของ persona
+      demoPersona,
     };
 
     return NextResponse.json({ data, error: null }, { status: 200 });

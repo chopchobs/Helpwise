@@ -7,6 +7,8 @@ import type { CsatResponseDTO, PortalCsatState } from "@/types/csat";
 import type { AttachmentDTO } from "@/types/attachment";
 // TagDTO เป็น agent-only — ห้าม import ใช้ในส่วน portal types
 import type { TagDTO } from "@/types/tag";
+// type-only import — ไม่ลาก runtime value/DEMO_PASSWORD เข้า client bundle
+import type { DemoPersonaKey } from "@/lib/demo-personas";
 
 // =============================================================================
 // ENUMS (string union เพื่อให้ใช้กับ Tailwind arbitrary values ง่าย)
@@ -349,6 +351,8 @@ export interface MeResponse {
     user: SessionUser;
     member: SessionMember;
     tenant: SessionTenant;
+    /** demo persona ของ session นี้ (จำแนกฝั่ง server) — null = ไม่ใช่ demo tenant/persona */
+    demoPersona: DemoPersonaKey | null;
   } | null;
   error: ApiError | null;
 }
