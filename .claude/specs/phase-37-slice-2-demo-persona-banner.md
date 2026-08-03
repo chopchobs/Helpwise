@@ -21,7 +21,11 @@ Flow ที่ Dev เลือก: `/demo` **ยัง auto-login เป็น 
 2. **ห้ามเป็นลิงก์กดได้ธรรมดา** → เป็น **copy link** + ข้อความบอกให้เปิดใน **incognito / อีกเบราว์เซอร์**
    เหตุผล: กดในเบราว์เซอร์เดิม = cookie ทับ session ตัวเอง → เห็น presence ไม่ได้ (ดู C)
 3. **ลิงก์ที่ copy ต้องพาไปถึง ticket ใบเดิม** → `/demo?persona=secondary&next=/tickets/<id>` (ดู B)
+   ⚠️ **URL ที่ copy ต้องเป็น absolute** ถึงจะ paste ใส่ incognito ได้ = `window.location.origin` + `/demo?persona=secondary&next=/tickets/<id>`
+   **`origin` มาจากเบราว์เซอร์เท่านั้น ห้ามประกอบจาก input/env/searchParams** · กฎ "relative เท่านั้น" ใน § B บังคับกับ **ค่าของ param `next`** ไม่ใช่กับ URL ที่ copy
 4. **dismissible + จำว่าปิดแล้ว** (localStorage)
+   - key ต้องผูกกับ tenant (เช่น `helpwise:demo-persona-banner-dismissed:<tenantSlug>`) ไม่ใช่ key กลางตัวเดียว
+   - localStorage อาจ throw (private mode/quota) → **ต้อง try/catch** ถ้าอ่าน/เขียนไม่ได้ให้ถือว่า "ยังไม่ dismiss" (banner แสดงตามปกติ) ห้ามพังทั้งหน้า
 5. **ห้าม render ฝั่ง portal** — agent-only เหมือน `PresenceBar`
    (ตำแหน่งใน `(agent)/(workspace)/` แยกจาก `(portal)/` อยู่แล้ว — ห้ามสร้างทางที่ทำให้หลุดไป portal)
 
@@ -30,6 +34,15 @@ Flow ที่ Dev เลือก: `/demo` **ยัง auto-login เป็น 
 - render เฉพาะบน demo tenant (`DEMO_TENANT_SLUGS`) เท่านั้น
 - ใช้ palette token เท่านั้น (`bg-surface`/`text-secondary`/`text-primary-ink`/…) **ห้าม hardcode hex** · a11y ครบ (ปุ่ม copy มี `aria-label`, สถานะ "คัดลอกแล้ว" ต้องประกาศให้ screen reader)
 
+### A-bis. ปุ่ม copy ต้องมี fallback (บังคับ — Dev เพิ่ม)
+
+`navigator.clipboard` **ต้องการ secure context และ user ปฏิเสธได้** ถ้า copy fail เงียบ visitor จะไม่ได้อะไรเลย
+แล้วสรุปว่าฟีเจอร์พัง — ซึ่งเป็น failure mode เดียวกับที่ทั้งเฟสนี้พยายามปิด
+
+- **แสดง URL เป็น text ที่ select ได้ควบคู่เสมอ** (ทางที่ดีที่สุด) หรืออย่างน้อยแสดงเมื่อ copy fail
+- ต้อง**ประกาศสถานะให้ screen reader** ทั้งกรณีสำเร็จและล้มเหลว (live region)
+- `navigator.clipboard` อาจ **undefined** (ไม่ใช่แค่ reject) → ต้องเช็คก่อนเรียก ห้าม throw หลุด
+
 ## B. `next` param — open-redirect hardening (บังคับ)
 
 validate ที่จุดเดียวกับที่ redirect จริง:
@@ -37,6 +50,8 @@ validate ที่จุดเดียวกับที่ redirect จริ�
 - ต้อง match `/tickets/<id>` เท่านั้น
 - reject: `//…`, `http://`, `https://`, `\`, อะไรก็ตามที่มี host
 - **ไม่ผ่าน → fallback `/dashboard` เงียบ ๆ ไม่ต้อง error**
+- validate จาก **string ดิบ** ที่รับมา (ห้าม normalize/decode ก่อนตรวจแล้วค่อยใช้ค่าอื่น — ตรวจค่าไหนต้องใช้ค่านั้น)
+- แยก logic นี้เป็น **pure function** (เช่น `resolveDemoNext(raw: string | null): string`) เพื่อ unit-test ได้ตรง ๆ — ดู § D
 
 > **Bug class เดียวกับ Story 1** (`src/lib/landing-links.ts:2` / `src/lib/demo-url.ts`): ปุ่ม "Try live demo" เคย hardcode
 > `https://acme.{ROOT_DOMAIN}/demo` ทุก host → visitor บน `globex.…` โดนส่งเข้า workspace ของ acme
@@ -51,16 +66,28 @@ validate ที่จุดเดียวกับที่ redirect จริ�
 - forward `persona` + `next` จาก searchParams ลงไปที่ POST body / ปลายทาง redirect
 - ⛔ **ห้ามแตะ route auth เด็ดขาด** — auth path ต้องมี branch เท่าเดิม เพื่อให้ขอบเขต security review แคบตามเดิม
 - ⚠️ `page.tsx` วันนี้เป็น `"use client"` ทั้งไฟล์ + POST โดยไม่มี body — ต้องแตกเป็น server page + client child
+- ⚠️ **วิธีอ่าน session ฝั่ง server: ใช้ helper ที่มีอยู่แล้วใน `src/lib/auth.ts` เท่านั้น** — ห้ามเขียน verify JWT / อ่าน cookie เอง
+  ต้องเป็นแบบ **ไม่ throw เมื่อไม่มี session** (ถ้ามีแต่ตัวที่ throw ให้ห่อ try/catch ที่ page ไม่ใช่ไปแก้ `lib/auth.ts` ซึ่งอยู่นอก scope)
+  ถ้า verify ไม่ผ่าน/ไม่มี cookie → ถือว่า "ยังไม่มี session" → auto-POST ตามปกติ (fail-open ไปทางพฤติกรรมเดิม)
 - ⚠️ **`DEMO_PASSWORD` ห้ามติด client bundle** — server component ส่งลง client child ได้แค่ `key` + `name`
   (`src/lib/landing-links.ts:2` เคยเขียนว่า demo.ts มี server-only code ซึ่ง stale ไปแล้ว — Phase 37 ทำให้กลับมามีความหมายอีกแบบ: demo.ts มี `DEMO_PASSWORD`. อัปเดต comment บรรทัดนั้นให้ตรงความจริงใหม่ — นี่คือการแก้ที่ถูกขอ ไม่ใช่ drive-by)
 
 ## D. Tests
 
-- `next` param: valid `/tickets/<id>` ผ่าน · `//evil.com`, `http://evil.com`, `https://evil.com`, `\\evil.com`,
-  `/tickets/<id>/../../settings`, path อื่น, ค่าว่าง → fallback `/dashboard` (รวมชุดเดียวกับ test "param ประหลาด")
-- banner: ไม่ render เมื่อ (ไม่ใช่ demo tenant / persona ปัจจุบัน = secondary / เคย dismiss แล้ว)
-- banner: ลิงก์ที่ copy มี ticket id ใบเดิม
+**บังคับ (ไม่มีข้อแก้ตัว — เป็น pure function):**
+- `resolveDemoNext()`: valid `/tickets/<id>` ผ่าน · `//evil.com`, `http://evil.com`, `https://evil.com`, `\\evil.com`,
+  `/\evil.com`, `/tickets/<id>/../../settings`, `/settings/api-keys`, `""`, `null`, ค่าที่มี `@`/`%2F`/newline
+  → fallback `/dashboard` (ชุดเดียวกับ test "param ประหลาด")
+
+**หมายเหตุ (orchestrator ตรวจให้แล้ว 2026-08-03):** repo นี้ **ไม่มี `@testing-library/react` และไม่มีไฟล์ `*.test.tsx` เลย**
+→ ให้ไปทางเส้น "ไม่มี infra" ด้านล่างได้เลย เคสต่อไปนี้เป็น manual/optional ไม่ต้องฝืนสร้าง infra ใหม่:
+- banner: ไม่ render เมื่อ (`demoPersona !== "primary"` / ไม่ใช่ demo tenant / เคย dismiss แล้ว)
+- banner: URL ที่ copy มี ticket id ใบเดิม + เป็น absolute
+- banner: `navigator.clipboard` undefined หรือ reject → ยังเห็น URL เป็น text และมีการประกาศสถานะ
 - `/demo` ที่มี session อยู่แล้ว → เห็นหน้ายืนยัน ไม่ auto-POST
+
+**ถ้าไม่มี infra:** ห้ามติดตั้ง dependency ใหม่เอง · ห้ามข้ามเงียบ ๆ — ให้ดึง logic ที่ทดสอบได้ (validate `next`, ตัดสินใจ
+show/hide banner, ประกอบ URL) ออกมาเป็น pure function แล้ว unit-test ให้ครบ **แล้วรายงานกลับว่าเคสไหนเหลือเป็น manual**
 
 ## E. File scope (frontend)
 
@@ -79,7 +106,10 @@ banner อ่านจาก session ไม่ต้องเทียบ email 
 กฎของ (B): derive จาก `DEMO_PERSONAS` ตัวเดียวกับ slice 1 (ห้ามมี list ที่สอง) · tenant ไม่ใช่ demo → `null`
 (ไม่ throw ไม่ 403) · ห้าม return email/password · **additive field เท่านั้น response shape เดิมห้ามเปลี่ยน**
 
-> frontend เริ่ม slice 2 ได้เมื่อ slice 1b merge แล้วเท่านั้น
+> ✅ **slice 1b เสร็จแล้ว** — commit `230af13` บน branch เดียวกัน (`feature/phase-37-demo-personas`)
+> `json.data.demoPersona` ใช้ได้ทันที ไม่ต้องรอ merge อะไรทั้งนั้น
+> `"primary"` → แสดง banner · `"secondary"` → ห้ามแสดง · `null` (ไม่ใช่ demo tenant/persona) → ห้ามแสดง
+> type อยู่ที่ `MeResponse["data"].demoPersona` ใน `src/types/ticket.ts` แล้ว
 
 ### (เก็บไว้เป็นบันทึก) ทางเลือกที่ไม่ได้เลือก
 
