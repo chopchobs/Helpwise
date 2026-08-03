@@ -81,4 +81,9 @@
 3. **Stray duplicate files (iCloud)** — เป็นปัญหาเป็นระยะ ทำ build พัง; ลบทีละไฟล์ (`rm <file>` ไม่ใช่ `rm -rf`) เมื่อพบ
 4. **Phase 28 deploy = เสร็จแล้วตอน launch** (Phase 31-33): migration `20260619000000_add_notification` + `20260619010000_add_sla_notification` apply แล้ว · QStash env provision + cron ยิง `/api/jobs/sla-sweep` แล้ว · `SLA_SWEEP_SECRET` ถอดออกครบ. deferred hardening ที่ยังเหลือ → memory `phase28-deferred-hardening`
 5. **Email = Postmark scaffold** (`src/lib/email.ts` fetch-based, ไม่มี SDK dep; SendGrid = TODO) — wire จริง + verify provider key ก่อนเปิด outbound production จริงจัง
-6. นี่คือ plan/handoff ครั้งแรกของ project — ก่อนหน้านี้ไม่มี `project-plan.md`
+6. 🔴 **`prisma/seed-demo.ts` re-seed บน prod = อันตราย ต้องอ่านก่อนรัน** (วิเคราะห์ 2026-08-03, ยังไม่แก้ = backlog)
+   - **`ticketCounter` hard-set (`l.868-871`)**: `data: { ticketCounter: maxTicketNumber }` (acme 1007 / globex 1006) ไม่ใช่ `max()` → ถ้า prod มี ticket เลขเกินนั้น counter **ถอยหลัง** → ชน unique `(tenantId, ticketNumber)` → **สร้าง ticket ใหม่ไม่ได้ทั้ง tenant** จนแก้มือ
+   - `Tenant.settings` ถูกทับทั้งก้อน (branding จาก UI หาย) · `Subscription` ถูกทับ (status/price/period reset จาก now — ทับ Stripe sync)
+   - ไม่มี dry-run flag · ไม่มี `delete` (upsert ล้วน จึงไม่ลบ junk ให้)
+   - **Fix ที่ควรทำ (backlog):** เปลี่ยนเป็น `ticketCounter: Math.max(existing, maxTicketNumber)` · `settings` merge แทน replace หรือ update เฉพาะตอน create · เพิ่ม `--dry-run` flag. รายละเอียดเต็ม → memory `seed-demo-idempotency-acme-cruft`
+7. นี่คือ plan/handoff ครั้งแรกของ project — ก่อนหน้านี้ไม่มี `project-plan.md`
