@@ -74,20 +74,18 @@ vi.mock("@/lib/rate-limit", () => ({
     ),
 }));
 
-// ใช้ค่าจริงจาก src/lib/demo (single source of truth — acme/globex)
-vi.mock("@/lib/demo", () => ({
-  DEMO_TENANT_SLUGS: ["acme", "globex"],
-  DEMO_PASSWORD: "demo-helpwise-2026",
-  DEMO_AGENTS: [
-    { tenantSlug: "acme", email: "demo@acme.helpwise.com", password: "demo-helpwise-2026", name: "Demo Agent" },
-    { tenantSlug: "globex", email: "demo@globex.helpwise.com", password: "demo-helpwise-2026", name: "Demo Agent" },
-  ],
-}));
+// ไม่ mock @/lib/demo — ใช้ค่าจริงจาก single source of truth (persona acme/globex)
 
 import { POST as demoLogin } from "@/app/api/auth/demo/login/route";
 
-function makeReq() {
-  return new Request("https://acme.helpwise.com/api/auth/demo/login", { method: "POST" });
+// body = undefined → POST โดยไม่มี body เลย (เคสเดิมของ demo page — ต้องเป็น primary)
+function makeReq(body?: unknown) {
+  return new Request("https://acme.helpwise.com/api/auth/demo/login", {
+    method: "POST",
+    ...(body === undefined
+      ? {}
+      : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
+  });
 }
 
 const DEMO_USER = {
@@ -97,6 +95,29 @@ const DEMO_USER = {
   passwordHash: "$2a$12$hash",
   isActive: true,
 };
+
+// persona secondary ของแต่ละ tenant (ค่าตรงกับ src/lib/demo-personas.ts)
+const ALEX_USER = {
+  id: "user-alex",
+  email: "alex@acme.helpwise.com",
+  name: "Alex Rivera",
+  passwordHash: "$2a$12$random-nobody-knows",
+  isActive: true,
+};
+const DANA_USER = {
+  id: "user-dana",
+  email: "dana@globex.helpwise.com",
+  name: "Dana Wu",
+  passwordHash: "$2a$12$random-nobody-knows",
+  isActive: true,
+};
+
+// จำลอง DB: หา User ตาม email (persona resolve → email → user)
+function mockUsersByEmail(users: Array<typeof DEMO_USER>) {
+  prismaMock.user.findUnique.mockImplementation(
+    (args: { where: { email: string } }) => users.find((u) => u.email === args.where.email) ?? null
+  );
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -167,7 +188,7 @@ describe("POST /api/auth/demo/login", () => {
       expect.objectContaining({
         action: "agent.login",
         tenantId: DEFAULT_TENANT_ID,
-        metadata: expect.objectContaining({ demo: true, role: "AGENT" }),
+        metadata: expect.objectContaining({ demo: true, persona: "primary", role: "AGENT" }),
       })
     );
     const auditArg = JSON.stringify(auditLogMock.mock.calls[0][0]);
@@ -190,6 +211,122 @@ describe("POST /api/auth/demo/login", () => {
     prismaMock.user.findUnique.mockResolvedValue(null);
 
     const res = await demoLogin(makeReq());
+    expect(res.status).toBe(503);
+    expect(issueAgentTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("(ช) body ว่าง {} (ไม่ส่ง persona) → login เป็น primary", async () => {
+    mockUsersByEmail([DEMO_USER, ALEX_USER]);
+
+    const res = await demoLogin(makeReq({}));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.user.email).toBe("demo@acme.helpwise.com");
+    expect(verifyPasswordMock).toHaveBeenCalled();
+  });
+
+  it("(ซ) persona=secondary บน acme → 200 เป็น Alex, ข้าม verifyPassword แต่ด่านอื่นครบ", async () => {
+    mockUsersByEmail([DEMO_USER, ALEX_USER]);
+
+    const res = await demoLogin(makeReq({ persona: "secondary" }));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data).toEqual({
+      user: { id: "user-alex", email: "alex@acme.helpwise.com", name: "Alex Rivera" },
+      role: "AGENT",
+    });
+    expect(verifyPasswordMock).not.toHaveBeenCalled();
+    expect(fakeDb.tenantMember.findFirst).toHaveBeenCalled();
+    expect(issueAgentTokenMock).toHaveBeenCalledWith("user-alex");
+    expect(setAgentCookieMock).toHaveBeenCalledWith("jwt-token-xyz");
+    expect(auditLogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ demo: true, persona: "secondary", role: "AGENT" }),
+      })
+    );
+  });
+
+  it("(ฌ) cross-tenant: context=globex + persona=secondary → ได้ Dana เท่านั้น (Alex ต้องไม่หลุดข้าม tenant)", async () => {
+    prismaMock.tenant.findUnique.mockResolvedValue({ slug: "globex" });
+    mockUsersByEmail([DEMO_USER, ALEX_USER, DANA_USER]);
+
+    const res = await demoLogin(makeReq({ persona: "secondary" }));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.user.email).toBe("dana@globex.helpwise.com");
+    expect(prismaMock.user.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { email: "dana@globex.helpwise.com" } })
+    );
+  });
+
+  it("(ญ) persona=secondary แต่ tenant ไม่ใช่ demo tenant → 404", async () => {
+    prismaMock.tenant.findUnique.mockResolvedValue({ slug: "realcorp" });
+    mockUsersByEmail([DEMO_USER, ALEX_USER]);
+
+    const res = await demoLogin(makeReq({ persona: "secondary" }));
+
+    expect(res.status).toBe(404);
+    expect(prismaMock.user.findUnique).not.toHaveBeenCalled();
+    expect(issueAgentTokenMock).not.toHaveBeenCalled();
+    expect(setAgentCookieMock).not.toHaveBeenCalled();
+  });
+
+  it.each([["admin"], ["__proto__"], ["primary "], [0], [1], [["secondary"]], [{ key: "secondary" }], [null]])(
+    "(ฎ) persona ค่าไม่รู้จัก (%j) → 400 และไม่ออก session",
+    async (persona) => {
+      mockUsersByEmail([DEMO_USER, ALEX_USER]);
+
+      const res = await demoLogin(makeReq({ persona }));
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.error.code).toBe("INVALID_PERSONA");
+      expect(json.data).toBeNull();
+      expect(prismaMock.user.findUnique).not.toHaveBeenCalled();
+      expect(issueAgentTokenMock).not.toHaveBeenCalled();
+      expect(setAgentCookieMock).not.toHaveBeenCalled();
+      expect(auditLogMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("(ฏ) secondary ที่ role !== AGENT → 403, ไม่ออก token", async () => {
+    mockUsersByEmail([DEMO_USER, ALEX_USER]);
+    fakeDb.tenantMember.findFirst.mockResolvedValue({ id: "member-alex", role: "ADMIN" });
+
+    const res = await demoLogin(makeReq({ persona: "secondary" }));
+
+    expect(res.status).toBe(403);
+    expect(issueAgentTokenMock).not.toHaveBeenCalled();
+    expect(setAgentCookieMock).not.toHaveBeenCalled();
+  });
+
+  it("(ฐ) secondary ที่ไม่มี TenantMember active → 503, ไม่ออก token", async () => {
+    mockUsersByEmail([DEMO_USER, ALEX_USER]);
+    fakeDb.tenantMember.findFirst.mockResolvedValue(null);
+
+    const res = await demoLogin(makeReq({ persona: "secondary" }));
+
+    expect(res.status).toBe(503);
+    expect(issueAgentTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("(ฑ) secondary ที่ user.isActive = false → 503, ไม่ออก token", async () => {
+    mockUsersByEmail([DEMO_USER, { ...ALEX_USER, isActive: false }]);
+
+    const res = await demoLogin(makeReq({ persona: "secondary" }));
+
+    expect(res.status).toBe(503);
+    expect(issueAgentTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("(ฒ) secondary ที่ยังไม่ seed (User ไม่มีใน DB) → 503, ไม่ออก token", async () => {
+    mockUsersByEmail([DEMO_USER]);
+
+    const res = await demoLogin(makeReq({ persona: "secondary" }));
+
     expect(res.status).toBe(503);
     expect(issueAgentTokenMock).not.toHaveBeenCalled();
   });
