@@ -70,8 +70,9 @@ export default function PortalVerifyPage() {
         if (res.ok && json.data?.ok) {
           setStatus("success");
           // รอสักครู่เพื่อให้ user เห็น success state ก่อน redirect
-          // TODO Phase (Portal Dashboard): เปลี่ยน "/portal" เป็น "/portal/tickets" เมื่อสร้างแล้ว
-          setTimeout(() => router.push("/portal"), 1200);
+          // ปลายทางต้องเป็น "/portal/tickets" — "/portal" ไม่มี page.tsx (ไม่เคยมี) → contact เจอ 404
+          // ทันทีหลัง login สำเร็จ ตั้งแต่ Phase 3 (พบตอน Gate 2 ของ Phase 37)
+          setTimeout(() => router.push("/portal/tickets"), 1200);
         } else {
           // token หมดอายุ / ถูกใช้ไปแล้ว / ไม่พบ
           setErrorMessage(json.error?.message ?? "ลิงก์ไม่ถูกต้องหรือหมดอายุ กรุณาขอลิงก์ใหม่");

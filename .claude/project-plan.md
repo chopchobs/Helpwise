@@ -117,7 +117,7 @@
    - 🔴 **บั๊กที่เจอระหว่างเดิน Gate 2 (ไม่เกี่ยวกับ Phase 37 แต่ severity สูงกว่า — ดูข้อ 9)**
    - บันทึกเหตุผลการตัดสินใจ 11 บท → `docs/phase-37-decision-log.md`
    - รายละเอียดเต็ม → `.claude/handoffs/phase-37-demo-personas-2026-08-03.md`
-9. 🔴 **`/portal` 404 หลัง magic-link verify — user-facing path ตายมาตั้งแต่ Phase 3 (พบ 2026-08-04, ยังไม่แก้)**
+9. ✅ **`/portal` 404 หลัง magic-link verify — แก้แล้ว (hotfix 2026-08-04) · เหลือ smoke บน prod**
    - `src/app/(portal)/portal/verify/page.tsx:73-74` → `router.push("/portal")` แต่ **`/portal` ไม่มี `page.tsx`
      และไม่เคยมีในประวัติ repo** (`git log --all` ยืนยัน) → **contact ทุกคนเจอ 404 ทันทีหลัง login สำเร็จ**
      (session ถูกสร้างแล้ว แค่ปลายทางผิด) — นี่คือ **entry point เดียวของ portal ลูกค้า**
@@ -125,5 +125,10 @@
      และ `"/portal"` ถูกอ้างอิงจุดเดียวในทั้ง repo → **fix = 1 บรรทัด ไม่มี dependency**
    - failure mode คนละแบบกับ presence: presence = *"ไม่มีใครรู้"* · อันนี้ = *"รู้ตั้งแต่เขียน แล้ว deferral
      ไม่เคยถูกทบทวน"* → ข้อเสนอ **P7** (grep TODO เทียบ route จริง / พิจารณาเปิด `typedRoutes`)
-   - **Dev ต้องตัดสิน:** hotfix แยก (แนะนำ) หรือรวมใน Phase 37
+   - ✅ **แก้แล้วเป็น hotfix แยก** (ไม่ผูกกับ Phase 37 และไม่ผูกกับ P7 — P7 = กลไกป้องกันที่ต้องออกแบบ
+     ส่วนนี่คือบั๊กที่กำลังทำร้าย user อยู่ ผูกกันจะกลายเป็นตัวประกันของงานที่ช้ากว่า):
+     `router.push("/portal/tickets")` · tsc + eslint clean · **1012 tests ผ่าน**
+   - ⏳ **เหลือ smoke บน prod หลัง deploy:** ขอ magic link ใหม่ (token เดิม one-time ใช้ไปแล้ว) →
+     verify → **เกณฑ์ผ่าน = ลงที่ `/portal/tickets` และเห็นรายการ ticket ของ Jane** (ไม่ใช่แค่ "ไม่ 404")
+     ⚠️ rate limit `portal-request-link-email` = 3 ครั้ง/15 นาที ต่ออีเมล — **ยิงให้ถูกครั้งเดียว**
 10. นี่คือ plan/handoff ครั้งแรกของ project — ก่อนหน้านี้ไม่มี `project-plan.md`
