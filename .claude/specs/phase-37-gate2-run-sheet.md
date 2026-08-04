@@ -99,7 +99,8 @@ login ที่ `https://acme.gethelpwise.xyz/login` · เป็นแค่ก
       · nav มุมบน = **Alex Rivera** · Network `POST` = 200 ครั้งเดียว
       **FAIL เมื่อ:** ไป `/dashboard` · เข้าเป็น Demo Agent · 404 · หน้า "เข้าสู่ demo ไม่สำเร็จ"
       *(ถ้าได้ 503/"เข้าสู่ demo ไม่สำเร็จ" — Gate 1 ผ่านแล้วจึงไม่น่าใช่ prerequisite แต่ให้รัน SQL ของ Gate 1 ซ้ำก่อนโทษโค้ด)*
-- [ ] **C-5** ภายใน ~5 วินาที: W1 เห็น **Alex Rivera** ในแถบ presence **และ** W2 เห็น **Demo Agent**
+- [**FAIL** — รอบที่ 1, 2026-08-04 · ดู § ผลการเดิน ด้านล่าง · **จะเดินซ้ำหลังตั้ง env + redeploy**]
+      **C-5** ภายใน ~5 วินาที: W1 เห็น **Alex Rivera** ในแถบ presence **และ** W2 เห็น **Demo Agent**
       **FAIL เมื่อ:** ฝั่งใดฝั่งหนึ่งไม่เห็น → เปิด Console ทั้ง 2 ฝั่งหา error ของ realtime channel แล้วแนบมาด้วย
       *(บริบท: presence เพิ่งจะ live บน prod ตั้งแต่ 2026-07-23 หลัง RLS policy ถูก apply — ข้อนี้กลืน backlog "smoke presence Phase 35" ไปด้วย)*
 - [ ] **C-6** W2 พิมพ์ในช่องตอบกลับ (ยังไม่ส่ง) → W1 เห็นสถานะ **กำลังพิมพ์** ของ Alex ในไม่กี่วินาที
@@ -161,6 +162,57 @@ login ที่ `https://acme.gethelpwise.xyz/login` · เป็นแค่ก
 > (2) `route.ts:111` `contact.upsert` → อีเมลใหม่ = **สร้าง Contact ใหม่ใน acme** (พัง baseline Gate 1
 > "contact นอก seed = 0") และ contact ใหม่ **ไม่ได้เป็นเจ้าของ T-acme** อยู่ดี
 > (3) `route.ts:126-131` เก็บแค่ `sha256(token)` — ตัวดิบไม่เคย persist → ไม่มีทางลัด read-only ดึงลิงก์
+
+---
+
+## 📋 ผลการเดิน — รอบที่ 1 (2026-08-04, live = `7eec335`)
+
+**สถานะ: ⏸️ ยังไม่ปิด — C-5 FAIL จาก env ที่ไม่ได้ตั้งบน Vercel (ไม่ใช่บั๊กโค้ด) รอ redeploy แล้วเดินซ้ำ**
+
+- ✅ **0-1** CI เขียวทั้ง 2 check (Vercel deploy + build-and-test) · live = `7eec335`
+- 🔴 **C-5 FAIL** — presence ไม่ทำงานทั้ง 2 ฝั่ง (ticket `#1001`, W2 incognito, prod)
+
+### C-5 — root cause (ยืนยันแล้ว ไม่ใช่บั๊กโค้ด)
+
+**หลักฐานหน้างาน:**
+- `PresenceBar` ไม่ render ทั้ง 2 ฝั่ง (`others` = 0)
+- Network filter `realtime` = **0 request** → `/api/realtime/token` **ไม่เคยถูกยิงเลย**
+- Console warn: `[realtime] NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY ไม่ได้ตั้ง — presence ถูกปิด`
+
+**เส้นทางในโค้ด (verify แล้ว):**
+`getRealtimeClient()` (`src/lib/supabase-realtime-client.ts:24-38`) อ่าน `NEXT_PUBLIC_SUPABASE_URL` /
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` ไม่เจอ → warn ครั้งเดียว → **return `null`**
+→ `useTicketPresence.ts:197-199` `start()` เจอ `if (!c) return; // fail-soft` → **ไม่ยิง token · ไม่เปิด channel · ไม่ throw = ตายเงียบ**
+
+**สาเหตุ:** `NEXT_PUBLIC_*` ถูก **inline ตอน build** → ต้องตั้งบน Vercel **แล้ว redeploy** ถึงมีผล
+(แก้ env เฉย ๆ ไม่พอ — build เดิมฝังค่า `undefined` ไปแล้ว)
+
+**🔎 สาเหตุเชิงกลไกที่ทำให้ไม่มีใครตั้ง (เจอเพิ่มตอน verify):**
+ทั้งสองตัวมีอยู่ใน `.env.example:38-43` แต่ **ไม่มีอยู่ใน `docs/deploy-checklist.md` และ `docs/operations.md` เลย**
+— ต่างจาก `NEXT_PUBLIC_ROOT_DOMAIN` / `DEMO_URL` / `SIGNIN_URL` / `API_BASE_URL` ที่อยู่ในเช็คลิสต์ครบ
+→ **deploy checklist มีช่องโหว่ตรงกับ resource ที่ตาย** (และอีก 4 ตัวมี `??` fallback ทั้งหมด จึงไม่เคยพังให้เห็น)
+
+### ผลที่ใหญ่กว่า Gate 2
+
+**Phase 35 presence ไม่เคยทำงานบน prod เลยตั้งแต่ต้น** — ไม่ใช่แค่ช่วงก่อน RLS policy apply
+`project-plan.md` ข้อ 0 ที่เขียนว่า *"realtime.messages = 2 policy = presence LIVE บน prod แล้ว"* → **ผิด**
+policy พร้อมจริง แต่ **client ต่อไม่ได้ตั้งแต่แรก** (แก้ข้อความในข้อ 0 แล้ว 2026-08-04)
+
+**บทเรียน Phase 35 ซ้ำรอบที่ 2 — คนละ resource:**
+| รอบ | resource ที่ไม่ได้ provision | อาการ |
+| --- | --- | --- |
+| 1 (2026-07-23) | migration/RLS policy ไม่ apply | presence ตายเงียบ |
+| 2 (2026-08-04) | `NEXT_PUBLIC_SUPABASE_*` ไม่ตั้งบน Vercel | presence ตายเงียบ |
+
+ทั้งคู่ **ผ่าน gate ในโค้ดครบ** แต่ข้อ *"external resource provision แล้ว"* ของ post-merge gate
+**ไม่เคยถูกตรวจด้วยหลักฐานจริง** + **fail-soft ทำให้ไม่มีสัญญาณ** → ข้อเสนอแก้เชิงระบบอยู่ใน
+`.claude/specs/post-merge-gate-external-resource-proposal.md`
+
+### สิ่งที่ต้องเดินซ้ำหลัง Dev ตั้ง env + redeploy
+- **C-5, C-6, C-7** (C-6/C-7 ขึ้นกับ presence channel เดียวกัน — รอบที่ 1 ยังตัดสินไม่ได้)
+- ก่อนเดินซ้ำ: ยืนยันว่า **redeploy ใหม่แล้ว** (commit เดิมก็ได้ แต่ต้อง build ใหม่หลังตั้ง env)
+  แล้วเช็คเร็ว ๆ ที่หน้า ticket: Console **ต้องไม่มี** warn `[realtime] …ไม่ได้ตั้ง` อีก และ Network ต้องเห็น
+  `POST /api/realtime/token` = 200
 
 ---
 

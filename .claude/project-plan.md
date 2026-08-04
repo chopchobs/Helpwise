@@ -72,7 +72,13 @@
 
 ## ⚠️ ค้าง / ต้องสังเกต
 0. ✅ **Migration prod ครบแล้ว 4 ตัว (2026-07-23, verified จาก `_prisma_migrations` applied=true):** `20260721000000_realtime_presence_rls`, `20260722000000_add_outbound_webhooks`, `20260722010000_add_webhooks_feature_flag`, `20260723000000_webhooks_rls`
-   - 🔴 **ข้อเท็จจริงที่แก้แล้ว:** ที่เคยเขียนว่า realtime RLS "apply ด้วยมือผ่าน SQL editor" **ผิด** — `pg_policies` = **0 แถว** = Phase 35 presence/typing **ไม่เคยทำงานบน prod** จนถึง 2026-07-23. สาเหตุ: `alter table realtime.messages enable RLS` ล้ม **42501** (owner=`supabase_realtime_admin`) → ถอดบรรทัดออก (commit `6dafbef`), Supabase เปิด RLS default + `CREATE POLICY` ทำได้. กู้ด้วย `migrate resolve --rolled-back` → `db:deploy`. **ตอนนี้ realtime.messages = 2 policy = presence LIVE บน prod แล้ว**
+   - 🔴 **ข้อเท็จจริงที่แก้แล้ว:** ที่เคยเขียนว่า realtime RLS "apply ด้วยมือผ่าน SQL editor" **ผิด** — `pg_policies` = **0 แถว** = Phase 35 presence/typing **ไม่เคยทำงานบน prod** จนถึง 2026-07-23. สาเหตุ: `alter table realtime.messages enable RLS` ล้ม **42501** (owner=`supabase_realtime_admin`) → ถอดบรรทัดออก (commit `6dafbef`), Supabase เปิด RLS default + `CREATE POLICY` ทำได้. กู้ด้วย `migrate resolve --rolled-back` → `db:deploy`. **ตอนนี้ realtime.messages = 2 policy แล้ว**
+   - 🔴 **แก้ข้อความเดิม (2026-08-04):** ที่เคยเขียนว่า *"= presence LIVE บน prod แล้ว"* **ผิด** — policy พร้อมจริง
+     แต่ **client ต่อไม่ได้ตั้งแต่แรก**: `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+     **ไม่เคยถูกตั้งบน Vercel Production** → `getRealtimeClient()` คืน `null` → `useTicketPresence.start()`
+     return ทันที (fail-soft) → **ไม่เคยยิง `/api/realtime/token` เลย**. พบตอนเดิน Gate 2 ของ Phase 37 (C-5 FAIL)
+     → **Phase 35 presence ไม่เคยทำงานบน prod เลยตั้งแต่ต้น** · `NEXT_PUBLIC_*` inline ตอน build → ตั้ง env แล้ว **ต้อง redeploy**
+     · หลักฐาน + ข้อเสนอเชิงระบบ → `.claude/specs/phase-37-gate2-run-sheet.md` § ผลการเดิน + `.claude/specs/post-merge-gate-external-resource-proposal.md`
    - ⚠️ บทเรียนถาวร (memory `realtime-messages-rls-supabase`): Prisma migration ถือกรรมสิทธิ์เฉพาะ schema `public`; `migrate status` เชื่อไม่ได้เมื่อมี failed migration (query `_prisma_migrations` ตรง ๆ)
    - เหลือ: smoke presence 2 เบราว์เซอร์ + เปิด FeatureFlag `webhooks`
    - ✅ **Open Q ปิดแล้ว (2026-08-03, Dev อนุมัติ):** เพิ่ม **Post-merge gate** เข้า DoD (`CLAUDE.md` § Post-merge gate) — phase ที่มี migration/external resource ต้อง verify บน prod จริงก่อนปิด phase
