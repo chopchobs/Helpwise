@@ -25,6 +25,9 @@
       | **W3** | **Safari** (แยกจาก Chrome เพื่อไม่กวน cookie ของ W1/W2) | **B-7** |
 - [ ] **0-4** W1 + W2: เปิด DevTools → Network → ติ๊ก **Preserve log** + filter `demo/login`
       (Network เป็นหลักฐานของ B-7 และ C-4 — ห้ามลืม)
+      ⛔ **ห้ามปิด DevTools ตลอดการเดิน** — `Preserve log` เก็บได้เฉพาะสิ่งที่เกิด **ขณะ DevTools เปิดอยู่**
+      **ไม่ย้อนเก็บของที่พลาดไปแล้ว** (บทเรียนรอบจริง: หลักฐานของ C-1 กับ C-4 หายเพราะปิด DevTools
+      ระหว่างทาง → ต้องเดินซ้ำ)
 
 - [ ] **0-5** เตรียม **local dev** ไว้สำหรับ **C-8c**: `npm run dev` → เปิด `http://acme.localhost:3000`
       · เปิด terminal ของ dev server ค้างไว้ (ต้องอ่าน magic link จาก console)
@@ -50,6 +53,16 @@
 login ที่ `https://acme.gethelpwise.xyz/login` · เป็นแค่การ **login ไม่ใช่การแตะ/แก้** account
 (ไม่ขัดข้อ "อย่าเพิ่งแตะ" ของ open item) · `demoPersona = null` + `role = OWNER` (ไม่อยู่ใน persona allowlist)
 
+> 🔁 **ของจริง: ต้องใช้ "ทาง A′" ที่ไม่มีในตัวเลือกเดิม** (2026-08-04)
+> ทาง A ตกเพราะ **จำ password ไม่ได้ + repo ไม่มี password-reset route** → ทางที่ใช้จริงคือ
+> **สร้าง bcrypt hash เอง แล้ว `update` `passwordHash` ของ `owner@acme.test` ผ่าน Supabase**
+> = **prod write ที่ไม่มีใครวางแผนไว้** (run sheet เดิมมีแต่ A/B/C)
+> **ทำไมยังดีกว่าทาง B:** ไม่เพิ่มแถวใหม่ (baseline Gate 1 ไม่เสีย) **และปิด standing risk ไปในตัว** —
+> บัญชี OWNER บน tenant ที่ public โดยสมบูรณ์ซึ่ง **ไม่มีใครรู้ password** อันตรายกว่าบัญชีที่ Dev คุม password อยู่
+> → open item `owner@acme.test` เปลี่ยนสถานะแล้ว (ดู `project-plan.md` ข้อ 7)
+> **บทเรียนสำหรับ run sheet ครั้งหน้า:** ถ้า subject ของ smoke เป็นบัญชีที่ "เคยสร้างมือ"
+> ให้ถามตั้งแต่ pre-flight ว่า **credential ยังใช้ได้จริงไหม** อย่าเพิ่งเชื่อว่า "จำได้"
+
 > ✅ **ทำไมทางนี้ตรงเจตนา P0 ที่สุด (ไม่ใช่แค่ทางที่สะดวก):**
 > บน **tenant จริง** `/demo` โดน demo-slug guard → **404** (นั่นคือเคส B-10 ต่างหาก)
 > แปลว่า **เส้นเดียวที่ session จริงมีโอกาสถูก demo ทับได้จริง = บน demo tenant เท่านั้น**
@@ -59,10 +72,13 @@ login ที่ `https://acme.gethelpwise.xyz/login` · เป็นแค่ก
 
 - [ ] **B7-1** W3 (Safari): login `owner@acme.test` ที่ `https://acme.gethelpwise.xyz/login` → เข้าถึง `/dashboard` ได้
 - [ ] **B7-2** W3: เปิด Web Inspector → Storage → Cookies → **จดค่า `hw_agent_session` ปัจจุบัน**
-      (จด 12 ตัวแรกพอ) : `______________________`
+      ⛔ **ห้ามจด 12 ตัวแรก** — ค่าเป็น **JWT** ทุกใบขึ้นต้น `eyJhbGciOiJIUzI1Ni…` เหมือนกันหมด
+      → เทียบ prefix = **false pass เสมอ** · ให้เทียบ **ค่าเต็ม** (paste ลง text editor) หรืออย่างน้อย **12 ตัวท้าย**
+      : `______________________`
 - [ ] **B7-3** W3: เปิด Network tab ค้างไว้ → พิมพ์ `https://acme.gethelpwise.xyz/demo`
 - [ ] **B7-4 ✅ เกณฑ์ผ่าน (ต้องครบทั้ง 3 ข้อ)**
-      1. เห็น **หน้ายืนยัน** "สลับเป็น บัญชี demo อีกคน?" พร้อมชื่อ/อีเมลของ session จริงที่กำลังใช้อยู่
+      1. เห็น **หน้ายืนยัน** — ข้อความจริงคือ **"สลับเป็น Demo Agent?"** (ชื่อ persona ปลายทาง
+         ไม่ใช่ "สลับเป็น บัญชี demo อีกคน?" ตามที่ checklist เดิมเขียน) พร้อมชื่อ/อีเมลของ session จริงที่ใช้อยู่
       2. Network **ไม่มี** `POST /api/auth/demo/login` เลย
       3. cookie `hw_agent_session` **ค่าเดิมไม่เปลี่ยน** (เทียบกับ B7-2)
 - [ ] **B7-5** กดลิงก์ **"ใช้บัญชีเดิมต่อ"** → ยังเป็น subject คนเดิม ไม่มี POST (ยืนยันว่าหน้ายืนยันไม่ใช่ทางเดียวไปสู่การถูกทับ)
@@ -107,7 +123,11 @@ login ที่ `https://acme.gethelpwise.xyz/login` · เป็นแค่ก
       → หยุดพิมพ์ ~5 วิ → สถานะหายไป **FAIL เมื่อ:** ไม่ขึ้นเลย · ขึ้นแล้วค้างถาวร
 - [ ] **C-7** ให้ W1 + W2 อยู่ในโหมดพิมพ์ตอบ ticket เดียวกันพร้อมกัน → เห็น **collision banner** อย่างน้อยฝั่งหนึ่ง
       **FAIL เมื่อ:** ไม่เตือนเลยทั้งสองฝั่ง
+      ℹ️ **ของจริงดีกว่าที่ checklist สมมติ:** C-6 กับ C-7 **ไม่ใช่ UI คนละตัว** — เป็น **แถบเดียวกัน**
+      ที่ขึ้นเตือน *"ระวังตอบซ้ำ"* ตั้งแต่มีคนพิมพ์คนเดียว (ไม่ต้องรอให้ชนกันจริง) → เดิน C-6 แล้วจะเห็น C-7 ต่อเนื่องกัน
 - [ ] **C-8a** W2 ส่งข้อความ **PUBLIC** → W1 เห็นข้อความใหม่ (reload ได้ถ้าไม่ real-time)
+      ℹ️ **ขอบเขตของ Phase 35 (ไม่ใช่บั๊ก):** realtime ครอบเฉพาะ **presence + typing/collision** เท่านั้น
+      **รายการข้อความไม่ sync แบบ realtime — ต้อง reload** ตามที่ checklist อนุญาตไว้แล้ว
 - [ ] **C-8b** W1 เพิ่ม **internal note** ที่ ticket ใบเดิม
 ### C-8c — internal-note isolation บน **ข้อมูล prod จริง** (ยกระดับเป็น prod smoke แล้ว)
 
@@ -165,9 +185,29 @@ login ที่ `https://acme.gethelpwise.xyz/login` · เป็นแค่ก
 
 ---
 
-## 📋 ผลการเดิน — รอบที่ 1 (2026-08-04, live = `7eec335`)
+## ✅ ผลสรุป — Gate 2 **ผ่านครบ** (2026-08-04)
 
-**สถานะ: ⏸️ ยังไม่ปิด — C-5 FAIL จาก env ที่ไม่ได้ตั้งบน Vercel (ไม่ใช่บั๊กโค้ด) รอ redeploy แล้วเดินซ้ำ**
+| รายการ | ผล |
+| --- | --- |
+| **B-7 (P0)** | ✅ ผ่านครบ 3 เกณฑ์ (หน้ายืนยัน · ไม่มี POST · cookie ไม่เปลี่ยนค่า) — subject = `owner@acme.test` ผ่าน **ทาง A′** |
+| **C-1 … C-8** | ✅ ผ่านทั้งหมด (C-5/C-6/C-7 ผ่านในรอบที่ 2 หลังแก้ 3 ชั้น) |
+| **C-8c** | ✅ **prod smoke เต็มตัว** — Checkpoint 1 (DB) + Checkpoint 2 (Redis) ผ่านทั้งคู่ → **ไม่ต้องบันทึกเป็น known gap** |
+
+**หลักฐานเด่นของ C-8c (แข็งกว่าที่ checklist ขอ):**
+portal แสดง **"การสนทนา (2 ข้อความ)"** ขณะที่ฝั่ง agent มี **4** → **ตัวนับเป็น 2 ไม่ใช่ "4 แล้วซ่อน 2"**
+= พิสูจน์ว่ากรองที่ **ระดับ query** ไม่ใช่ระดับ UI ตรงตามกฎ `CLAUDE.md`
+แถม: portal list แสดงเฉพาะ **#1001 / #1004 ของ Jane** ไม่ใช่ 7 ใบของ acme → own-records scope ทำงานจริง
+
+**C-5 รอบที่ 2 — presence ทำงานจริงครั้งแรกบน prod:**
+WS `101` + `phx_reply {"status":"ok"}` + `presence_diff` joins ·
+UI: W1 เห็น **"AR กำลังดูอยู่"** · W2 เห็น **"DA กำลังดูอยู่"**
+→ **backlog "smoke presence Phase 35" ปิดแล้ว**
+
+---
+
+## 📋 ผลการเดิน — รอบที่ 1 (2026-08-04, live = `7eec335`) — เก็บไว้เป็นบันทึกสาเหตุ
+
+**สถานะรอบนั้น: C-5 FAIL — 3 ชั้นซ้อน (แก้แล้วทั้งหมด ผ่านในรอบที่ 2)**
 
 - ✅ **0-1** CI เขียวทั้ง 2 check (Vercel deploy + build-and-test) · live = `7eec335`
 - 🔴 **C-5 FAIL** — presence ไม่ทำงานทั้ง 2 ฝั่ง (ticket `#1001`, W2 incognito, prod)
@@ -238,7 +278,25 @@ policy พร้อมจริง แต่ **client ต่อไม่ได�
 **ไม่เคยถูกตรวจด้วยหลักฐานจริง** + **fail-soft ทำให้ไม่มีสัญญาณ** → ข้อเสนอแก้เชิงระบบอยู่ใน
 `.claude/specs/post-merge-gate-external-resource-proposal.md`
 
-### สิ่งที่ต้องเดินซ้ำ — หลัง deploy fix ชั้น 3
+### 🔴 บั๊กที่เจอระหว่างเดิน — **ไม่เกี่ยวกับ Phase 37 แต่ severity สูงกว่า**
+
+`src/app/(portal)/portal/verify/page.tsx:73-74`
+```
+// TODO Phase (Portal Dashboard): เปลี่ยน "/portal" เป็น "/portal/tickets" เมื่อสร้างแล้ว
+setTimeout(() => router.push("/portal"), 1200);
+```
+- `/portal` **ไม่มี `page.tsx`** และ `git log --all` ยืนยันว่า **ไม่เคยมีในประวัติ repo**
+- → **contact ทุกคนที่ login ผ่าน magic link เจอ 404 ทันทีหลัง verify สำเร็จ** (session ถูกสร้างแล้ว
+  แค่ปลายทาง redirect ผิด) — เป็นแบบนี้ตั้งแต่ **Phase 3**
+- **นี่คือ entry point เดียวของ portal ลูกค้า** = user-facing path ตายมาหลายเดือน
+- ✅ **verify เพิ่ม:** `/portal/tickets/page.tsx` **มีอยู่แล้ว** (เงื่อนไขใน TODO บรรลุไปนานแล้ว)
+  และ `"/portal"` ถูกอ้างอิง **จุดเดียวในทั้ง repo** → fix = แก้ 1 บรรทัด ไม่มี dependency
+
+**ต่างจากเคส presence ในเชิงสาเหตุ:** presence = *"ไม่มีใครรู้"* · อันนี้ = ***"รู้ตั้งแต่เขียน
+เขียน TODO ทิ้งไว้ แล้ว deferral ไม่เคยถูกทบทวน"*** → ข้อเสนอ **P7** ใน
+`.claude/specs/post-merge-gate-external-resource-proposal.md`
+
+### สิ่งที่ต้องเดินซ้ำ — หลัง deploy fix ชั้น 3 *(ทำแล้ว ผ่านครบในรอบที่ 2)*
 - **C-5, C-6, C-7** (C-6/C-7 ใช้ channel เดียวกัน — รอบที่ 1 ยังตัดสินไม่ได้)
 - **pre-check ก่อนเดินซ้ำ (ไล่ทีละชั้น เพื่อไม่ให้ชั้นล่างซ่อนอีก):**
   1. ชั้น 1 — Console **ไม่มี** warn `[realtime] … ไม่ได้ตั้ง` ✅ (ผ่านแล้วหลัง redeploy)

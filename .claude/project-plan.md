@@ -80,9 +80,13 @@
      → **Phase 35 presence ไม่เคยทำงานบน prod เลยตั้งแต่ต้น** · `NEXT_PUBLIC_*` inline ตอน build → ตั้ง env แล้ว **ต้อง redeploy**
      · หลักฐาน + ข้อเสนอเชิงระบบ → `.claude/specs/phase-37-gate2-run-sheet.md` § ผลการเดิน + `.claude/specs/post-merge-gate-external-resource-proposal.md`
    - ⚠️ บทเรียนถาวร (memory `realtime-messages-rls-supabase`): Prisma migration ถือกรรมสิทธิ์เฉพาะ schema `public`; `migrate status` เชื่อไม่ได้เมื่อมี failed migration (query `_prisma_migrations` ตรง ๆ)
-   - เหลือ: smoke presence 2 เบราว์เซอร์ + เปิด FeatureFlag `webhooks`
+   - ✅ **smoke presence ปิดแล้ว (2026-08-04)** — Gate 2 ของ Phase 37 กอง C-5 ผ่าน: WS `101` +
+     `phx_reply {"status":"ok"}` + `presence_diff` joins · W1 เห็น "AR กำลังดูอยู่" · W2 เห็น "DA กำลังดูอยู่"
+     = **ครั้งแรกที่ presence ทำงานจริงบน prod** (ต้องแก้ 3 ชั้นก่อน — ดู ข้อ 7)
+   - เหลือ: เปิด FeatureFlag `webhooks`
    - ✅ **Open Q ปิดแล้ว (2026-08-03, Dev อนุมัติ):** เพิ่ม **Post-merge gate** เข้า DoD (`CLAUDE.md` § Post-merge gate) — phase ที่มี migration/external resource ต้อง verify บน prod จริงก่อนปิด phase
-   - 🔶 **ผลย้อนหลัง:** Phase 35 + 36 ยังไม่ผ่าน post-merge gate ครบ (migration ✅ verified แต่ smoke presence prod ✗ · FeatureFlag `webhooks` ยังไม่เปิดให้ tenant ใด ✗) → นับเป็น **done-with-open-gate** จนกว่า Dev ทำ 2 ข้อนี้
+   - 🔶 **ผลย้อนหลัง (อัปเดต 2026-08-04):** Phase 35 **ผ่าน post-merge gate ครบแล้ว** (migration ✅ · smoke presence prod ✅)
+     · Phase 36 ยัง **done-with-open-gate** (FeatureFlag `webhooks` ยังไม่เปิดให้ tenant ใด ✗)
 1. **ไม่มี Phase ค้าง · LAUNCHED แล้ว** — merge + push ครบทุก branch, deploy live ที่ gethelpwise.xyz (Phase 31-33)
 2. **RLS ยังไม่ active** (`RLS_ENABLED=false`, app ใช้ BYPASSRLS role) — application-enforced isolation เป็นด่านจริง; จะ activate RLS ต้องสลับ DB role + เปิด flag
 3. **Stray duplicate files (iCloud)** — เป็นปัญหาเป็นระยะ ทำ build พัง; ลบทีละไฟล์ (`rm <file>` ไม่ใช่ `rm -rf`) เมื่อพบ
@@ -93,11 +97,33 @@
    - `Tenant.settings` ถูกทับทั้งก้อน (branding จาก UI หาย) · `Subscription` ถูกทับ (status/price/period reset จาก now — ทับ Stripe sync)
    - ไม่มี dry-run flag · ไม่มี `delete` (upsert ล้วน จึงไม่ลบ junk ให้)
    - **Fix ที่ควรทำ (backlog):** เปลี่ยนเป็น `ticketCounter: Math.max(existing, maxTicketNumber)` · `settings` merge แทน replace หรือ update เฉพาะตอน create · เพิ่ม `--dry-run` flag. รายละเอียดเต็ม → memory `seed-demo-idempotency-acme-cruft`
-7. 🟡 **Phase 37 merge แล้ว (`68ad2e1`) — ยังไม่ push · Gate 2 ยังไม่รัน** (`main...origin/main [ahead 17]`) · 1012 tests เขียว
+7. ✅ **Phase 37 — Gate 1 + Gate 2 ผ่านครบ (2026-08-04) → ปิดเฟสได้** · 1012 tests เขียว
    - ✅ **Gate 1 ผ่าน** (SQL audit บน prod 2026-08-03, read-only): persona **4/4 OK** (User+TenantMember role=AGENT active) · contact/ticket นอก seed = **0** · **ApiKey/WebhookEndpoint/Attachment = 0** ทั้ง 2 tenant · `ticketCounter` ตรง `MAX(ticketNumber)` พอดี (acme 1007 · globex 1006) → **ไม่ต้อง re-seed**
-   - ⏳ **Gate 2 ยังไม่รัน** — push → รอ Vercel deploy → เดิน `.claude/specs/phase-37-manual-checklist.md` **กอง C (8 ข้อ) + B-7** เป็นขั้นต่ำ · **ปิดเฟสไม่ได้จนกว่าผ่าน**
+   - ✅ **Gate 2 ผ่าน** — **B-7 (P0) ผ่านครบ 3 เกณฑ์** · **C-1…C-8 ผ่านทั้งหมด** · **C-8c = prod smoke เต็มตัว**
+     (Checkpoint 1 DB + Checkpoint 2 Redis ผ่านทั้งคู่ → ไม่มี known gap). หลักฐานเด่น: portal แสดง
+     **"การสนทนา (2 ข้อความ)"** ขณะที่ agent มี 4 → **ตัวนับเป็น 2 = กรองที่ระดับ query ไม่ใช่ UI** ·
+     portal list เห็นเฉพาะ #1001/#1004 ของ Jane. รายละเอียด → `.claude/specs/phase-37-gate2-run-sheet.md`
+   - 🔧 **Gate 2 เจอของจริงที่ทุก gate ก่อนหน้าไม่จับ** — C-5 รอบแรก FAIL จาก **3 ชั้นซ้อน**:
+     (1) `NEXT_PUBLIC_SUPABASE_*` ไม่ได้ตั้งบน Vercel → เงียบสนิท (2) `SUPABASE_REALTIME_JWT_PRIVATE_KEY`/`KID`
+     ไม่ได้ตั้ง → token 500 แต่ client กลืน error (3) 🔴 **CSP `connect-src` ไม่รองรับ Supabase = บั๊กโค้ดจาก Phase 35**
+     (แก้แล้ว `fd8cb08`) → ข้อเสนอเชิงระบบ P1a-P7 ใน `.claude/specs/post-merge-gate-external-resource-proposal.md`
    - ⚠️ **R-1 ยังมีผลเชิงนโยบาย:** persona `secondary` login ได้โดยไม่มี credential → ข้อมูลใน acme/globex = **public ทั้งหมด** (ตอนนี้ข้อมูลสะอาดแล้ว แต่กฎคือ **ห้ามเอาของจริงเข้า 2 tenant นี้อีก**)
-   - 🟡 **open item:** `owner@acme.test` (OWNER, active, created 2026-05-31, สร้างมือผ่าน signup ไม่อยู่ในโค้ด) ยังอยู่ใน acme — ไม่ใช่ช่องโหว่ (demo-login บังคับ `role === "AGENT"` → OWNER ได้ 403) แต่เป็น standing risk **Dev ตัดสินทีหลัง อย่าเพิ่งแตะ**
+   - ✅ **open item `owner@acme.test` — เปลี่ยนสถานะแล้ว (2026-08-04):** ใช้เป็น subject ของ B-7 ผ่าน **"ทาง A′"**
+     — จำ password ไม่ได้ + repo ไม่มี password-reset route → **สร้าง bcrypt hash เองแล้ว update `passwordHash`
+     ผ่าน Supabase** (prod write ที่ไม่ได้วางแผนไว้ แต่ไม่เพิ่มแถวใหม่ baseline Gate 1 จึงไม่เสีย)
+     → **standing risk ปิดไปในตัว**: จากเดิม "บัญชี OWNER บน tenant public ที่ไม่มีใครรู้ password"
+     เป็น "**Dev คุม credential แล้ว**" · ตัวเลือกที่เหลือ (deactivate / ลด role / ถอด membership) ยังเปิดอยู่
+     แต่**ไม่เร่งด่วนแล้ว**
+   - 🔴 **บั๊กที่เจอระหว่างเดิน Gate 2 (ไม่เกี่ยวกับ Phase 37 แต่ severity สูงกว่า — ดูข้อ 9)**
    - บันทึกเหตุผลการตัดสินใจ 11 บท → `docs/phase-37-decision-log.md`
    - รายละเอียดเต็ม → `.claude/handoffs/phase-37-demo-personas-2026-08-03.md`
-8. นี่คือ plan/handoff ครั้งแรกของ project — ก่อนหน้านี้ไม่มี `project-plan.md`
+9. 🔴 **`/portal` 404 หลัง magic-link verify — user-facing path ตายมาตั้งแต่ Phase 3 (พบ 2026-08-04, ยังไม่แก้)**
+   - `src/app/(portal)/portal/verify/page.tsx:73-74` → `router.push("/portal")` แต่ **`/portal` ไม่มี `page.tsx`
+     และไม่เคยมีในประวัติ repo** (`git log --all` ยืนยัน) → **contact ทุกคนเจอ 404 ทันทีหลัง login สำเร็จ**
+     (session ถูกสร้างแล้ว แค่ปลายทางผิด) — นี่คือ **entry point เดียวของ portal ลูกค้า**
+   - มี TODO เขียนกำกับไว้ตั้งแต่แรกว่า *"เปลี่ยนเป็น `/portal/tickets` เมื่อสร้างแล้ว"* — **`/portal/tickets` สร้างไปนานแล้ว**
+     และ `"/portal"` ถูกอ้างอิงจุดเดียวในทั้ง repo → **fix = 1 บรรทัด ไม่มี dependency**
+   - failure mode คนละแบบกับ presence: presence = *"ไม่มีใครรู้"* · อันนี้ = *"รู้ตั้งแต่เขียน แล้ว deferral
+     ไม่เคยถูกทบทวน"* → ข้อเสนอ **P7** (grep TODO เทียบ route จริง / พิจารณาเปิด `typedRoutes`)
+   - **Dev ต้องตัดสิน:** hotfix แยก (แนะนำ) หรือรวมใน Phase 37
+10. นี่คือ plan/handoff ครั้งแรกของ project — ก่อนหน้านี้ไม่มี `project-plan.md`

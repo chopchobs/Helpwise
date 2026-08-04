@@ -142,7 +142,20 @@ where u.email in ('alex@acme.helpwise.com','dana@globex.helpwise.com',
 - **R-1 data audit สะอาด:** contact นอก seed = 0 · ticket นอก seed = 0 · **ApiKey = 0 · WebhookEndpoint = 0 · Attachment = 0** ทั้ง acme และ globex
 - **`ticketCounter` ตรง `MAX(ticketNumber)` พอดี** (acme 1007/1007 · globex 1006/1006) → กับระเบิด re-seed ยังไม่ทำงาน แต่กฎในข้อ 6 ของ project-plan ยังมีผลถ้าจะ re-seed ในอนาคต
 
-### 🟡 Open item — `owner@acme.test` (Dev ตัดสินทีหลัง, **อย่าเพิ่งแตะ**)
+### ✅ อัปเดต 2026-08-04 — Gate 2 ผ่านครบ + open item เปลี่ยนสถานะ
+
+- **Gate 2 ผ่าน:** B-7 (P0) ✅ · C-1…C-8 ✅ · **C-8c = prod smoke เต็มตัว** (Checkpoint DB + Redis ผ่านทั้งคู่)
+  → `.claude/specs/phase-37-gate2-run-sheet.md` · **backlog smoke presence Phase 35 ปิดแล้ว**
+- **C-5 รอบแรก FAIL จาก 3 ชั้นซ้อน** (env client · env JWT · 🔴 CSP `connect-src` = บั๊กโค้ดจาก Phase 35,
+  แก้แล้ว `fd8cb08`) → ข้อเสนอเชิงระบบ `.claude/specs/post-merge-gate-external-resource-proposal.md`
+- **`owner@acme.test` — ใช้เป็น subject ของ B-7 ผ่าน "ทาง A′"**: จำ password ไม่ได้ + ไม่มี password-reset route
+  → สร้าง bcrypt hash เอง แล้ว `update passwordHash` ผ่าน Supabase (prod write ที่ไม่ได้วางแผน แต่ไม่เพิ่มแถวใหม่)
+  → **standing risk ปิดไปในตัว — Dev คุม credential แล้ว** · ตัวเลือกอื่น (deactivate / ลด role / ถอด membership)
+  ยังเปิดอยู่แต่ไม่เร่งด่วน · **ข้อความ "อย่าเพิ่งแตะ" ด้านล่างเป็นบริบทเดิมก่อน 2026-08-04**
+- 🔴 **บั๊กใหม่ที่เจอระหว่างเดิน (ยังไม่แก้):** `/portal` 404 หลัง magic-link verify —
+  `portal/verify/page.tsx:73-74` push ไป `/portal` ที่ไม่มีอยู่จริง ตั้งแต่ Phase 3 → `project-plan.md` ข้อ 9
+
+### 🟡 Open item (บริบทเดิม ก่อน 2026-08-04) — `owner@acme.test`
 `owner@acme.test` เป็น `TenantMember(OWNER, active)` ของ **acme** สร้างเมื่อ 2026-05-31 · Dev grep แล้ว **ไม่มีในโค้ด/seed เลย** = สร้างมือผ่าน signup
 
 - **ไม่ใช่ช่องโหว่:** visitor เข้าไม่ถึง — demo-login บังคับ `role === "AGENT"` (OWNER → 403) และ persona allowlist ไม่มี email นี้ · `demoPersona` ของมัน = `null`
@@ -151,8 +164,9 @@ where u.email in ('alex@acme.helpwise.com','dana@globex.helpwise.com',
 - 💡 ใช้ประโยชน์ได้ก่อนตัดสินใจ: บัญชีนี้คือ **subject ที่เหมาะที่สุดสำหรับ B-7** (agent ที่ `demoPersona = null` บน demo tenant → ต้องเห็นหน้ายืนยันเสมอ ห้าม auto-login ทับ) โดยไม่ต้องมี tenant จริงบน prod
 
 ### ค้างอยู่ / Open Questions
-- [x] ~~Gate 1~~ **ผ่านแล้ว** (ดูด้านบน) · [ ] Dev: push → รอ Vercel deploy → **Gate 2 (smoke กอง C + B-7)**
-- [ ] **ตัดสินใจเรื่อง `owner@acme.test`** (open item ด้านบน)
+- [x] ~~Gate 1~~ **ผ่านแล้ว** · [x] ~~Gate 2 (กอง C + B-7)~~ **ผ่านแล้ว 2026-08-04**
+- [x] ~~ตัดสินใจเรื่อง `owner@acme.test`~~ — credential กลับมาอยู่ในมือ Dev แล้ว (ทาง A′)
+- [ ] 🔴 **ตัดสินใจ: `/portal` 404 — hotfix แยก (แนะนำ) หรือรวมใน Phase 37** (แก้ 1 บรรทัด)
 - [ ] **R-1 cleanup acme/globex** ก่อนเปิดให้คนนอกใช้จริง
 - [ ] Backlog เดิมที่ยังค้าง: smoke presence Phase 35 (จะถูกกลืนโดยกอง C ของเฟสนี้พอดี) · เปิด FeatureFlag `webhooks` ให้ tenant · Backlog Phase 36 (LOW) · seed-demo hardening (`ticketCounter` เป็น `max()`, `settings` merge, `--dry-run`)
 - **Open Q:** R-2 (XFF spoof → rate-limit ไม่จริง) เป็น pre-existing ระดับ project — จะทำเป็นเฟสของตัวเองไหม

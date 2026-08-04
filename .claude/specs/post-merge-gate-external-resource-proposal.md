@@ -138,6 +138,31 @@
 - **P6c:** สังเกตให้ครบว่า CSP directive ไหน **ไม่ได้ gate ด้วย `isProd`** — พวกนี้พังบน dev ด้วย
   จึงควรถูกจับตั้งแต่เครื่อง dev ถ้ามีใครเปิดฟีเจอร์นั้นดูจริงสักครั้ง
 
+## P7 — จับ TODO ที่อยู่บน **user-facing path** (เพิ่ม 2026-08-04 หลังเจอ `/portal` 404)
+
+**ที่มา:** `portal/verify/page.tsx:73-74` เขียน `router.push("/portal")` พร้อม TODO ว่า *"เปลี่ยนเป็น
+`/portal/tickets` เมื่อสร้างแล้ว"* — `/portal/tickets` ถูกสร้างไปนานแล้ว แต่ **TODO ไม่เคยถูกทบทวน**
+→ contact ทุกคนเจอ **404 หลัง login สำเร็จ** ตั้งแต่ Phase 3
+
+**นี่คือ failure mode คนละแบบกับ P1-P6 — และ gate ที่มีอยู่จับไม่ได้เลย:**
+
+| | presence (P1-P6) | `/portal` 404 (P7) |
+| --- | --- | --- |
+| สาเหตุ | **ไม่มีใครรู้** ว่าพัง | **รู้ตั้งแต่เขียน** แล้ว defer |
+| กลไกที่พลาด | ไม่มี assertion บน prod | **deferral ไม่มีวันหมดอายุ ไม่มีใครทบทวน** |
+| ยาที่ใช้ได้ | smoke / artifact check | **ทำให้ deferral มีเจ้าของและวันตาย** |
+
+- **P7a (อัตโนมัติ, ถูกที่สุด):** script + CI — grep `TODO`/`FIXME` ใน `src/app/**/page.tsx`
+  และ `src/app/**/route.ts` แล้ว **cross-check กับ route ที่มีอยู่จริง**: ถ้า TODO อ้างถึง path
+  (เช่น `"/portal"`, `/portal/tickets`) ให้ยืนยันว่า **path ที่โค้ดใช้อยู่จริงมี `page.tsx` รองรับ**
+  ไม่งั้น fail — จับเคสนี้ได้ตรง ๆ โดยไม่ต้องพึ่งคนอ่าน TODO
+- **P7b (กว้างกว่า, ทำคู่กันได้):** ตรวจว่า **ทุก `router.push()` / `redirect()` ที่เป็น string literal
+  ชี้ไป route ที่มีอยู่จริง** — เป็น static check ที่ Next.js ไม่มีให้ (typedRoutes ช่วยได้บางส่วน
+  แต่โปรเจกต์นี้ยังไม่ได้เปิด → **ทางเลือกที่ควรพิจารณาคู่กัน: เปิด `typedRoutes` ของ Next 16**
+  ซึ่งจะทำให้ `router.push("/portal")` **compile ไม่ผ่าน** ตั้งแต่แรก = แก้ที่รากที่สุด)
+- **P7c (นโยบาย):** TODO ที่อยู่บน user-facing path ต้องมี **เจ้าของ + phase ที่จะแก้** และถูกยกมา
+  ทบทวนใน handoff ของทุก phase — TODO ที่ไม่มีวันตาย = bug ที่ยังไม่ถูกนับ
+
 ## P5 — เปลี่ยนถ้อยคำของ post-merge gate ใน `CLAUDE.md`
 
 จาก checkbox ลอย ๆ *"external resource ที่ feature ต้องใช้ provision แล้ว"* → บังคับให้ **แต่ละ phase
@@ -168,6 +193,8 @@
 | 4 | **P2** readiness endpoint (server-side resource เท่านั้น) | `backend` | S–M | จับ provider/queue/bucket ที่ล้มเงียบ |
 | 5 | **P3** observable fail-soft | `frontend` | S | smoke assert ได้ว่า "ต่อจริง" |
 | — | **P1b** build guard | `devops` | S | ทับซ้อนกับ P1a เป็นส่วนใหญ่ — ทำก็ต่อเมื่ออยาก fail ตั้งแต่ก่อน build |
+| 6 | **P6a** test `buildCsp()` | `qa-testing` | XS | กัน CSP regression |
+| 7 | **P7a/P7b** TODO + route ที่ไม่มีอยู่จริง (พิจารณาเปิด `typedRoutes`) | `devops` / `frontend` | S | จับ failure mode "รู้แล้ว defer จนลืม" ที่ P1-P6 จับไม่ได้ |
 
 **ถ้าเลือกได้แค่ 2 ข้อ:** P4 (ทันที) + **P1a** (กันซ้ำถาวร ด้วยของที่มีอยู่แล้ว)
 **ทำเป็น phase ของตัวเอง หรือแทรกก่อนปิด Phase 37 ก็ได้** — แต่ **ไม่ควรผูกเป็นเงื่อนไขปิด Phase 37**
