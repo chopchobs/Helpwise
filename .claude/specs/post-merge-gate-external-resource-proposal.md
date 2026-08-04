@@ -7,10 +7,15 @@
 
 เกิดซ้ำ **2 รอบใน 1 เดือน กับ feature เดียวกัน คนละ resource**:
 
-| รอบ | resource | สาเหตุ | ตรวจไม่เจอเพราะ |
+| รอบ | resource / defect | สาเหตุ | ตรวจไม่เจอเพราะ |
 | --- | --- | --- | --- |
 | 1 (2026-07-23) | RLS policy บน `realtime.messages` | migration ล้ม 42501 แล้วถูกถอด | เชื่อ `migrate status` ไม่ได้ query `pg_policies` |
 | 2 (2026-08-04) | `NEXT_PUBLIC_SUPABASE_URL` / `ANON_KEY` บน Vercel | ไม่เคยถูกตั้ง + ไม่อยู่ใน deploy checklist | **fail-soft → ไม่มีสัญญาณใด ๆ** |
+| 3 (2026-08-04) | `SUPABASE_REALTIME_JWT_PRIVATE_KEY` / `KID` บน Vercel | ไม่เคยถูกตั้ง | token route 500 แต่ **client กลืน error** (`fetchRealtimeToken` คืน `null`) |
+| 4 (2026-08-04) | 🔴 **CSP `connect-src` ไม่รองรับ Supabase — บั๊กโค้ด** | Phase 35 เพิ่ม WebSocket แต่ไม่แก้ CSP ของ Phase 13 | ไม่มี test ตัวไหนรู้ว่าเบราว์เซอร์บล็อกอะไร → **ต้องเปิดเบราว์เซอร์จริงเท่านั้น** |
+
+> รอบ 2-4 **ซ้อนกันอยู่ในอาการเดียว** — แก้ชั้นบนแล้วชั้นถัดไปถึงโผล่ ไม่มีทางเห็นพร้อมกัน
+> และรอบ 4 พิสูจน์ว่า gate นี้ไม่ได้จับแค่ "resource ไม่ provision" แต่จับ **defect จริงที่ทดสอบด้วยโค้ดไม่ได้**
 
 **แกนของปัญหา 3 ข้อ:**
 1. **Fail-soft ที่ถูกต้องเชิงวิศวกรรม กลายเป็นตัวกลบหลักฐาน** — `getRealtimeClient()` return `null`
@@ -118,6 +123,20 @@
   และตาราง env ของ `docs/operations.md` (**วันนี้ไม่มีทั้งสองไฟล์** — คือสาเหตุตรง ๆ ที่ไม่มีใครตั้ง)
 - ระบุชัดว่าเป็น **build-time inlined** → *แก้ค่าแล้วต้อง redeploy ถึงจะมีผล*
 - P1 จะบังคับข้อนี้อัตโนมัติในอนาคต (ตัวแปรใหม่ที่ไม่ถูกจัดหมวด = build fail)
+
+## P6 — CSP ต้องเดินคู่กับ "external origin ที่ feature ใหม่ใช้" (เพิ่ม 2026-08-04 หลังเจอชั้น 3)
+
+**ที่มา:** Phase 13 ตั้ง CSP · Phase 35 เพิ่ม WebSocket ไป Supabase แต่ไม่แก้ `connect-src`
+→ presence **ไม่เคยทำงานได้ทั้ง prod และ local dev** (`connect-src` ไม่ได้ถูก gate ด้วย `isProd`)
+ทุก gate ในโค้ดไม่จับ เพราะไม่มี unit test ตัวไหนรู้จัก "เบราว์เซอร์จริงบล็อกอะไร"
+
+- **P6a (ถูกที่สุด, ทำเลย):** unit test ของ `buildCsp()` — assert ว่าเมื่อมี `NEXT_PUBLIC_SUPABASE_URL`
+  แล้ว `connect-src` ต้องมีทั้ง `https://` และ `wss://` ของ origin นั้น · จับ regression ทันทีถ้ามีคน
+  แก้ CSP ทีหลัง (แต่ **ไม่จับ** กรณี env หายตอน build — นั่นเป็นงานของ P1a)
+- **P6b:** เพิ่มบรรทัดใน DoD/PR checklist: *"feature นี้เรียก origin ภายนอกใหม่หรือไม่
+  (WebSocket / fetch / img / iframe)? ถ้าใช่ → อัปเดต CSP directive ที่เกี่ยวข้อง"*
+- **P6c:** สังเกตให้ครบว่า CSP directive ไหน **ไม่ได้ gate ด้วย `isProd`** — พวกนี้พังบน dev ด้วย
+  จึงควรถูกจับตั้งแต่เครื่อง dev ถ้ามีใครเปิดฟีเจอร์นั้นดูจริงสักครั้ง
 
 ## P5 — เปลี่ยนถ้อยคำของ post-merge gate ใน `CLAUDE.md`
 

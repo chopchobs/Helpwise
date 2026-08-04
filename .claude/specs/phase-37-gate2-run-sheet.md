@@ -172,7 +172,37 @@ login ที่ `https://acme.gethelpwise.xyz/login` · เป็นแค่ก
 - ✅ **0-1** CI เขียวทั้ง 2 check (Vercel deploy + build-and-test) · live = `7eec335`
 - 🔴 **C-5 FAIL** — presence ไม่ทำงานทั้ง 2 ฝั่ง (ticket `#1001`, W2 incognito, prod)
 
-### C-5 — root cause (ยืนยันแล้ว ไม่ใช่บั๊กโค้ด)
+### C-5 — root cause: **3 ชั้นซ้อนกัน** (ไม่ใช่สาเหตุเดียว)
+
+> 🔑 **ลักษณะสำคัญ: แก้ชั้นบนแล้วชั้นถัดไปถึงจะโผล่ — ไม่มีทางเห็นพร้อมกัน**
+> แต่ละชั้นบังคลื่นชั้นถัดไปไว้หมด จึงต้อง redeploy + เดินซ้ำทีละชั้น
+
+| ชั้น | สาเหตุ | อาการที่เห็น | ประเภท |
+| --- | --- | --- | --- |
+| **1** | `NEXT_PUBLIC_SUPABASE_URL` / `ANON_KEY` ไม่ได้ตั้งบน Vercel | **เงียบสนิท** — `/api/realtime/token` ไม่เคยถูกยิง | config (fail-soft กลบ) |
+| **2** | `SUPABASE_REALTIME_JWT_PRIVATE_KEY` / `KID` ไม่ได้ตั้งบน Vercel | token route **500** แต่ **client กลืน error** (`fetchRealtimeToken` คืน `null` ไม่ throw) | config (fail-soft กลบ) |
+| **3** | **CSP `connect-src 'self'` ไม่รองรับ Supabase** (`next.config.ts:17` เดิม) | Console: `violates … "connect-src 'self'" … blocked` — WebSocket ถูกบล็อกทุกครั้ง | 🔴 **บั๊กโค้ด** |
+
+**ชั้น 3 = defect จริงจาก Phase 35** — Phase 13 ตั้ง CSP ไว้ · Phase 35 เพิ่ม realtime presence
+แต่ **ไม่เคยแก้ CSP ให้รองรับ** · และ `connect-src` **ไม่ได้ถูก gate ด้วย `isProd`** (ต่างจาก `'unsafe-eval'`)
+→ **presence ถูกบล็อกบน local dev ด้วย = ฟีเจอร์นี้ไม่เคยทำงานได้ที่ไหนเลยตั้งแต่ Phase 35 merge**
+ไม่ใช่แค่ตายบน prod
+
+**Fix (commit นี้):** derive origin จาก `NEXT_PUBLIC_SUPABASE_URL` ตอน build → `https:` + `wss:`
+ไม่ใช้ wildcard `https://*.supabase.co` · ผลจริงเมื่อมี env:
+`connect-src 'self' https://<ref>.supabase.co wss://<ref>.supabase.co`
+
+> ⚠️ **fix นี้มี fail-silent ซ้ำอีกชั้น:** ถ้า env หายตอน build → ได้ `connect-src 'self'` เงียบ ๆ เหมือนเดิม
+> → **P1a/P1b ไม่ใช่ optional อีกต่อไป แต่เป็นคู่บังคับของ fix นี้** (เขียนกำกับไว้ในคอมเมนต์ของ `next.config.ts` แล้ว)
+
+### ผลต่อ verdict ของ Gate 2
+
+Gate 2 ไม่ได้เจอแค่ "external resource ไม่ถูก provision" (ชั้น 1-2) แต่เจอ **defect จริงในโค้ด (ชั้น 3)
+ที่ทุก gate ก่อนหน้าไม่จับ** — เพราะ acceptance ของ Phase 35 คือ *"เปิด 2 เบราว์เซอร์แล้วดู"*
+ซึ่งถูก defer เป็น backlog มา 2 สัปดาห์และ **ไม่เคยมีใครรัน**
+→ ยืนยันคุณค่าของ post-merge gate: **unit test + code review + security audit ไม่มีทางจับ CSP-vs-WebSocket ได้เลย**
+
+### หลักฐานเดิม (ชั้น 1 — รอบแรกที่พบ)
 
 **หลักฐานหน้างาน:**
 - `PresenceBar` ไม่ render ทั้ง 2 ฝั่ง (`others` = 0)
@@ -208,11 +238,18 @@ policy พร้อมจริง แต่ **client ต่อไม่ได�
 **ไม่เคยถูกตรวจด้วยหลักฐานจริง** + **fail-soft ทำให้ไม่มีสัญญาณ** → ข้อเสนอแก้เชิงระบบอยู่ใน
 `.claude/specs/post-merge-gate-external-resource-proposal.md`
 
-### สิ่งที่ต้องเดินซ้ำหลัง Dev ตั้ง env + redeploy
-- **C-5, C-6, C-7** (C-6/C-7 ขึ้นกับ presence channel เดียวกัน — รอบที่ 1 ยังตัดสินไม่ได้)
-- ก่อนเดินซ้ำ: ยืนยันว่า **redeploy ใหม่แล้ว** (commit เดิมก็ได้ แต่ต้อง build ใหม่หลังตั้ง env)
-  แล้วเช็คเร็ว ๆ ที่หน้า ticket: Console **ต้องไม่มี** warn `[realtime] …ไม่ได้ตั้ง` อีก และ Network ต้องเห็น
-  `POST /api/realtime/token` = 200
+### สิ่งที่ต้องเดินซ้ำ — หลัง deploy fix ชั้น 3
+- **C-5, C-6, C-7** (C-6/C-7 ใช้ channel เดียวกัน — รอบที่ 1 ยังตัดสินไม่ได้)
+- **pre-check ก่อนเดินซ้ำ (ไล่ทีละชั้น เพื่อไม่ให้ชั้นล่างซ่อนอีก):**
+  1. ชั้น 1 — Console **ไม่มี** warn `[realtime] … ไม่ได้ตั้ง` ✅ (ผ่านแล้วหลัง redeploy)
+  2. ชั้น 2 — Network เห็น `POST /api/realtime/token` = **200** (ไม่ใช่ 500) ✅ (ผ่านแล้ว)
+  3. ชั้น 3 — Console **ไม่มี** `violates … connect-src` และเห็น WebSocket `wss://<ref>.supabase.co`
+     ใน Network tab **WS** ที่สถานะ `101 Switching Protocols`
+  4. ตรวจ header จริงของ deploy ใหม่:
+     `curl -sI https://acme.gethelpwise.xyz/ | grep -i content-security-policy`
+     → ต้องเห็น `connect-src 'self' https://<ref>.supabase.co wss://<ref>.supabase.co`
+     **ถ้ายังเป็น `connect-src 'self'` เปล่า ๆ = env หายตอน build → อย่าเดินต่อ** (นี่คือ fail-silent
+     ของ fix เอง — ดูคำเตือนด้านบน)
 
 ---
 
