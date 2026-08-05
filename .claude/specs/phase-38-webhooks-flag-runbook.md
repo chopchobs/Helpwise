@@ -244,14 +244,37 @@ default `gethelpwise.xyz` — `src/proxy.ts:203`) → ยิงตรงได�
 และ cookie jar จะผูก domain ให้ถูกต้องอัตโนมัติ
 
 ```bash
-JAR=$(mktemp)            # เก็บ cookie ชั่วคราว
+umask 077                # ไฟล์ที่สร้างต่อจากนี้เป็น 0600 (คนอื่นบนเครื่องอ่านไม่ได้)
+JAR=$(mktemp)            # cookie jar ชั่วคราว
 read -s HW_PASS          # พิมพ์ password ของ owner@acme.test แล้ว Enter (ไม่โชว์บนจอ)
+echo                     # ขึ้นบรรทัดใหม่ (read -s ไม่ขึ้นให้)
 
+# body ส่งทาง stdin (--data @-) → password ไม่เคยเป็น argument ของ process ใดเลย
 curl -sS -i -c "$JAR" \
   -X POST https://acme.gethelpwise.xyz/api/auth/agent/login \
   -H "Content-Type: application/json" \
-  --data "$(printf '{"email":"owner@acme.test","password":"%s"}' "$HW_PASS")"
+  --data @- <<JSON
+{"email":"owner@acme.test","password":"$HW_PASS"}
+JSON
 ```
+
+**ทำไมปลอดภัยกว่าเวอร์ชันเดิม (`--data "$(printf ... "$HW_PASS")"`)**
+เวอร์ชันเดิมทำให้ password กลายเป็น **argument ของ process `curl`** → ใครก็ตามที่ login อยู่บนเครื่อง
+เดียวกันเห็นได้ด้วย `ps aux` ตลอดช่วงที่ request ทำงาน (และ shell บางตัวเก็บลง history ด้วย)
+เวอร์ชันใหม่ password ถูก **shell ขยายเข้าไปใน body ของ heredoc** ซึ่ง curl อ่านทาง **stdin** →
+**ไม่ปรากฏใน argv ของทั้ง `curl` และคำสั่งใดในไปป์ไลน์** (ไม่ต้องใช้ `printf`/`jq`/เครื่องมือเพิ่มเลย)
+
+⚠️ **ข้อจำกัดที่เหลืออยู่ — อ่านก่อนใช้**
+
+1. **อักขระพิเศษในรหัสผ่าน:** heredoc ตัวนี้ *เปิด* shell expansion (จำเป็น เพราะต้องแทนค่า `$HW_PASS`)
+   → ถ้ารหัสผ่านมี `"` `\` `$` หรือ backtick **อย่าใช้วิธีนี้** — `"`/`\` จะทำ JSON พัง ส่วน `$`/backtick
+   จะถูก shell ตีความ (ส่งค่าผิด และ backtick = command substitution)
+   → กรณีนั้นให้ใช้ **§ 3 ทางที่ 2 (login ผ่าน browser แล้วคัด cookie จาก DevTools)** แทน
+2. **heredoc กับไฟล์ชั่วคราว:** บาง shell (เช่น zsh, bash เวอร์ชันเก่า) materialize heredoc เป็นไฟล์ temp
+   ชั่วขณะ — ไฟล์นั้นเป็นของ user เอง, ถูก unlink ทันที และ `umask 077` ด้านบนคุมสิทธิ์ไว้แล้ว
+   (bash ≥ 5.1 ใช้ pipe ไม่สร้างไฟล์) — **ยังปลอดภัยกว่า argv ที่ทุก user บนเครื่องเห็นได้**
+3. `read -s HW_PASS` ไม่ลง shell history (เป็น input ไม่ใช่คำสั่ง) แต่ **ห้ามพิมพ์ password เป็นส่วนหนึ่ง
+   ของคำสั่งใด ๆ** และ **ห้าม `echo "$HW_PASS"`** เพื่อ "เช็คว่าพิมพ์ถูกไหม"
 
 **ผ่านเมื่อ:** `200` + response header มี `Set-Cookie: hw_agent_session=...`
 
@@ -304,15 +327,32 @@ subdomain) — ข้ามได้ถ้า § 2-4 พบว่า globex ไ�
 
 ### 4-2 · End-to-end (ยืนยันว่า "ทำงาน" ไม่ใช่แค่ "ไม่ 403")
 
-1. **สร้าง endpoint** ชี้ไป request-bin สาธารณะที่ Dev คุมเอง
-   ต้องเป็น **https สาธารณะ** เพราะ SSRF guard บล็อก private/loopback/CGNAT/metadata
-   (`validateWebhookUrl` เรียกที่ `src/app/api/webhook-endpoints/route.ts:188–198`)
+1. **สร้าง endpoint** ชี้ไป request-bin ที่ Dev คุมเอง
+
+   **คุณสมบัติของ bin ที่ต้องครบทุกข้อ:**
+   - **https สาธารณะ** — SSRF guard บล็อก private/loopback/CGNAT/169.254 metadata
+     (`validateWebhookUrl` เรียกที่ `src/app/api/webhook-endpoints/route.ts:188–198`)
+   - ⭐ **URL ต้องเดาไม่ได้** — ต้องมี random token ในพาธ และเป็น **bin ใช้ครั้งเดียวแล้วทิ้ง**
+     เหตุผล: payload ที่ยิงออกไปมี **เนื้อหา ticket ของ tenant** และ **HMAC signature header**
+     ถ้า URL เดาได้ ใครก็เปิดดูสิ่งที่เราส่งออกไปได้
+   - ⛔ **ห้าม paste URL ของ bin กลับมาในแชต และห้าม commit ลงไฟล์ใด ๆ** (runbook นี้, handoff,
+     project-plan) — คำสั่งด้านล่างจึงรับ URL ทาง `read -s` แล้วส่งเข้า curl ทาง stdin
+   - ⚠️ R-1: `acme`/`globex` เป็น demo public → ticket ที่ใช้ทริกเกอร์ (ข้อ 2) ต้องเป็น
+     **ข้อมูลทดสอบล้วน** ห้ามมีข้อมูลจริงใด ๆ
 
    ```bash
+   read -s BIN_URL    # วาง URL ของ bin (รวม https://) แล้ว Enter — ไม่โชว์บนจอ, ไม่ลง history
+   echo
+
+   # body ส่งทาง stdin ด้วย here-string → URL ที่เดาไม่ได้ไม่ไปโผล่ใน argv/history
    curl -sS -i -b "$JAR" -X POST https://acme.gethelpwise.xyz/api/webhook-endpoints \
      -H "Content-Type: application/json" \
-     -d '{"description":"phase38 smoke","url":"https://<your-request-bin>","events":["TICKET_CREATED"]}'
+     --data @- <<<"{\"description\":\"phase38 smoke\",\"url\":\"$BIN_URL\",\"events\":[\"TICKET_CREATED\"]}"
    ```
+   ใช้ here-string (`<<<`) แทน heredoc ตรงนี้เพราะบล็อกนี้อยู่ในลิสต์ที่มีย่อหน้า —
+   heredoc จะต้องมีบรรทัดปิดชิดซ้าย ถ้า copy ทั้งย่อหน้าไปวางแล้ว shell จะค้างรอ delimiter
+   ⚠️ มี shell expansion เหมือน § 3 → ถ้า URL มี `"` `\` `$` หรือ backtick ให้เปลี่ยน bin ใหม่
+   (โดยปกติ URL ของ bin เป็น `[A-Za-z0-9-._/]` อยู่แล้ว)
 
    **ผ่านเมื่อ:** `201` + body มี `plaintextSecret` (`route.ts:248–251`)
    ⛔ **ห้าม copy `plaintextSecret` ไปไว้ที่ใด** — คือ HMAC signing secret (`prisma/schema.prisma:762–764`)
@@ -346,6 +386,10 @@ subdomain) — ข้ามได้ถ้า § 2-4 พบว่า globex ไ�
    ```
    (`src/app/api/webhook-endpoints/[id]/route.ts:234`)
    จากนั้นเรียก `GET /api/webhook-endpoints` ซ้ำ → ต้อง **ไม่มี** endpoint ของ smoke เหลือ
+
+   ⛔ **คู่กันเสมอ: ปิด/ลบ request-bin ทิ้งด้วย** — bin เก็บ payload ที่มีเนื้อหา ticket + signature header
+   ค้างไว้ ถ้าไม่ลบก็เท่ากับทิ้งสำเนาข้อมูลไว้บนบริการภายนอกโดยไม่มีกำหนด
+   จบแล้วเก็บกวาดตัวแปรด้วย: `unset BIN_URL`
 
 ### 4-3 · Negative: tenant ที่ plan ไม่ถึง `pro` ต้องยังได้ `FEATURE_LOCKED`
 
@@ -498,7 +542,7 @@ ORDER BY t."slug", we."createdAt" DESC;
 - [ ] § 3 login สำเร็จ ได้ `hw_agent_session`
 - [ ] § 4-1 `GET /api/webhook-endpoints` = **200** (ไม่ใช่ `FEATURE_LOCKED` / `FORBIDDEN`)
 - [ ] § 4-2 create `201` → ticket ใหม่ → delivery `SUCCEEDED`
-- [ ] § 4-2 ข้อ 4 **ลบ endpoint smoke แล้ว** + § 6.1 ยืนยันว่าไม่เหลือ
+- [ ] § 4-2 ข้อ 4 **ลบ endpoint smoke แล้ว** + § 6.1 ยืนยันว่าไม่เหลือ · **ปิด/ลบ request-bin ทิ้งด้วย** (`unset BIN_URL`)
 - [ ] § 4-3 negative test ผ่าน **หรือ** บันทึก known gap ตาม § 5.3
 - [ ] § 5.1 RLS policy + `relforcerowsecurity` ของ webhook tables ครบ
 - [ ] ลบ cookie jar / unset password (`rm -f "$JAR"; unset HW_PASS`)
