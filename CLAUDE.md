@@ -257,6 +257,7 @@ const tickets = await db.ticket.findMany()
 | client env (`NEXT_PUBLIC_*`) | สแกน **artifact ที่ deploy จริง** — `npm run scan:bundle` (ไม่ใช่ถาม server) | ค่าโผล่ใน `.next/static` |
 | server env / provider | เรียก endpoint ที่ **ใช้ provider นั้นจริง** บน prod แล้วดูผลลัพธ์ | ทำงานด้วย provider จริง (ไม่ใช่ค่า stub/`console`) |
 | FeatureFlag | เรียก API ของ feature นั้นบน prod | `200` ไม่ใช่ `403` |
+| gate ถูกเรียกจริงบน Vercel (Project Settings override `vercel.json` ได้ ตรวจจาก repo ไม่ได้) | อ่าน build log ของ deploy ล่าสุด | มีบรรทัด `✅ [scan:bundle] สะอาด` **ที่ต่อท้ายด้วย `และยืนยัน … ค่า NEXT_PUBLIC_*`** และไม่มี `GATE OVERRIDDEN` (เจอ = bypass อยู่ ยังไม่ผ่าน) |
 
 - [ ] **ตรวจที่ชั้นเดียวกับที่ค่าถูกใช้จริง** — build-time value (`NEXT_PUBLIC_*` inline ตอน build → ต้อง redeploy) ตรวจที่ artifact · runtime value ตรวจที่ runtime. **ตรวจผิดชั้น = false PASS**
 - [ ] **feature ที่ออกแบบให้ fail-soft ต้องมี assertion ยืนยัน happy path บน prod เสมอ** — fail-soft = ไม่มี error ให้เห็นโดยธรรมชาติ (fail-soft ต่อผู้ใช้ · fail-loud ต่อผู้ดูแล)

@@ -43,6 +43,34 @@ requests (or, for `AUTH_SECRET`, the app will fail to start).
 > Stripe Price IDs are **not** environment variables — they live on `Plan.stripePriceIdMonthly`
 > / `Plan.stripePriceIdYearly` in the database and are set via `prisma/seed.ts`.
 
+### Emergency bypass: `SCAN_BUNDLE_SKIP_REQUIRED`
+
+`npm run scan:bundle` runs as part of the production build and fails the build when a
+**required** `NEXT_PUBLIC_*` value is missing from `.next/static`, so a red scan blocks
+every deploy — including an urgent hotfix. To ship anyway, set
+`SCAN_BUNDLE_SKIP_REQUIRED=1` on Vercel (scope: **Production**) and redeploy. This is the
+only supported bypass — do not invent another flag name, comment the script out, or edit
+the build command. It disables **only** the REQUIRED-value check; the secret-leak
+(FORBIDDEN) check still runs and **must never be bypassed** — a build that leaks a server
+secret into the client bundle is not shippable under any deadline. The bypass does not skip
+the scan: the script still scans the artifact and prints the missing values, then prints
+`⚠️⚠️⚠️ [scan:bundle] GATE OVERRIDDEN — SCAN_BUNDLE_SKIP_REQUIRED=1 ⚠️⚠️⚠️` and exits `0`.
+That warning is the audit trail the post-merge gate reads back, so never suppress it.
+
+Use it for urgent hotfixes only, and treat it as an incident with an owner and an expiry —
+not an open-ended deferral:
+
+1. Set `SCAN_BUNDLE_SKIP_REQUIRED=1` (Production) → redeploy → ship the hotfix.
+2. Fix the underlying missing/stale `NEXT_PUBLIC_*` value (set it on Vercel, then redeploy
+   so it is inlined into a fresh artifact).
+3. **Remove the env var immediately after the hotfix is out**, redeploy, and confirm the
+   build log shows `✅ [scan:bundle] สะอาด …` **including the `และยืนยัน … ค่า NEXT_PUBLIC_*`
+   clause** and no `GATE OVERRIDDEN` line. A bypassed build omits that clause on purpose —
+   it verified nothing.
+4. Record who set it and the date it must be gone by. A bypass left in place is a live bug
+   that nobody is counting yet — the `/portal` 404 shipped that way, as a TODO with no
+   expiry date.
+
 ---
 
 ## Database & Migrations

@@ -136,6 +136,7 @@ npx tsx prisma/seed-demo.ts # demo data acme/globex (idempotent)
 
 ## 8. Verify production
 
+- [ ] **`SCAN_BUNDLE_SKIP_REQUIRED` ไม่ถูกตั้งค้างบน Vercel (Production)** — ถ้ามี = bypass ค้างจากเหตุการณ์ก่อน ต้องถอดแล้ว redeploy (build log ต้องเห็น `✅ [scan:bundle] สะอาด …` ที่มีข้อความยืนยันจำนวนค่า ไม่ใช่ `GATE OVERRIDDEN`)
 - [ ] `acme.gethelpwise.xyz` resolve + cert (apex + wildcard) Active
 - [ ] ปุ่ม "Try live demo" → `/demo` → auto-login → **`/dashboard`**
 - [ ] login ปกติ → **`/dashboard`**
