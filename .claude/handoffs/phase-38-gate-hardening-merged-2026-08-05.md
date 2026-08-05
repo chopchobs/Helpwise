@@ -21,8 +21,20 @@ Working state:
 ⚠️ ต้อง verify ก่อนเริ่ม context ถัดไป:
 - [x] ✅ **push แล้ว (Dev รันจาก Terminal จริง) — `origin/main` = `58c83d5`** ยืนยันด้วย `git ls-remote origin main`
       · Vercel deploy จาก `58c83d5` = **Ready · Production (live จริง)**
-- [ ] ค้าง (ก): อ่าน build log ของ deploy ที่มาจาก `1eafba3` — เกณฑ์อยู่ใน § Session Summary
+- [x] ✅ **ค้าง (ก) ปิดแล้ว 2026-08-05** — ดู § ตารางหลักฐาน Phase 38
 - [ ] ค้าง (ข): smoke webhooks ตาม `.claude/specs/phase-38-webhooks-flag-runbook.md`
+
+## ตารางหลักฐาน Phase 38 (ตามรูปแบบ `CLAUDE.md` § Post-merge gate)
+
+| resource | วิธีตรวจบน prod | ผลที่ได้ |
+|---|---|---|
+| **gate ถูกเรียกจริงบน Vercel** | อ่าน build log ของ deploy `58c83d5` (Production · Ready · 1m 5s · 2026-08-05) | ✅ **VERIFIED** — พบบรรทัด `✅ [scan:bundle] สะอาด — … และยืนยัน 2 ค่า …` · ไม่มี `GATE OVERRIDDEN` |
+| client env (`NEXT_PUBLIC_*`) | clause ในบรรทัดเดียวกัน | ✅ ยืนยัน **2 ค่า** (`SUPABASE_URL` + `ANON_KEY`) — ตรงตามที่ตั้งใจหลังย้าย `ROOT_DOMAIN` เป็น advisory |
+| Vercel Dashboard override | Dev เปิด Project Settings ดูเอง | ✅ Override **ปิดทั้ง 4 ช่อง** → `vercel.json` มีผลจริง |
+| FeatureFlag `webhooks` (Phase 36) | smoke ตาม runbook ทาง A | ⏳ **ยังไม่ทำ** = ค้าง (ข) |
+
+> 🏁 **`58c83d5` คือครั้งแรกที่ gate รันจริงบน Vercel** — ก่อนหน้านี้ `vercel.json` `buildCommand: "next build"`
+> override `package.json` อยู่ → `scan:bundle` ไม่เคยถูกเรียกในสาย build ของ production เลย
 
 ## Carried Forward
 ### Decisions
@@ -69,9 +81,7 @@ Working state:
   จะเป็นงานตกแต่งที่ไม่เคยรันบน Vercel เลย
 
 ### ค้างอยู่ / Open Questions
-- [ ] **(ก) อ่าน build log ของ deploy ที่มาจาก `1eafba3`** — ผ่าน = มีบรรทัด **`✅ [scan:bundle] สะอาด`**
-      ที่มี clause **`และยืนยัน … ค่า NEXT_PUBLIC_*`** และ **ไม่มี** `GATE OVERRIDDEN`
-      · ไม่เห็นบรรทัด `[scan:bundle]` เลย = gate ยังไม่ถูกเรียก
+- [x] ✅ **(ก) ปิดแล้ว** — deploy `58c83d5` ผ่านเกณฑ์ครบ (ดู § ตารางหลักฐาน Phase 38)
 - [ ] **(ข) smoke webhooks ทาง A** → ปิด gate ของ **Phase 36** ด้วย
 - [ ] **Residual gap — ห้ามเข้าใจว่า Phase 38 ปิดครบ:** บั๊ก presence มี **4 ชั้น** · Phase 38 ปิดแค่
       **ชั้น 2 (client env)** + **ชั้น 4 (CSP)** · **ชั้น 3 (`SUPABASE_REALTIME_JWT_PRIVATE_KEY`/`KID`
