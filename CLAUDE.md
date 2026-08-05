@@ -245,9 +245,19 @@ const tickets = await db.ticket.findMany()
 #### Post-merge gate (เฉพาะ phase ที่มี migration หรือ external resource)
 
 > ปิด phase ไม่ได้จนกว่าข้อนี้ผ่าน — **gate ก่อน merge ตรวจแค่ code + mock DB จึงไม่จับ feature ที่ตายบน prod**
-> (บทเรียนจริง: Phase 35 realtime presence ผ่านทุก gate แต่ RLS policy ไม่เคย apply บน prod → feature dead 1 เดือน)
+> (บทเรียนจริง: Phase 35 realtime presence ผ่านทุก gate แต่ RLS policy ไม่เคย apply + `NEXT_PUBLIC_SUPABASE_*` ไม่เคยตั้งบน Vercel → feature dead 1 เดือน)
 
 - [ ] **verify migration apply บน prod จริง** — query `_prisma_migrations` ตรง ๆ ว่า `finished_at` ไม่ null / `rolled_back_at` เป็น null ทุกตัวของ phase นั้น. **ห้ามเชื่อ `prisma migrate status`** (รายงานผิดเมื่อมี failed migration)
 - [ ] **verify effect ของ migration บน prod** ไม่ใช่แค่แถวใน `_prisma_migrations` — เช่น policy → `pg_policies`, ตาราง/คอลัมน์ใหม่ → `information_schema`, RLS → `relrowsecurity`/`relforcerowsecurity`
-- [ ] **external resource ที่ feature ต้องใช้ provision แล้ว** — FeatureFlag เปิดให้ tenant ที่ต้องใช้ · storage bucket · queue/cron · provider key ใน env prod
+- [ ] **ตารางหลักฐาน external resource** (ไม่ใช่ checkbox ของเจตนา) — ทุก resource ที่ feature ใช้ต้องเขียนเป็นตารางในเอกสารปิด phase:
+
+| resource | คำสั่ง/วิธีตรวจบน prod | ผลที่ถือว่าผ่าน |
+| --- | --- | --- |
+| RLS policy | `select * from pg_policies where tablename='messages'` | ≥ 2 แถว |
+| client env (`NEXT_PUBLIC_*`) | สแกน **artifact ที่ deploy จริง** — `npm run scan:bundle` (ไม่ใช่ถาม server) | ค่าโผล่ใน `.next/static` |
+| server env / provider | เรียก endpoint ที่ **ใช้ provider นั้นจริง** บน prod แล้วดูผลลัพธ์ | ทำงานด้วย provider จริง (ไม่ใช่ค่า stub/`console`) |
+| FeatureFlag | เรียก API ของ feature นั้นบน prod | `200` ไม่ใช่ `403` |
+
+- [ ] **ตรวจที่ชั้นเดียวกับที่ค่าถูกใช้จริง** — build-time value (`NEXT_PUBLIC_*` inline ตอน build → ต้อง redeploy) ตรวจที่ artifact · runtime value ตรวจที่ runtime. **ตรวจผิดชั้น = false PASS**
+- [ ] **feature ที่ออกแบบให้ fail-soft ต้องมี assertion ยืนยัน happy path บน prod เสมอ** — fail-soft = ไม่มี error ให้เห็นโดยธรรมชาติ (fail-soft ต่อผู้ใช้ · fail-loud ต่อผู้ดูแล)
 - [ ] **smoke ของจริงบน prod** อย่างน้อย 1 path ของ feature นั้น (ไม่ใช่ local/CI)
