@@ -16,6 +16,10 @@ requests (or, for `AUTH_SECRET`, the app will fail to start).
 | `DIRECT_URL` | **Yes** | Direct PostgreSQL connection (port `5432`, no pooler). Used by `prisma migrate` / `prisma db seed`. | `postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:5432/postgres` |
 | `NEXT_PUBLIC_ROOT_DOMAIN` | **Yes** | Root domain used for tenant subdomain routing (`{slug}.{domain}`). Never hardcode this elsewhere. | `gethelpwise.xyz` |
 | `NEXT_PUBLIC_API_BASE_URL` | **Yes** | Base URL template shown to agents on the Settings → API Keys page. | `https://{slug}.gethelpwise.xyz` |
+| `NEXT_PUBLIC_SUPABASE_URL` | **Yes** for realtime presence | Supabase project URL the browser client uses to connect to Realtime presence. **Build-time inlined** — see the note below the table. | `https://[ref].supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Yes** for realtime presence | Supabase anon key (safe to expose to the browser; the actual channel token is minted by `/api/realtime/token`). If unset, presence is disabled **silently** (fail-soft) — no error is surfaced. **Build-time inlined**. | `eyJ...` |
+| `SUPABASE_REALTIME_JWT_PRIVATE_KEY` | **Yes** for realtime presence | Server-only PEM private key (EC P-256, alg `ES256`) used to sign short-lived tenant-scoped Realtime tokens. If unset, `/api/realtime/token` returns `500` and the client swallows the error — presence dies silently. Never expose to the client. | `-----BEGIN PRIVATE KEY-----...` |
+| `SUPABASE_REALTIME_JWT_KID` | **Yes** for realtime presence | Key id of the signing key above, sent in the JWT header so Supabase picks the right verification key. | `xxxx` |
 | `REDIS_URL` | **Yes** | Redis connection string (Upstash). Used for tenant-context cache and rate limiting. (Async jobs use Upstash QStash, not Redis.) | `rediss://default:[password]@[host].upstash.io:6379` |
 | `STRIPE_SECRET_KEY` | **Yes** (if billing enabled) | Stripe server-side secret key. | `sk_test_...` / `sk_live_...` |
 | `STRIPE_WEBHOOK_SECRET` | **Yes** in production | Stripe webhook signing secret. Without it, `/api/webhooks/stripe` rejects all requests. | `whsec_...` |
@@ -28,8 +32,44 @@ requests (or, for `AUTH_SECRET`, the app will fail to start).
 | `QSTASH_TARGET_BASE_URL` | **Yes** in production | Public origin QStash calls back into worker routes, e.g. `https://acme.gethelpwise.xyz`. | `https://...` |
 | `NODE_ENV` | Set by platform | `development` \| `production`. Controls HSTS, CSP `unsafe-eval`, and several "allow in dev / reject in prod" checks. | `production` |
 
+> **`NEXT_PUBLIC_*` variables are build-time inlined** into the client bundle — they are not
+> read at runtime. Setting or changing one on Vercel only takes effect after a **redeploy**,
+> and it can only be verified against the **deployed artifact** (`npm run scan:bundle`, which
+> scans `.next/static`). Do **not** use a server-side readiness/health endpoint to confirm
+> them: that endpoint reads `process.env` at runtime and will report "configured" while the
+> deployed bundle still has no value — a false PASS. This is exactly how realtime presence
+> stayed dead on production for a month without a single error.
+
 > Stripe Price IDs are **not** environment variables — they live on `Plan.stripePriceIdMonthly`
 > / `Plan.stripePriceIdYearly` in the database and are set via `prisma/seed.ts`.
+
+### Emergency bypass: `SCAN_BUNDLE_SKIP_REQUIRED`
+
+`npm run scan:bundle` runs as part of the production build and fails the build when a
+**required** `NEXT_PUBLIC_*` value is missing from `.next/static`, so a red scan blocks
+every deploy — including an urgent hotfix. To ship anyway, set
+`SCAN_BUNDLE_SKIP_REQUIRED=1` on Vercel (scope: **Production**) and redeploy. This is the
+only supported bypass — do not invent another flag name, comment the script out, or edit
+the build command. It disables **only** the REQUIRED-value check; the secret-leak
+(FORBIDDEN) check still runs and **must never be bypassed** — a build that leaks a server
+secret into the client bundle is not shippable under any deadline. The bypass does not skip
+the scan: the script still scans the artifact and prints the missing values, then prints
+`⚠️⚠️⚠️ [scan:bundle] GATE OVERRIDDEN — SCAN_BUNDLE_SKIP_REQUIRED=1 ⚠️⚠️⚠️` and exits `0`.
+That warning is the audit trail the post-merge gate reads back, so never suppress it.
+
+Use it for urgent hotfixes only, and treat it as an incident with an owner and an expiry —
+not an open-ended deferral:
+
+1. Set `SCAN_BUNDLE_SKIP_REQUIRED=1` (Production) → redeploy → ship the hotfix.
+2. Fix the underlying missing/stale `NEXT_PUBLIC_*` value (set it on Vercel, then redeploy
+   so it is inlined into a fresh artifact).
+3. **Remove the env var immediately after the hotfix is out**, redeploy, and confirm the
+   build log shows `✅ [scan:bundle] สะอาด …` **including the `และยืนยัน … ค่า NEXT_PUBLIC_*`
+   clause** and no `GATE OVERRIDDEN` line. A bypassed build omits that clause on purpose —
+   it verified nothing.
+4. Record who set it and the date it must be gone by. A bypass left in place is a live bug
+   that nobody is counting yet — the `/portal` 404 shipped that way, as a TODO with no
+   expiry date.
 
 ---
 
@@ -233,3 +273,9 @@ Before deploying (or promoting) to production:
 - [ ] The deployment runs behind a trusted proxy/edge that overwrites `x-forwarded-for`
       (see above)
 - [ ] `NEXT_PUBLIC_ROOT_DOMAIN` and `NEXT_PUBLIC_API_BASE_URL` match the production domain
+- [ ] `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+      `SUPABASE_REALTIME_JWT_PRIVATE_KEY`, and `SUPABASE_REALTIME_JWT_KID` are set (realtime
+      presence fails **silently** without them)
+- [ ] Every `NEXT_PUBLIC_*` value was set **before** the current build, and the deployment has
+      been **redeployed** since the last change — verified against the artifact with
+      `npm run scan:bundle`, not via a server endpoint

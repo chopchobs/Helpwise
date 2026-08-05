@@ -54,6 +54,22 @@ Demo creds เป็น **public-by-design** (role=AGENT) → ใครก็ย
 - [ ] `NEXT_PUBLIC_ROOT_DOMAIN` = `gethelpwise.xyz` *(หัวใจ subdomain routing — ต้องตรง domain จริง)*
 - [ ] `NEXT_PUBLIC_API_BASE_URL` = `https://{slug}.gethelpwise.xyz`
 
+### Realtime presence (Supabase — ห้ามลืม: พลาดแล้ว feature ตายเงียบ ไม่มี error ให้เห็น)
+- [ ] `NEXT_PUBLIC_SUPABASE_URL` = `https://[ref].supabase.co` *(client env)*
+- [ ] `NEXT_PUBLIC_SUPABASE_ANON_KEY` *(client env — anon key เท่านั้น ห้ามใช้ service role key)*
+- [ ] `SUPABASE_REALTIME_JWT_PRIVATE_KEY` *(server-only — PEM private key EC P-256 / ES256 จาก Supabase → JWT Signing Keys)*
+- [ ] `SUPABASE_REALTIME_JWT_KID` *(server-only — key id ของ signing key ตัวเดียวกัน)*
+
+> 🔴 **บทเรียนจริง (2026-08-04):** 4 ตัวนี้ไม่เคยถูกตั้งบน Vercel Production เพราะ**ไม่เคยอยู่ใน checklist นี้**
+> → presence **ตายเงียบบน prod 1 เดือน**: ไม่มี client env = `getRealtimeClient()` คืน `null` แล้วหยุดเงียบ ๆ (fail-soft),
+> ไม่มี JWT key = `/api/realtime/token` 500 แต่ client กลืน error → **ไม่มีสัญญาณใดให้เห็นเลย**
+
+> ⚠️ **`NEXT_PUBLIC_*` ทุกตัวเป็น build-time inlined** — ค่าถูกฝังเข้า client bundle ตอน build ไม่ได้อ่านตอน runtime
+> → **ตั้ง/แก้ค่าบน Vercel แล้วต้อง redeploy ถึงจะมีผล** (แก้ค่าเฉย ๆ ไม่พอ)
+> verify ได้ที่ **artifact เท่านั้น** — `npm run scan:bundle` (สแกน `.next/static` ว่าค่าโผล่จริง)
+> ⛔ **ห้ามใช้ readiness/health endpoint ยืนยัน `NEXT_PUBLIC_*`** — endpoint อ่าน `process.env` ฝั่ง server ตอน runtime
+> จึงตอบว่า "ตั้งแล้ว" ได้ทั้งที่ bundle ที่ deploy อยู่ยังไม่มีค่า = **false PASS**
+
 ### Core (build/runtime)
 - [ ] `DATABASE_URL` — pooled (pgbouncer)
 - [ ] `DIRECT_URL` — direct (สำหรับ migrate)
@@ -120,6 +136,7 @@ npx tsx prisma/seed-demo.ts # demo data acme/globex (idempotent)
 
 ## 8. Verify production
 
+- [ ] **`SCAN_BUNDLE_SKIP_REQUIRED` ไม่ถูกตั้งค้างบน Vercel (Production)** — ถ้ามี = bypass ค้างจากเหตุการณ์ก่อน ต้องถอดแล้ว redeploy (build log ต้องเห็น `✅ [scan:bundle] สะอาด …` ที่มีข้อความยืนยันจำนวนค่า ไม่ใช่ `GATE OVERRIDDEN`)
 - [ ] `acme.gethelpwise.xyz` resolve + cert (apex + wildcard) Active
 - [ ] ปุ่ม "Try live demo" → `/demo` → auto-login → **`/dashboard`**
 - [ ] login ปกติ → **`/dashboard`**
