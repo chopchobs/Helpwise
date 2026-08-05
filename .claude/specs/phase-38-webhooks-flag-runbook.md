@@ -1,165 +1,123 @@
-# Phase 38 — Runbook: เปิด FeatureFlag `webhooks` ให้ `acme` + `globex` บน prod
+# Phase 38 — Runbook: ปิด post-merge gate ของ Phase 36 (outbound webhooks) บน prod
 
-> **เป้าหมาย:** ปิด post-merge gate ที่ค้างจาก Phase 36 (outbound webhooks) — พิสูจน์บน prod จริงว่า
-> feature ทำงาน (API ตอบ 200 ไม่ใช่ 403 FEATURE_LOCKED) โดย **เปิดแคบที่สุด = per-tenant override เท่านั้น**
+> **เป้าหมาย:** พิสูจน์ว่า outbound webhooks **ทำงานจริงบน prod** ผ่าน **เส้นทางเดียวกับที่ลูกค้าจริงเดิน**
+> คือ `Tenant.plan` → `x-tenant-plan` (ผ่าน Redis cache ใน proxy) → `hasFeature()` → route
 >
-> **ผู้รัน:** Dev (รันเอง 100%) — เอกสารนี้เขียนโดย agent ที่ **อ่านโค้ดอย่างเดียว ไม่ได้รัน SQL ใด ๆ**
-> ทุกข้อเท็จจริงด้านล่างอ้าง `ไฟล์:บรรทัด` จริงในรีโป (commit ที่อ่าน = branch `feature/phase-38-gate-hardening`)
+> **ขอบเขต: read-only ทั้งหมด** — ⛔ **ไม่มีการเขียน DB แม้แต่คำสั่งเดียว** ไม่มี `INSERT`/`UPDATE`/`DELETE`
+> ไม่แตะ `TenantFeature` ไม่แตะ `FeatureFlag` งานนี้คือ **ตรวจสถานะ + smoke** เท่านั้น
 >
-> ⛔ **ข้อจำกัดที่ต้องรู้ก่อนเริ่ม:** `.env` ของเครื่อง Dev ชี้ Supabase **ชุดเดียวกับ prod** →
-> ห้ามรัน `prisma migrate` / `db push` / `seed` / `seed-demo` จากเครื่องเพื่อทำงานนี้เด็ดขาด
-> งานนี้ใช้ **SQL editor บน Supabase** เท่านั้น
+> **ผู้รัน:** Dev — เอกสารนี้เขียนโดย agent ที่ **อ่านโค้ดอย่างเดียว** ทุกข้อเท็จจริงอ้าง `ไฟล์:บรรทัด` จริง
+> (branch `feature/phase-38-gate-hardening`)
 >
-> **ข้อจำกัดจาก Dev (verbatim):** *"per-tenant override (TenantFeature) เท่านั้น — ห้าม global default
-> และห้ามผูก plan. เปิดที่ plan = เปลี่ยน entitlement ของลูกค้าจริงทุกราย ซึ่งเป็นเรื่อง billing
-> ไม่ใช่เรื่องปิด gate งานนี้คือพิสูจน์ว่าฟีเจอร์ทำงานบน prod → เปิดแคบที่สุดที่พิสูจน์ได้พอ"*
+> ⛔ `.env` ของเครื่อง Dev ชี้ Supabase/Upstash **ชุดเดียวกับ prod** → ห้ามรัน
+> `prisma migrate` / `db push` / `seed` / `seed-demo` เพื่อทำงานนี้เด็ดขาด
+> SQL ในไฟล์นี้เป็น `SELECT` ล้วน รันบน Supabase SQL editor ได้ปลอดภัย
 
 ---
 
-## 0. สรุปผลการสืบค้น (อ่านก่อน — มี 4 เรื่องที่เปลี่ยนวิธีเดิน)
+## 0. บันทึกการตัดสินใจ — ทำไม "ทาง A (ไม่แตะ DB)" ไม่ใช่ "ทาง B (ใส่ TenantFeature override)"
 
-### 0.1 ไม่มี "ทางที่ถูกต้อง" ผ่าน route/script → **ต้องเดินทาง B (SQL ตรง)**
+> 📌 **อ่านก่อนคิดจะย้อนกลับไปทำ B** — เคยพิจารณาแล้วและ **ถูกปฏิเสธ** ด้วยเหตุผลด้านล่าง
 
-ค้นทั้งรีโปแล้ว **ไม่มี** admin route / API / script / migration ใดที่ **สร้างหรือแก้ `TenantFeature`** เลย
-ตัวตนของ `TenantFeature` ในรีโปมีแค่:
+ข้อเสนอเดิม (ทาง B) คือ `INSERT TenantFeature(enabled=true)` ให้ `acme`/`globex` เพื่อบังคับเปิด feature
+**Dev ปฏิเสธ** ด้วยเหตุผล (verbatim):
+
+> *"เป้าหมายคือพิสูจน์ว่าฟีเจอร์ทำงานบน prod เส้นทางที่ลูกค้าจริงเดินคือ plan → x-tenant-plan (ผ่าน Redis)
+> → hasFeature() ถ้าใส่ TenantFeature override เราจะพิสูจน์ว่า 'override ทำงาน' แล้วปิด gate ทั้งที่เส้นทางจริง
+> ยังไม่เคยถูกแตะ = ตรวจคนละชั้นกับที่ค่าถูกใช้จริง ซึ่งเป็นกฎที่ commit `457e40b` เพิ่งเขียนลง CLAUDE.md เมื่อกี้เอง"*
+>
+> *"ที่คุณบอกว่า 'ไม่ผ่าน Redis cache' เป็นข้อดี — สำหรับงานนี้มันกลับด้าน Redis + plan path
+> คือของที่ต้องพิสูจน์ ไม่ใช่ noise ที่ต้องกำจัด"*
+>
+> *"B แลกมาด้วย deviation `audit.log()` + write ด้วยมือบน prod + override row ที่จะบังคับ acme/globex ตลอดไป
+> (วันหลังเปลี่ยน plan แล้วไม่มีผล คนจะงง)"*
+
+**สรุปข้อเสียของ B ที่ทำให้ตกไป:**
+
+| ข้อเสียของ B | รายละเอียด |
+| --- | --- |
+| ตรวจคนละชั้นกับที่ใช้จริง | override ชนะก่อนทุกอย่าง (`src/lib/features.ts:90–92`) → plan path + Redis cache ไม่เคยถูกทดสอบ |
+| deviation กฎ AuditLog | ไม่มี route/script ใดเขียน `TenantFeature` ได้ (ดู § 1.2) → ต้อง `INSERT AuditLog` เอง ขัด `src/lib/audit.ts:5–6` |
+| write ด้วยมือบน prod | เพิ่มความเสี่ยงโดยไม่จำเป็นสำหรับงานที่แค่ต้อง "พิสูจน์" |
+| override ค้างถาวร | วันหลังเปลี่ยน plan ของ acme/globex แล้ว entitlement ไม่ขยับ — คนมาอ่านทีหลังจะงง |
+
+**ข้อดีของ A ที่ชี้ขาด:** สมมติฐานที่ว่า *"acme/globex เป็น plan `pro` จึงน่าจะเปิดอยู่แล้ว"* เป็นการ **infer
+จาก `prisma/seed-demo.ts:589–593, 618–634`** ซึ่งเป็นไฟล์ที่ **ห้ามรันบน prod** →
+**ไม่มีใครเคยยืนยันค่า `Tenant.plan` จริงบน prod เลย** ทาง A ตอบคำถามนี้ในตัว (§ 2-2 + § 4)
+
+---
+
+## 1. ข้อเท็จจริงพื้นฐานที่สืบค้นแล้ว (ใช้ตีความผลลัพธ์)
+
+### 1.1 ตรรกะ feature gate (`src/lib/features.ts`)
+
+`hasFeature(tenantId, key, tenantPlan)` (`:64–110`) ตัดสินตามลำดับ:
+
+1. `TenantFeature` override → ถ้ามีแถว **ชนะทุกอย่าง** (`:70–78`, `:90–92`)
+2. ไม่มี `FeatureFlag` record → `false` (safe default, `:95–97`)
+3. มี `requiredPlan` → เทียบ plan (`:100–106`) ด้วย `isPlanSufficient` (`:36–43`)
+   ลำดับ plan: `starter=0 · growth=1 · pro=2 · enterprise=3` (`:25–30`)
+4. ไม่มี `requiredPlan` → ใช้ `defaultEnabled` (`:109`)
+
+`tenantPlan` ที่ route ส่งเข้ามาคือ `ctx.plan` ซึ่งมาจาก header `x-tenant-plan` ที่ proxy inject
+(`src/lib/tenant.ts:95`, fallback `"starter"` ที่ `:105`) — **นี่คือจุดที่ Redis cache เข้ามาเกี่ยว**
+(`src/proxy.ts` lookup tenant + cache) → **เส้นทางที่ต้องพิสูจน์**
+
+`FEATURE_KEYS.WEBHOOKS = "webhooks"` (`src/lib/features.ts:137`)
+
+### 1.2 ไม่มี admin route/script ใดจัดการ `TenantFeature`
+
+ตัวตนของ `TenantFeature` ในรีโปมีแค่ 4 จุด และ **ไม่มีจุดใดเขียนข้อมูล**:
 
 | ที่ | บรรทัด | ทำอะไร |
 | --- | --- | --- |
-| `prisma/schema.prisma` | 261–272 | นิยาม model |
-| `src/lib/features.ts` | 70–92 | **อ่านอย่างเดียว** (`findUnique` → override ชนะเสมอ) |
-| `prisma/migrations/20260531113517_init/migration.sql` | 88–97, 277, 280, 388 | สร้างตาราง + unique `(tenantId, featureKey)` |
+| `prisma/schema.prisma` | 261–272 | นิยาม model + unique `(tenantId, featureKey)` |
+| `src/lib/features.ts` | 70–78 | **อ่านอย่างเดียว** (`findUnique`) |
+| `prisma/migrations/20260531113517_init/migration.sql` | 88–97, 277, 280, 388 | สร้างตาราง |
 | `prisma/migrations/20260617000000_rls_tenant_isolation/migration.sql` | 206–218 | RLS policy |
 
-- รายการ API route ทั้งหมด (`find src/app/api -name route.ts`, 58 ไฟล์) **ไม่มี** route ชื่อ `features`/`admin`/`entitlements`
-- `scripts/` มีแค่ `scan-client-bundle.ts` และ `stripe-smoke.ts` — ไม่เกี่ยวข้อง
-- `prisma/seed.ts:160–183` seed **`FeatureFlag` (global)** เท่านั้น ไม่แตะ `TenantFeature`
-- `prisma/seed-demo.ts` ไม่มีคำว่า `tenantFeature` เลย
+- API route ทั้งหมด (`find src/app/api -name route.ts` = 58 ไฟล์) ไม่มี route `features`/`admin`/`entitlements`
+- `scripts/` มีแค่ `scan-client-bundle.ts`, `stripe-smoke.ts`
+- `prisma/seed.ts:160–183` seed แค่ `FeatureFlag` (global) — ไม่แตะ `TenantFeature`
 
-**สรุป: ทาง B** — ต้อง `INSERT ... ON CONFLICT DO UPDATE` ลง `TenantFeature` ตรง ๆ บน Supabase
+→ ข้อเท็จจริงนี้คือเหตุผลหนึ่งที่ B ต้องใช้ SQL มือ + insert AuditLog เอง (และเป็นเหตุผลที่ B ตกไป)
 
-### 0.2 ผลกระทบต่อกฎ AuditLog (deviation ที่ต้องบันทึก)
+### 1.3 Guard ของ webhook routes
 
-กฎโปรเจกต์: *"ใช้ helper `audit.log()` เสมอ ไม่ create row ตรง ๆ"* (`src/lib/audit.ts:5–6`)
+| route | ไฟล์:บรรทัด | role ที่ต้องมี | feature gate |
+| --- | --- | --- | --- |
+| `GET /api/webhook-endpoints` | `src/app/api/webhook-endpoints/route.ts:96` | `requireAgent({roles:["OWNER","ADMIN"]})` `:98` | `:102–111` |
+| `POST /api/webhook-endpoints` | `:134` | `:136` | `:139–148` |
+| `PATCH` / `DELETE /api/webhook-endpoints/[id]` | `src/app/api/webhook-endpoints/[id]/route.ts:98, 234` | OWNER/ADMIN | มี |
+| `GET /api/webhook-deliveries` | `src/app/api/webhook-deliveries/route.ts:98` | `:100` | `:103` |
 
-การรัน SQL ตรง = `audit.log()` **ไม่ถูกเรียก** → ไม่มีร่องรอยว่าใครเปิด entitlement ให้ tenant
+### 1.4 ⚠️ ปุ่ม demo login ใช้ smoke งานนี้ไม่ได้
 
-**การตัดสินใจ:** ยอมรับ deviation นี้ **เฉพาะครั้งนี้** โดย **insert `AuditLog` row เองใน transaction เดียวกัน**
-กับการเขียน `TenantFeature` (ดู § 3) เหตุผล:
+- demo member ถูก seed เป็น `AGENT` เสมอ (`prisma/seed-demo.ts:674, 678, 698, 702`)
+- `/api/auth/demo/login` **บังคับซ้ำ** ว่า `role === "AGENT"` (`src/app/api/auth/demo/login/route.ts:19–21`)
+- webhook routes ต้อง `OWNER`/`ADMIN` → demo session จะได้ **`403 FORBIDDEN` เสมอ ไม่เกี่ยวกับ flag**
 
-1. ไม่มี code path ใดในระบบที่เขียน `TenantFeature` ได้เลย → ไม่มีทาง "ใช้ helper" โดยไม่เขียนโค้ดใหม่
-2. การเขียน admin route ใหม่เพื่อ operation ครั้งเดียวคือ scope creep + เพิ่ม attack surface
-   (route ที่แก้ entitlement ได้ = ของอันตราย ต้องมี design/security review ของตัวเอง)
-3. Row ที่ insert เองใช้ **คอลัมน์ชุดเดียวกับที่ `createAuditLog()` เขียน** (`src/lib/audit.ts:143–158`)
-   → shape เหมือนกันทุกประการ ต่างแค่ transport
-4. `actorType = "system"` เป็นค่าที่ helper รองรับอยู่แล้ว (`src/lib/audit.ts:135–137` — ไม่มี actor id)
+→ smoke ต้องใช้บัญชี **OWNER จริง**: `owner@acme.test`
 
-**Follow-up ที่ควรเปิดเป็นงานแยก (ไม่ทำในงานนี้):** ถ้าอนาคตต้องเปิด/ปิด flag ราย tenant บ่อยขึ้น
-→ ทำ **script** (ไม่ใช่ route สาธารณะ) ที่เรียก `audit.log()` จริง แล้วเลิกใช้ SQL ตรง
+### 1.5 แยก 403 สองแบบ (สำคัญที่สุดต่อการอ่านผล)
 
-### 0.3 ⚠️ ตรวจก่อนว่า flag "ยังปิดจริงไหม" — อาจเปิดอยู่แล้วจาก plan
+ทั้งคู่เป็น HTTP `403` — **ต้องดู `error.code` ใน response body เท่านั้น**
 
-`prisma/migrations/20260722010000_add_webhooks_feature_flag/migration.sql:6–17` insert
-`FeatureFlag('webhooks', defaultEnabled=false, requiredPlan='pro')`
-
-และ `prisma/seed-demo.ts:589–593, 618–634` ตั้ง **acme/globex เป็น plan `pro`**
-
-ตรรกะ `hasFeature()` (`src/lib/features.ts:100–106`) → ถ้าไม่มี override และ `requiredPlan='pro'`
-จะเทียบ plan: `isPlanSufficient('pro','pro')` = **true** (`src/lib/features.ts:36–43`)
-
-**แปลว่า:** ถ้า prod ของ acme/globex เป็น plan `pro` จริง feature **อาจเปิดอยู่แล้วโดยไม่ต้องทำอะไร**
-(ที่ Phase 36 ยังปิด gate ไม่ได้ อาจเป็นเพราะไม่เคยมีใคร *ยืนยัน* ไม่ใช่เพราะมันปิดจริง)
-
-→ **Pre-check § 2 จะบอกคำตอบ** และถึงจะเปิดอยู่แล้ว **ก็ยังควรใส่ override** เพราะ:
-- override ทำให้ผลลัพธ์ **deterministic** ไม่ผูกกับ plan/billing (ตรงตามคำสั่ง Dev)
-- plan มาจาก header `x-tenant-plan` ที่ **cache ใน Redis** (`src/lib/tenant.ts:95, 105`) → path ที่ผ่าน plan
-  ขึ้นกับ cache; ส่วน `TenantFeature` **ไม่มี cache เลย** (`src/lib/features.ts` ไม่ import redis) → เห็นผลทันที
-
-### 0.4 ⚠️ Demo login ให้ role = `AGENT` เท่านั้น → **smoke ด้วย demo persona จะได้ 403 ตลอด**
-
-- ทุก webhook route บังคับ `requireAgent({ roles: ["OWNER", "ADMIN"] })`
-  (`src/app/api/webhook-endpoints/route.ts:98, 136` · `src/app/api/webhook-deliveries/route.ts:100`)
-- แต่ demo member ถูก seed เป็น `AGENT` เสมอ (`prisma/seed-demo.ts:674, 678, 698, 702`)
-  และ `/api/auth/demo/login` ยัง **บังคับซ้ำ** ว่า `role === "AGENT"`
-  (`src/app/api/auth/demo/login/route.ts:19–21`)
-
-→ **Dev ต้องใช้บัญชี OWNER/ADMIN จริงของ acme/globex ในการ smoke** ไม่ใช่ปุ่ม demo login
-Pre-check § 2 มี query หา member ที่ใช้ได้ **ถ้าไม่มีเลย = blocker ต้องแก้ก่อน smoke** (ดู § 5.0)
-
-⚠️ **ต้องแยก 403 สองแบบให้ออก** — ทั้งคู่เป็น 403 แต่คนละสาเหตุ:
-
-| `error.code` | แปลว่า | อ้างอิง |
+| `error.code` | มาจากไหน | แปลว่า |
 | --- | --- | --- |
-| `FORBIDDEN` | role ไม่ถึง OWNER/ADMIN (หรือ auth ไม่ผ่าน) — **ไม่เกี่ยวกับ flag** | `src/lib/auth.ts:106–111` |
-| `FEATURE_LOCKED` | flag ปิดอยู่ — **นี่คือตัวที่ runbook นี้ต้องทำให้หาย** | `src/app/api/webhook-endpoints/route.ts:104–110` |
+| `FORBIDDEN` | `src/lib/auth.ts:106–111` (`AuthError` statusCode 403) | **role ไม่ถึง OWNER/ADMIN** → smoke ตั้งผิด **ไม่ใช่ผลของ feature** |
+| `FEATURE_LOCKED` | `src/app/api/webhook-endpoints/route.ts:104–110` | ผ่าน role แล้ว แต่ **feature ปิด/plan ไม่ถึง** |
+
+ทุก API ของโปรเจกต์ตอบรูปแบบ `{ data, error }` เสมอ → อ่าน `error.code` จาก body ได้ตรง ๆ
 
 ---
 
-## 1. ผลการตรวจ demo reset vs `WebhookEndpoint` (Dev สั่งเช็คโดยตรง)
+## 2. Pre-check — read-only SQL ทั้งหมด (⛔ ห้ามข้าม)
 
-### คำตอบ: **`prisma/seed-demo.ts` ไม่ล้าง `WebhookEndpoint` — และไม่ล้างอะไรเลยทั้งไฟล์**
+รันบน **Supabase SQL editor** ของ prod ทีละ block แล้ว **จดผลไว้**
+ทุก query เป็น `SELECT` และ scope ด้วย `slug` เสมอ (ไม่มี tenant id ที่เดามาใส่ — ให้ query ดึงเอง)
 
-หลักฐาน:
-- `grep -n "deleteMany\|\.delete(" prisma/seed-demo.ts` → **ไม่มีผลลัพธ์แม้แต่บรรทัดเดียว** (ไฟล์ยาว 891 บรรทัด)
-- header ของไฟล์ระบุชัด: *"idempotent: upsert ทุก record ตาม unique key"* (`prisma/seed-demo.ts:8–9`)
-  ทุก write เป็น `upsert` (`:618, :639, :662, :672, :685, :696, :717, :733, :749, :783, :828, :856`)
-- คำว่า `webhook` ปรากฏใน `seed-demo.ts` แค่ที่เดียวคือ **เนื้อความ ticket ตัวอย่าง** (`prisma/seed-demo.ts:212`)
-  ไม่ใช่โค้ดจัดการ `WebhookEndpoint`
-- **ไม่มี "demo reset" script/route อยู่ในระบบเลย** — `package.json:8–22` ไม่มี npm script สำหรับ seed-demo/reset
-  และไม่มี API route ที่ reset demo
-
-→ กล่าวคือ **"demo reset" ในความหมายของ "ล้างของที่ visitor สร้าง" ไม่มีอยู่จริงในโปรเจกต์นี้**
-seed-demo เป็น *upsert-only reconciler* ที่ reconcile เฉพาะ key ของตัวเอง อะไรที่ visitor สร้างขึ้นใหม่จะ **ค้างตลอดไป**
-
-### ความเสี่ยงที่ตามมา (ประเมินแล้ว)
-
-`acme`/`globex` เป็น demo public (`src/lib/demo.ts:8–13` — creds public-by-design) →
-**visitor คนใดก็ได้** (ถ้าได้สิทธิ์ OWNER/ADMIN) สร้าง `WebhookEndpoint` ชี้ไป URL ของตัวเองได้ แล้ว
-**endpoint นั้นจะค้างถาวรและรับ payload ของ demo tenant ต่อไปเรื่อย ๆ ไม่มีวันหมดอายุ**
-ข้อมูลเป็น demo ไม่ใช่ของจริง (R-1) แต่มันคือ **outbound traffic จาก infra เราไปหา URL ที่เราควบคุมไม่ได้**
-
-**แต่ — ปัจจัยที่ลดความเสี่ยงลงมาก (ตรวจแล้ว):**
-
-1. สร้าง endpoint ได้เฉพาะ **OWNER/ADMIN** (`src/app/api/webhook-endpoints/route.ts:136`)
-   แต่ demo login ให้แค่ `AGENT` และ **บังคับซ้ำที่ route** (`src/app/api/auth/demo/login/route.ts:19–21`)
-   → **visitor ที่เข้าทางปุ่ม demo ปกติ สร้าง endpoint ไม่ได้เลย (ได้ 403 FORBIDDEN)**
-2. cap 10 endpoint ต่อ tenant (`src/lib/webhook-dispatch.ts:39` + เช็คที่ `route.ts:205–214`)
-   → fan-out จำกัด ไม่ระเบิด
-3. rate limit สร้าง 20 ครั้ง/ชม./tenant (`src/app/api/webhook-endpoints/route.ts:30–31, 151–158`)
-4. SSRF guard บังคับ https สาธารณะ (`validateWebhookUrl`, เรียกที่ `route.ts:188`)
-
-### ข้อเสนอ (⛔ **ห้าม implement ในงานนี้** — เขียนเป็นข้อเสนอเท่านั้น)
-
-**ทางแก้ที่เล็กที่สุด (เรียงจากเล็กไปใหญ่):**
-
-- **S1 (เล็กสุด, manual):** ไม่แตะโค้ดเลย — เพิ่มข้อ "ตรวจ `WebhookEndpoint` ของ demo tenant" เข้า
-  operational checklist รายเดือน + SQL ลบแบบ scope ต่อ tenant (มีให้แล้วใน § 6.2 ของไฟล์นี้)
-  เหมาะเพราะปัจจุบัน visitor สร้างไม่ได้อยู่แล้ว (ปัจจัยข้อ 1)
-- **S2 (เล็ก, ~10 บรรทัดใน `prisma/seed-demo.ts`):** เพิ่ม `deleteMany` ของ `WebhookEndpoint`
-  **เฉพาะ `tenantId` ของ demo tenant ที่กำลัง loop อยู่** ก่อน upsert
-  ⚠️ ผลข้างเคียงที่รู้แล้ว: `WebhookDelivery` ผูก composite FK `onDelete: Cascade`
-  (`prisma/schema.prisma:796`) → ลบ endpoint = ประวัติ delivery หายตาม (ยอมรับได้บน demo tenant)
-  ⚠️ และ seed-demo **ห้ามรันจากเครื่อง Dev** (ชี้ prod) → ประโยชน์จริงเกิดต่อเมื่อมี pipeline seed แยก
-- **S3 (ใหญ่, เกิน scope):** TTL/expiry บน `WebhookEndpoint` ของ demo tenant + cron ล้าง
-
-**ควรเป็น blocker ของการเปิด flag ไหม → ไม่ (เป็น follow-up แยก)**
-
-เหตุผล: ช่องทางที่ทำให้ความเสี่ยงเกิดจริง คือ "visitor สร้าง endpoint ได้" ซึ่ง **ถูกปิดด้วย role gate
-OWNER/ADMIN อยู่แล้ว 2 ชั้น** (route + demo-login guard) การเปิด flag ไม่ได้เปิดช่องนั้นเพิ่ม —
-มันแค่ทำให้ **บัญชี OWNER/ADMIN ที่มีอยู่แล้ว** ใช้ฟีเจอร์ได้ ซึ่งคือคนของเราเอง
-
-**เงื่อนไขที่จะกลับมาเป็น blocker ทันที:** ถ้ามีการ (ก) ให้ demo persona เป็น OWNER/ADMIN, หรือ
-(ข) ผ่อน role gate ของ `/api/webhook-endpoints` ลงมาที่ `AGENT` → ต้องทำ S2 ก่อน
-
-**Action ที่ต้องทำในงานนี้แทน:** § 6.1 บังคับให้ Dev **ลบ endpoint ที่สร้างตอน smoke ทิ้งทุกครั้ง**
-(อย่าปล่อยค้าง เพราะไม่มีอะไรมาล้างให้)
-
----
-
-## 2. Pre-check — read-only ทั้งหมด (⛔ ห้ามข้าม)
-
-รันบน **Supabase SQL editor** ของ prod ทีละ block แล้ว **จดผลไว้** ก่อนแตะอะไร
-
-### 2-1 · FeatureFlag `webhooks` มีจริงไหม + ค่าปัจจุบัน
+### 2-1 · `FeatureFlag('webhooks')` มีจริงไหม + ค่าปัจจุบัน
 
 ```sql
 SELECT "key", "defaultEnabled", "requiredPlan", "createdAt"
@@ -170,407 +128,377 @@ WHERE "key" = 'webhooks';
 **คาดหวัง:** 1 แถว · `defaultEnabled = false` · `requiredPlan = 'pro'`
 (ตรงกับ `prisma/migrations/20260722010000_add_webhooks_feature_flag/migration.sql:6–17`)
 
-- ⚠️ **ถ้าได้ 0 แถว** = migration `20260722010000` ยังไม่ apply บน prod → **หยุด** นี่เป็นปัญหาคนละเรื่อง
-  (migration ค้าง) ต้องแก้ก่อน แล้วค่อยกลับมา
-- ⚠️ **ถ้า `defaultEnabled = true`** = มีคนเปิด global ไว้ → **หยุด** แล้วรายงาน ขัดคำสั่ง Dev
-  (ต้องเป็น per-tenant override เท่านั้น)
+- **0 แถว** → migration `20260722010000` ยังไม่ apply บน prod → **หยุด** นี่คือปัญหา migration ค้าง
+  (คนละเรื่องกับ runbook นี้) ต้องแก้ก่อน แล้วจึงกลับมา
+- `defaultEnabled = true` → มีคนเปิด global ไว้ → บันทึกไว้ ผลของ smoke จะตีความต่างออกไป
 
-### 2-2 · tenant id + plan ของ acme/globex (**ห้ามเดา id — ต้องดึงจากที่นี่**)
+### 2-2 · ⭐ `Tenant.plan` **จริงบน prod** ของ acme/globex (คำถามที่ยังไม่เคยมีใครตอบ)
 
 ```sql
-SELECT t."id" AS tenant_id, t."slug", t."isActive", p."name" AS plan_name
+SELECT t."slug", t."isActive", p."name" AS plan_name, t."updatedAt"
 FROM "Tenant" t
 JOIN "Plan" p ON p."id" = t."planId"
 WHERE t."slug" IN ('acme', 'globex')
 ORDER BY t."slug";
 ```
 
-**จดไว้:** `tenant_id` ของแต่ละ slug (จะใช้ต่อทุกขั้น) และ `plan_name`
+**ทำไมสำคัญ:** ที่ผ่านมาเราแค่ *infer* ว่าเป็น `pro` จาก `prisma/seed-demo.ts:589–593, 618–634`
+ซึ่งเป็นไฟล์ที่ **ห้ามรันบน prod** → ค่าจริงยังไม่เคยถูกยืนยัน
 
-> 📌 ถ้า `plan_name = 'pro'` ทั้งคู่ → ตาม § 0.3 feature **น่าจะเปิดอยู่แล้ว** ผ่าน layer 2
-> ให้ทำต่อตามปกติ (override ทำให้ deterministic) แต่ **บันทึกข้อเท็จจริงนี้ไว้ในรายงานปิด gate**
-> ว่า "ไม่ได้ปิดอยู่จริงมาตั้งแต่แรก" — สำคัญต่อการสรุปว่าทำไม Phase 36 ค้าง
+**การตีความ** (เทียบ `requiredPlan` จาก § 2-1 ผ่านลำดับ plan `src/lib/features.ts:25–30`):
 
-### 2-3 · TenantFeature วันนี้เป็นอะไร (ทั้งระบบ สำหรับ key นี้)
+| `plan_name` | คาดว่า smoke § 4-1 จะได้ |
+| --- | --- |
+| `pro` หรือ `enterprise` | `200` — feature เปิดอยู่แล้วผ่าน plan path |
+| `starter` หรือ `growth` | `403 FEATURE_LOCKED` → **หยุดแล้ว escalate** อย่าเพิ่งแก้อะไร (การเปลี่ยน plan = เรื่อง billing) |
+
+### 2-3 · มี `TenantFeature` override ค้างอยู่ไหม (ต้องรู้ก่อนตีความผล)
 
 ```sql
-SELECT tf."tenantId", t."slug", tf."featureKey", tf."enabled", tf."createdAt", tf."updatedAt"
+SELECT t."slug", tf."featureKey", tf."enabled", tf."createdAt", tf."updatedAt"
 FROM "TenantFeature" tf
 JOIN "Tenant" t ON t."id" = tf."tenantId"
 WHERE tf."featureKey" = 'webhooks'
 ORDER BY t."slug";
 ```
 
-**คาดหวัง:** 0 แถว (ยังไม่เคยมีใครตั้ง override)
-ถ้ามีแถวอยู่แล้ว → จดค่าเดิมไว้ **ก่อน** ทำ § 3 (ต้องใช้ตอน rollback)
+**คาดหวัง: 0 แถว** — ถ้าเป็น 0 แปลว่า smoke ที่ได้ 200 คือการพิสูจน์ **plan path จริง** (เป้าหมายของงานนี้)
 
-### 2-4 · หา member OWNER/ADMIN ที่ใช้ smoke ได้ (จาก § 0.4)
+⚠️ ถ้ามีแถว → **หยุด** แล้วรายงาน เพราะแปลว่ามีคนใส่ override ไว้ก่อนหน้า →
+ผล smoke จะพิสูจน์แค่ "override ทำงาน" ไม่ใช่ plan path (คือปัญหาเดียวกับที่ทาง B ถูกปฏิเสธ)
+⛔ **ห้ามลบแถวนั้นเองในงานนี้** — งานนี้ read-only ให้ escalate ก่อน
+
+### 2-4 · ยืนยันว่ามี OWNER/ADMIN ให้ smoke จริง
 
 ```sql
-SELECT t."slug", tm."id" AS member_id, tm."role", tm."isActive", u."email"
+SELECT t."slug", tm."role", tm."isActive", u."email", u."isActive" AS user_active
 FROM "TenantMember" tm
 JOIN "Tenant" t ON t."id" = tm."tenantId"
 JOIN "User" u ON u."id" = tm."userId"
 WHERE t."slug" IN ('acme', 'globex')
   AND tm."role" IN ('OWNER', 'ADMIN')
-  AND tm."isActive" = true
 ORDER BY t."slug", tm."role";
 ```
 
-- **ถ้าได้ ≥ 1 แถวต่อ tenant** → ใช้ email นั้น login ปกติที่ `/login` ของ subdomain นั้น (ต้องรู้ password)
-- **⛔ ถ้าได้ 0 แถว** → **smoke ไม่ผ่านแน่นอน** ไม่ว่า flag จะเปิดหรือไม่ (จะได้ `FORBIDDEN`)
-  → **หยุดที่นี่แล้ว escalate** อย่าเพิ่งเขียน § 3 ดู § 5.0 ประกอบ
+**ต้องเห็น:** `owner@acme.test` เป็น `OWNER` ของ `acme` · `tm."isActive" = true` · `user_active = true`
+(login route เช็คทั้ง `User.isActive` ที่ `src/app/api/auth/agent/login/route.ts:120–127`
+และ membership + `isActive` ที่ `:129–137`)
 
-### 2-5 · หา tenant สำหรับ negative test (ต้องยังได้ 403 `FEATURE_LOCKED`)
+- ถ้า `globex` ไม่มี OWNER/ADMIN → smoke ได้เฉพาะ `acme` และบันทึกเป็น known gap
+  (ไม่ใช่ blocker — tenant เดียวก็พิสูจน์ plan path ได้แล้ว)
+
+### 2-5 · หา tenant สำหรับ negative test (**เช็คก่อนว่ามีจริง — ห้ามแต่งขั้นตอนที่รันไม่ได้**)
 
 ```sql
-SELECT t."slug", t."id" AS tenant_id, p."name" AS plan_name, t."isActive"
+SELECT t."slug", p."name" AS plan_name, t."isActive",
+       (tf."id" IS NOT NULL) AS has_webhooks_override
 FROM "Tenant" t
 JOIN "Plan" p ON p."id" = t."planId"
 LEFT JOIN "TenantFeature" tf
        ON tf."tenantId" = t."id" AND tf."featureKey" = 'webhooks'
 WHERE t."slug" NOT IN ('acme', 'globex')
-  AND tf."id" IS NULL
 ORDER BY p."name", t."slug";
 ```
 
-⚠️ **เลือก tenant ที่ `plan_name` ต่ำกว่า `pro` เท่านั้น** (`starter` หรือ `growth` —
-ลำดับ plan ที่โค้ดใช้อยู่ที่ `src/lib/features.ts:25–30`) เพราะ tenant ที่ plan ≥ `pro`
-จะผ่าน layer 2 และได้ 200 อยู่แล้วโดยไม่เกี่ยวกับ override → **พิสูจน์อะไรไม่ได้**
-
-- ถ้าไม่มี tenant ที่ plan < `pro` เลย → ข้าม negative test แบบ HTTP แล้วใช้ **§ 5.3 ทางเลือก B**
-  (พิสูจน์ด้วย SQL ว่ามี override เพียง 2 แถว) แล้วบันทึกข้อจำกัดนี้ไว้
-
-### 2-6 · (แนะนำ) ยืนยัน RLS ของ webhook tables apply แล้ว — เกี่ยวกับ gate เดียวกัน
+จากนั้นหา **OWNER/ADMIN ของ tenant เหล่านั้น** (ต้องมี ไม่งั้นจะได้ `FORBIDDEN` แทน `FEATURE_LOCKED`):
 
 ```sql
-SELECT tablename, policyname FROM pg_policies
-WHERE tablename IN ('WebhookEndpoint', 'WebhookDelivery', 'TenantFeature');
+SELECT t."slug", p."name" AS plan_name, tm."role", u."email"
+FROM "TenantMember" tm
+JOIN "Tenant" t ON t."id" = tm."tenantId"
+JOIN "Plan" p ON p."id" = t."planId"
+JOIN "User" u ON u."id" = tm."userId"
+WHERE t."slug" NOT IN ('acme', 'globex')
+  AND tm."role" IN ('OWNER', 'ADMIN')
+  AND tm."isActive" = true
+ORDER BY p."name", t."slug";
 ```
 
-คาดหวัง: มี policy `tenant_isolation` ครบทั้ง 3 ตาราง
-(`prisma/migrations/20260723000000_webhooks_rls/migration.sql:37, 53` ·
-`prisma/migrations/20260617000000_rls_tenant_isolation/migration.sql:206–218`)
+**negative test จะทำได้จริงก็ต่อเมื่อครบทั้ง 3 ข้อ:**
+1. มี tenant ที่ `plan_name` ∈ (`starter`, `growth`) — ต่ำกว่า `requiredPlan='pro'`
+2. tenant นั้น **ไม่มี** override (`has_webhooks_override = false`)
+3. Dev **เข้าถึงบัญชี OWNER/ADMIN ของ tenant นั้นได้จริง** (รู้ credentials / เป็นบัญชีของ Dev เอง)
+
+⛔ **ถ้าไม่ครบ → ห้ามเปลี่ยน plan ของ tenant ใดเพื่อทดสอบ และห้ามแต่งขั้นตอนที่รันไม่ได้จริง**
+ให้บันทึกเป็น **known gap** ตามแบบฟอร์ม § 5.3 แล้วเดินต่อ
 
 ---
 
-## 3. ขั้นตอนเปิด flag (ทาง B — SQL ตรง + AuditLog ใน transaction เดียว)
+## 3. เตรียม session (OWNER จริง — ⛔ ไม่ใช่ปุ่ม demo login)
 
-> **หลักการที่ SQL ชุดนี้ยึด:**
-> - ทุกคำสั่งมี **tenant scope ชัดเจน** ผ่าน sub-select `WHERE "slug" = '...'` — **ไม่มี UPDATE/DELETE
->   ที่ไม่มี scope** และ **ไม่มีการ hardcode tenant id** (กันพิมพ์ id ผิดแล้วไปโดน tenant อื่น)
-> - **idempotent**: รันซ้ำได้ไม่พัง (`ON CONFLICT`)
-> - `AuditLog` เขียนใน **transaction เดียวกัน** → ไม่มีสภาพ "เปลี่ยน entitlement แต่ไม่มีร่องรอย"
-> - `AuditLog` เป็น **INSERT อย่างเดียว** ไม่มี UPDATE/DELETE (immutable ตาม `src/lib/audit.ts:5`)
->   และ **ไม่มี PII** ใน `after`/`metadata` (มีแค่ featureKey/enabled/เหตุผล)
+**Route login จริง:** `POST /api/auth/agent/login` (`src/app/api/auth/agent/login/route.ts:45`)
+body = `{ "email": "...", "password": "..." }` (schema `:31–34`)
+หน้า UI คู่กัน: `/login` (`src/app/(agent)/login/page.tsx`)
 
-### 3-1 · รันทีละ tenant — **acme**
+**Cookie ที่ได้:** `hw_agent_session` (`src/lib/auth.ts:39`)
+attributes: `httpOnly` · `secure` (prod) · `sameSite=strict` · `path=/` · อายุ **8 ชม.**
+(`src/lib/auth.ts:378–385`, `COOKIE_MAX_AGE_SECONDS` `:371`)
 
-```sql
-BEGIN;
+> ⛔ **ห้าม echo / paste / commit ค่า cookie หรือ password ลงไฟล์ / chat / handoff ใด ๆ**
+> cookie นี้ใช้แทนตัวตน OWNER ได้ตรง ๆ
 
--- (ก) เปิด override ให้ acme เท่านั้น — idempotent
-INSERT INTO "TenantFeature" ("id", "tenantId", "featureKey", "enabled", "createdAt", "updatedAt")
-SELECT
-  'tf_phase38_webhooks_' || t."slug",   -- deterministic id → รันซ้ำชนกับตัวเองเสมอ ไม่สร้างขยะ
-  t."id",
-  'webhooks',
-  true,
-  CURRENT_TIMESTAMP,
-  CURRENT_TIMESTAMP                      -- ⚠️ updatedAt ไม่มี DB default (Prisma จัดการ) → ต้องใส่เอง
-FROM "Tenant" t
-WHERE t."slug" = 'acme'                  -- ← tenant scope
-ON CONFLICT ("tenantId", "featureKey")
-DO UPDATE SET "enabled" = EXCLUDED."enabled",
-              "updatedAt" = CURRENT_TIMESTAMP;
+### ทางที่ 1 (แนะนำ) — curl cookie jar ล้วน ไม่ต้องเปิด browser
 
--- (ข) AuditLog — deviation จากกฎ "ใช้ audit.log() เสมอ" (เหตุผลบันทึกไว้ที่ § 0.2 ของ runbook นี้)
---     คอลัมน์ตรงกับที่ createAuditLog() เขียนทุกช่อง (src/lib/audit.ts:143-158)
-INSERT INTO "AuditLog" (
-  "id", "tenantId", "actorType", "actorUserId", "actorMemberId", "actorContactId",
-  "targetType", "targetId", "action", "before", "after", "metadata", "ticketId", "createdAt"
-)
-SELECT
-  'audit_phase38_webhooks_' || t."slug",
-  t."id",
-  'system',                              -- actorType ที่ helper รองรับ (src/lib/audit.ts:135-137)
-  NULL, NULL, NULL,
-  'tenant_feature',
-  'webhooks',
-  'tenant_feature.enabled',
-  '{"enabled": null, "source": "plan_default"}'::jsonb,
-  '{"enabled": true, "source": "tenant_override"}'::jsonb,
-  '{"phase": "38", "reason": "post-merge gate Phase 36 — prove outbound webhooks on prod", "method": "manual SQL (no admin route exists)", "runbook": ".claude/specs/phase-38-webhooks-flag-runbook.md"}'::jsonb,
-  NULL,
-  CURRENT_TIMESTAMP
-FROM "Tenant" t
-WHERE t."slug" = 'acme'                  -- ← tenant scope
-ON CONFLICT ("id") DO NOTHING;           -- รันซ้ำ = ไม่เพิ่มแถว (immutable, ห้าม UPDATE)
-
-COMMIT;
-```
-
-### 3-2 · รันซ้ำอีกรอบสำหรับ **globex**
-
-ใช้ block เดียวกับ § 3-1 แต่เปลี่ยน `'acme'` → `'globex'` **ทั้ง 2 แห่ง** (บรรทัด `WHERE t."slug"`)
-id ทั้งสองตัวสร้างจาก `|| t."slug"` อยู่แล้ว → ไม่ชนกัน
-
-> 💡 **รันทีละ tenant ตั้งใจ** — ไม่ใช้ `IN ('acme','globex')` เพื่อให้เห็นว่าแต่ละครั้งกระทบ 1 tenant
-> และถ้าพลาดกลางทาง rollback ได้ทีละตัว
-
-### 3-3 · ถ้าเจอ error RLS (`new row violates row-level security policy`)
-
-`TenantFeature`/`AuditLog` เป็น `ENABLE ROW LEVEL SECURITY` แต่ **ไม่ได้ `FORCE`**
-(`prisma/migrations/20260617000000_rls_tenant_isolation/migration.sql:207, 222` — เทียบกับ
-`Ticket` ที่ FORCE ที่บรรทัด 36) → role ที่เป็น table owner จะ bypass ได้ตามปกติ **จึงไม่ควรเจอ error นี้**
-
-ถ้าเจอจริง ให้ใส่บรรทัดนี้ **ต่อจาก `BEGIN;` ทันที** แล้วรันใหม่ (bypass มีผลเฉพาะใน transaction นี้):
-
-```sql
-SELECT set_config('app.rls_bypass', 'on', true);  -- true = transaction-local
-```
-
-(ค่านี้คือ escape hatch ที่ policy รองรับอยู่แล้ว — เห็นได้ที่ migration บรรทัด 211, 216)
-ความปลอดภัยยังอยู่ เพราะทุก statement ด้านบน scope ด้วย `WHERE t."slug" = '...'` อยู่แล้ว
-
-### 3-4 · Verify ทันทีหลัง commit (read-only)
-
-```sql
-SELECT t."slug", tf."featureKey", tf."enabled", tf."updatedAt"
-FROM "TenantFeature" tf
-JOIN "Tenant" t ON t."id" = tf."tenantId"
-WHERE tf."featureKey" = 'webhooks'
-ORDER BY t."slug";
-```
-
-**ผ่านเมื่อ:** ได้ **2 แถวเท่านั้น** — `acme` และ `globex` · `enabled = true` ทั้งคู่
-⚠️ ถ้าได้ > 2 แถว = เผลอเปิดให้ tenant อื่น → ไป § 4 ทันที
-
-```sql
-SELECT t."slug", a."action", a."actorType", a."targetType", a."targetId", a."after", a."createdAt"
-FROM "AuditLog" a
-JOIN "Tenant" t ON t."id" = a."tenantId"
-WHERE a."targetType" = 'tenant_feature' AND a."targetId" = 'webhooks'
-ORDER BY t."slug";
-```
-
-**ผ่านเมื่อ:** 2 แถว (acme, globex) · `actorType='system'` · `after` มี `"enabled": true`
-
----
-
-## 4. Rollback (ถ้าพัง / ต้องปิดกลับ)
-
-> ปิดกลับมี 2 ระดับ — **เลือกระดับ 1 ก่อนเสมอ**
-
-### 4-1 · ระดับ 1 (แนะนำ): พลิก override เป็น `false` — เก็บร่องรอยไว้
-
-```sql
-BEGIN;
-
-UPDATE "TenantFeature" tf
-SET "enabled" = false, "updatedAt" = CURRENT_TIMESTAMP
-FROM "Tenant" t
-WHERE tf."tenantId" = t."id"             -- ← tenant scope (join)
-  AND t."slug" = 'acme'                  -- ← เปลี่ยนเป็น 'globex' แล้วรันซ้ำอีกรอบ
-  AND tf."featureKey" = 'webhooks';
-
-INSERT INTO "AuditLog" (
-  "id", "tenantId", "actorType", "targetType", "targetId",
-  "action", "before", "after", "metadata", "createdAt"
-)
-SELECT
-  'audit_phase38_webhooks_rollback_' || t."slug",
-  t."id", 'system', 'tenant_feature', 'webhooks',
-  'tenant_feature.disabled',
-  '{"enabled": true, "source": "tenant_override"}'::jsonb,
-  '{"enabled": false, "source": "tenant_override"}'::jsonb,
-  '{"phase": "38", "reason": "rollback", "runbook": ".claude/specs/phase-38-webhooks-flag-runbook.md"}'::jsonb,
-  CURRENT_TIMESTAMP
-FROM "Tenant" t
-WHERE t."slug" = 'acme'
-ON CONFLICT ("id") DO NOTHING;
-
-COMMIT;
-```
-
-`enabled = false` เป็น **override ที่ชนะ layer plan ด้วย** (`src/lib/features.ts:90–92`)
-→ ปิดได้จริงแม้ tenant จะ plan `pro`
-
-### 4-2 · ระดับ 2: ลบแถว override ทิ้ง (กลับไปตัดสินตาม plan เหมือนเดิม 100%)
-
-⚠️ ใช้เมื่อต้องการคืนสภาพ "เหมือนไม่เคยทำ" เท่านั้น — **ห้ามลบ `AuditLog`** (immutable)
-
-```sql
-DELETE FROM "TenantFeature" tf
-USING "Tenant" t
-WHERE tf."tenantId" = t."id"
-  AND t."slug" IN ('acme', 'globex')     -- ← tenant scope บังคับ ห้ามตัดออก
-  AND tf."featureKey" = 'webhooks';      -- ← key scope บังคับ ห้ามตัดออก
-```
-
-📌 ถ้า § 2-3 พบว่ามี override เดิมอยู่ก่อนแล้ว → **อย่าใช้ § 4-2** ให้ใช้ § 4-1 แล้วเซ็ตกลับเป็นค่าเดิมที่จดไว้
-
----
-
-## 5. เกณฑ์ผ่าน (post-merge gate) — smoke บน prod จริง
-
-> 📌 โปรเจกต์นี้ resolve tenant จาก **Host header** (`src/proxy.ts:203`, root domain
-> `NEXT_PUBLIC_ROOT_DOMAIN` default `gethelpwise.xyz`) → ใช้ `curl -H "Host: ..."` เท่านั้น
-> **ห้ามใช้ Node `fetch`** (undici ดรอป Host header — บทเรียนเดิมของโปรเจกต์)
-
-### 5-0 · เตรียม session cookie (⛔ ต้องเป็น OWNER/ADMIN)
-
-- ใช้ email จาก **§ 2-4** login ที่หน้า agent login ของ subdomain นั้น (เช่น `https://acme.gethelpwise.xyz`)
-- เปิด DevTools → Application → Cookies → คัดลอกค่า cookie ชื่อ **`hw_agent_session`**
-  (`src/lib/auth.ts:39`) — httpOnly จึงต้องอ่านจาก DevTools ไม่ใช่จาก JS
-- ⛔ **ห้ามใช้ปุ่ม demo login** — ได้ role `AGENT` → จะเจอ `403 FORBIDDEN` เสมอ (§ 0.4)
-- ⛔ **ห้ามวางค่า cookie ลงในเอกสาร/handoff/commit ใด ๆ** — มันคือ session token
+`acme.gethelpwise.xyz` เป็น DNS จริงบน prod (root domain `NEXT_PUBLIC_ROOT_DOMAIN`
+default `gethelpwise.xyz` — `src/proxy.ts:203`) → ยิงตรงได้ **ไม่ต้อง override Host**
+และ cookie jar จะผูก domain ให้ถูกต้องอัตโนมัติ
 
 ```bash
-# ตั้ง env ชั่วคราวใน shell (อย่า echo, อย่า commit)
-read -s HW_COOKIE   # วาง value ของ hw_agent_session แล้ว Enter
+JAR=$(mktemp)            # เก็บ cookie ชั่วคราว
+read -s HW_PASS          # พิมพ์ password ของ owner@acme.test แล้ว Enter (ไม่โชว์บนจอ)
+
+curl -sS -i -c "$JAR" \
+  -X POST https://acme.gethelpwise.xyz/api/auth/agent/login \
+  -H "Content-Type: application/json" \
+  --data "$(printf '{"email":"owner@acme.test","password":"%s"}' "$HW_PASS")"
 ```
 
-### 5-1 · Positive — tenant ที่เปิด flag ต้องได้ **200**
+**ผ่านเมื่อ:** `200` + response header มี `Set-Cookie: hw_agent_session=...`
 
-**Endpoint จริงจากรีโป:** `GET /api/webhook-endpoints`
-(`src/app/api/webhook-endpoints/route.ts:96` — auth `requireAgent({roles:["OWNER","ADMIN"]})` บรรทัด 98,
-feature gate บรรทัด 102–111, ตอบ 200 บรรทัด 122)
+| ผลอื่น | แปลว่า | อ้างอิง |
+| --- | --- | --- |
+| `401` + `"code":"LOGIN_FAILED"` | email/password ผิด **หรือ** user inactive **หรือ** ไม่ได้เป็น member ของ tenant นี้ (ข้อความเดียวกันโดยตั้งใจ กัน enumeration) | `route.ts:102–107, 112–117, 121–127, 137–141` |
+| `429` | ชน rate limit 10 req/60s ต่อ IP | `route.ts:48–56` |
+| `404` | subdomain resolve tenant ไม่ได้ | `src/proxy.ts` |
+
+จบงานแล้วลบทิ้ง: `rm -f "$JAR"; unset HW_PASS`
+
+### ทางที่ 2 (สำรอง) — ยิงตรงไปที่ Vercel deployment URL ด้วย Host header
+
+ใช้เมื่อต้องทดสอบ deployment ที่ยังไม่ผูก DNS
+
+> ⚠️ **ห้ามใช้ Node `fetch`** — undici ดรอป Host header (บทเรียนเดิมของโปรเจกต์) ต้องใช้ `curl -H "Host: ..."`
+> ⚠️ โหมดนี้ cookie jar จะผูก cookie กับ **host ของ URL** ไม่ใช่ค่าใน `-H "Host:"` →
+> ต้อง **ส่ง cookie เองด้วย `-H "Cookie: ..."`** แทน `-b jar`
 
 ```bash
-curl -sS -i \
-  -H "Host: acme.gethelpwise.xyz" \
-  -H "Cookie: hw_agent_session=$HW_COOKIE" \
-  https://acme.gethelpwise.xyz/api/webhook-endpoints
+curl -sS -i -H "Host: acme.gethelpwise.xyz" \
+  -H "Cookie: hw_agent_session=<TOKEN>" \
+  https://<deployment-host>/api/webhook-endpoints
 ```
 
-ทำซ้ำกับ `globex` (เปลี่ยน Host + URL + ใช้ cookie ของ session globex — **คนละ session**)
+หา `<TOKEN>`: login ที่ `https://acme.gethelpwise.xyz/login` → DevTools → Application → Cookies →
+`hw_agent_session` (httpOnly จึงอ่านจาก JS ไม่ได้ ต้องดูใน DevTools)
+
+---
+
+## 4. Smoke — เส้นทางจริงที่ลูกค้าเดิน
+
+### 4-1 · Positive: `GET /api/webhook-endpoints` บน `acme`
+
+```bash
+curl -sS -i -b "$JAR" https://acme.gethelpwise.xyz/api/webhook-endpoints
+```
+
+**อ่านผลจาก `error.code` ใน body เสมอ ไม่ใช่แค่ status:**
 
 | ผลลัพธ์ | แปลว่า | ทำอะไรต่อ |
 | --- | --- | --- |
-| `200` + `{"data":{"endpoints":[...]},"error":null}` | ✅ **ผ่าน** | ไปข้อ 5-2 |
-| `403` + `"code":"FEATURE_LOCKED"` | ❌ flag ยังไม่มีผล | กลับไป § 3-4 verify แถว; ถ้าแถวถูกแล้วให้ตรวจว่ายิงถูก tenant จริง |
-| `403` + `"code":"FORBIDDEN"` | ⚠️ **ไม่ใช่ปัญหา flag** — role ไม่ถึง OWNER/ADMIN | กลับไป § 2-4 / § 5-0 หา account ที่ถูก |
-| `401` + `"code":"UNAUTHORIZED"` | cookie หมดอายุ/ผิด (อายุ 8 ชม. — `src/lib/auth.ts:371`) | login ใหม่ |
+| `200` + `{"data":{"endpoints":[...]},"error":null}` (`route.ts:122`) | ✅ **ผ่าน** — plan path + Redis + gate ทำงานครบบน prod | ไป § 4-2 |
+| `403` + `"code":"FEATURE_LOCKED"` (`route.ts:104–110`) | plan ไม่ถึง `pro` หรือ flag ปิด | เทียบ § 2-1 / § 2-2 → ถ้า plan จริง < `pro` ให้ **หยุด escalate** (เรื่อง billing) |
+| `403` + `"code":"FORBIDDEN"` (`src/lib/auth.ts:106–111`) | ⚠️ **smoke ตั้งผิด** — role ไม่ถึง OWNER/ADMIN (เช่นเผลอใช้ demo session) | กลับไป § 2-4 / § 3 ใช้ `owner@acme.test` |
+| `401` + `"code":"UNAUTHORIZED"` | cookie หมดอายุ (8 ชม.) หรือไม่ได้แนบ | login ใหม่ (§ 3) |
 
-### 5-2 · End-to-end (แนะนำ — พิสูจน์ว่า "ทำงาน" ไม่ใช่แค่ "ไม่ 403")
+ทำซ้ำกับ **`globex`** (`https://globex.gethelpwise.xyz/...` + **login แยก session** เพราะ cookie ผูกกับ
+subdomain) — ข้ามได้ถ้า § 2-4 พบว่า globex ไม่มี OWNER/ADMIN (บันทึกเป็น gap)
 
-1. **สร้าง endpoint** ชี้ไป request-bin สาธารณะที่ Dev คุมเอง (ต้องเป็น **https** + สาธารณะ
-   เพราะ SSRF guard บล็อก private/loopback/CGNAT/metadata — `route.ts:188–198`)
+### 4-2 · End-to-end (ยืนยันว่า "ทำงาน" ไม่ใช่แค่ "ไม่ 403")
+
+1. **สร้าง endpoint** ชี้ไป request-bin สาธารณะที่ Dev คุมเอง
+   ต้องเป็น **https สาธารณะ** เพราะ SSRF guard บล็อก private/loopback/CGNAT/metadata
+   (`validateWebhookUrl` เรียกที่ `src/app/api/webhook-endpoints/route.ts:188–198`)
 
    ```bash
-   curl -sS -i -X POST \
-     -H "Host: acme.gethelpwise.xyz" \
-     -H "Cookie: hw_agent_session=$HW_COOKIE" \
+   curl -sS -i -b "$JAR" -X POST https://acme.gethelpwise.xyz/api/webhook-endpoints \
      -H "Content-Type: application/json" \
-     -d '{"description":"phase38 smoke","url":"https://<your-request-bin>","events":["TICKET_CREATED"]}' \
-     https://acme.gethelpwise.xyz/api/webhook-endpoints
+     -d '{"description":"phase38 smoke","url":"https://<your-request-bin>","events":["TICKET_CREATED"]}'
    ```
 
    **ผ่านเมื่อ:** `201` + body มี `plaintextSecret` (`route.ts:248–251`)
-   ⛔ **ห้าม copy `plaintextSecret` ไปวางในเอกสาร/chat/commit** — มันคือ signing secret
+   ⛔ **ห้าม copy `plaintextSecret` ไปไว้ที่ใด** — คือ HMAC signing secret (`prisma/schema.prisma:762–764`)
 
-   | ผลอื่น | แปลว่า |
-   | --- | --- |
-   | `400 INVALID_WEBHOOK_URL` | URL ไม่ผ่าน SSRF guard → ใช้ https สาธารณะจริง |
-   | `409 ENDPOINT_LIMIT_REACHED` | ครบ 10 endpoint แล้ว (`src/lib/webhook-dispatch.ts:39`) → ลบของเก่าก่อน |
-   | `429` | ชน rate limit 20/ชม. (`route.ts:30–31`) → รอ |
+   | ผลอื่น | แปลว่า | อ้างอิง |
+   | --- | --- | --- |
+   | `400` + `"code":"INVALID_WEBHOOK_URL"` | URL ไม่ผ่าน SSRF guard | `route.ts:191–197` |
+   | `409` + `"code":"ENDPOINT_LIMIT_REACHED"` | ครบ cap 10 endpoint/tenant | `src/lib/webhook-dispatch.ts:39`, `route.ts:206–214` |
+   | `429` | ชน rate limit 20 create/ชม./tenant | `route.ts:30–31, 151–158` |
 
-2. **ทริกเกอร์ event** — สร้าง ticket ใหม่บน tenant นั้นผ่าน UI agent
+2. **ทริกเกอร์ event** — สร้าง ticket ใหม่บน `acme` ผ่าน UI agent
    (`POST /api/tickets` → `dispatchWebhookEvent` ที่ `src/app/api/tickets/route.ts:495`)
-   → ควรเห็น request เข้า request-bin ของ Dev
+   → ควรเห็น request เข้า request-bin
+   ⚠️ ตาม R-1 (`acme`/`globex` เป็น demo public) → **เนื้อหา ticket ต้องเป็นข้อมูลทดสอบเท่านั้น**
 
-3. **ดูประวัติ delivery** — `GET /api/webhook-deliveries`
-   (`src/app/api/webhook-deliveries/route.ts:98`, gate เดียวกัน บรรทัด 100–103)
-   หรือดูใน UI ที่ `/settings/webhooks` (`src/app/(agent)/(workspace)/settings/webhooks/page.tsx`)
-
-   **ผ่านเมื่อ:** มี delivery ที่ `status = SUCCEEDED`
-
-4. ⛔ **ลบ endpoint smoke ทิ้งทันทีเมื่อจบ** (สำคัญ — ไม่มีอะไรมาล้างให้ ดู § 1 และ § 6.1)
+3. **ดูประวัติ delivery**
 
    ```bash
-   curl -sS -i -X DELETE \
-     -H "Host: acme.gethelpwise.xyz" \
-     -H "Cookie: hw_agent_session=$HW_COOKIE" \
+   curl -sS -i -b "$JAR" https://acme.gethelpwise.xyz/api/webhook-deliveries
+   ```
+   (`src/app/api/webhook-deliveries/route.ts:98`; gate เดียวกัน `:100, :103`)
+   หรือดูใน UI ที่ `/settings/webhooks` (`src/app/(agent)/(workspace)/settings/webhooks/page.tsx`)
+
+   **ผ่านเมื่อ:** มี delivery `status = SUCCEEDED` (enum `prisma/schema.prisma:101–104`)
+
+4. ⛔ **ลบ endpoint ที่สร้างตอน smoke ทิ้งทันที** (บังคับ — เหตุผลใน § 6)
+
+   ```bash
+   curl -sS -i -b "$JAR" -X DELETE \
      https://acme.gethelpwise.xyz/api/webhook-endpoints/<ENDPOINT_ID>
    ```
    (`src/app/api/webhook-endpoints/[id]/route.ts:234`)
+   จากนั้นเรียก `GET /api/webhook-endpoints` ซ้ำ → ต้อง **ไม่มี** endpoint ของ smoke เหลือ
 
-### 5-3 · Negative — พิสูจน์ว่า override **แคบจริง** ไม่ได้เปิดทั้งระบบ
+### 4-3 · Negative: tenant ที่ plan ไม่ถึง `pro` ต้องยังได้ `FEATURE_LOCKED`
 
-**ทางเลือก A (ดีที่สุด — พิสูจน์ผ่าน HTTP):**
-ใช้ tenant จาก § 2-5 ที่ **plan < `pro` และไม่มี override** — login เป็น OWNER/ADMIN ของ tenant นั้น แล้ว:
+**ทำได้ก็ต่อเมื่อ § 2-5 ครบทั้ง 3 เงื่อนไข** — ถ้าไม่ครบ ข้ามไป § 5.3 (known gap)
 
 ```bash
-curl -sS -i \
-  -H "Host: <other-slug>.gethelpwise.xyz" \
-  -H "Cookie: hw_agent_session=$HW_COOKIE_OTHER" \
-  https://<other-slug>.gethelpwise.xyz/api/webhook-endpoints
+# login เป็น OWNER/ADMIN ของ tenant นั้นก่อน (§ 3 ทางที่ 1 เปลี่ยน subdomain + email)
+curl -sS -i -b "$JAR_OTHER" https://<other-slug>.gethelpwise.xyz/api/webhook-endpoints
 ```
 
-**ผ่านเมื่อ:** `403` + `"code":"FEATURE_LOCKED"` (**ต้องเป็น `FEATURE_LOCKED` ไม่ใช่ `FORBIDDEN`** —
-`FORBIDDEN` แปลว่าโดนตีตกที่ role ก่อนถึง feature gate → **พิสูจน์เรื่อง flag ไม่ได้**)
-**ไม่ผ่านเมื่อ:** ได้ `200` → แปลว่าเปิดกว้างเกิน → ไป § 4 ทันทีแล้ว escalate
-
-**ทางเลือก B (ถ้าไม่มี tenant plan < pro / ไม่มี OWNER account ของ tenant อื่น):**
-พิสูจน์ด้วย SQL แทน + บันทึกข้อจำกัดไว้ในรายงาน
-
-```sql
--- ต้องได้ 2 แถวเท่านั้น (acme, globex) — ไม่มี tenant อื่นถูกแตะ
-SELECT t."slug", tf."enabled"
-FROM "TenantFeature" tf JOIN "Tenant" t ON t."id" = tf."tenantId"
-WHERE tf."featureKey" = 'webhooks';
-
--- global ต้องยังปิด: defaultEnabled = false
-SELECT "key", "defaultEnabled", "requiredPlan" FROM "FeatureFlag" WHERE "key" = 'webhooks';
-```
-
-### 5-4 · สรุปเกณฑ์ปิด gate
-
-- [ ] § 3-4 — `TenantFeature` มี **2 แถวเท่านั้น** (acme, globex) `enabled=true`
-- [ ] § 3-4 — `AuditLog` มี 2 แถว `targetType='tenant_feature'`, `actorType='system'`
-- [ ] § 5-1 — `GET /api/webhook-endpoints` ได้ **200** ทั้ง acme และ globex
-- [ ] § 5-2 — สร้าง endpoint ได้ `201` + มี delivery `SUCCEEDED` อย่างน้อย 1 (end-to-end จริงบน prod)
-- [ ] § 5-2 ข้อ 4 — **ลบ endpoint smoke ทิ้งแล้ว**
-- [ ] § 5-3 — negative test ผ่าน (`FEATURE_LOCKED` บน tenant อื่น หรือทางเลือก B + บันทึกข้อจำกัด)
-- [ ] § 2-1 — `FeatureFlag.defaultEnabled` ยังเป็น `false` (ไม่ได้เผลอเปิด global)
+| ผลลัพธ์ | สรุป |
+| --- | --- |
+| `403` + `"code":"FEATURE_LOCKED"` | ✅ **ผ่าน** — plan gate ทำงานจริง ไม่ได้เปิดทั้งระบบ |
+| `403` + `"code":"FORBIDDEN"` | ❌ **ไม่นับ** — ตกที่ role ก่อนถึง feature gate → หา account ที่ role ถูก |
+| `200` | ⚠️ **ผิดคาด** — plan ต่ำกว่า `pro` ไม่ควรผ่าน → **escalate ทันที** (อาจมี override ค้าง — เช็ค § 2-3 / `has_webhooks_override` ใน § 2-5) |
 
 ---
 
-## 6. หมายเหตุความเสี่ยง (ต่อจาก § 1)
+## 5. เกณฑ์ปิด post-merge gate ของ Phase 36
 
-### 6.1 ⛔ ต้องลบ endpoint ที่สร้างตอน smoke ทิ้งเสมอ
+รูปแบบตาม `CLAUDE.md` § Post-merge gate
 
-ไม่มี seed/reset/cron ใดในระบบล้าง `WebhookEndpoint` เลย (§ 1) → **อะไรที่สร้างทิ้งไว้ = อยู่ถาวร**
-และจะยิง payload ของ demo tenant ออกไปเรื่อย ๆ ทุกครั้งที่มี ticket ใหม่
+| resource | วิธีตรวจบน prod | ผลที่ถือว่าผ่าน |
+| --- | --- | --- |
+| migration `20260722010000_add_webhooks_feature_flag` | SQL § 2-1 | 1 แถว `key='webhooks'` · `defaultEnabled=false` · `requiredPlan='pro'` |
+| migration `20260723000000_webhooks_rls` — **effect ไม่ใช่แค่แถวใน `_prisma_migrations`** | SQL § 5.1 | `pg_policies` มี `tenant_isolation` บน `WebhookEndpoint` + `WebhookDelivery` และ `relforcerowsecurity = true` ทั้งคู่ |
+| entitlement ของ `acme` (external resource = plan) | SQL § 2-2 | `plan_name` ≥ `pro` ตามลำดับ `src/lib/features.ts:25–30` |
+| ไม่มี override บังหน้า plan path | SQL § 2-3 | `TenantFeature` featureKey `webhooks` = **0 แถว** |
+| smoke read path (`GET /api/webhook-endpoints`) | § 4-1 | `200` + `{"data":{"endpoints":[...]},"error":null}` (ไม่ใช่ 403 ใด ๆ) |
+| smoke write path (`POST /api/webhook-endpoints`) | § 4-2 ข้อ 1 | `201` + มี `plaintextSecret` |
+| smoke end-to-end delivery | § 4-2 ข้อ 2–3 + SQL § 5.2 | มี `WebhookDelivery` `status=SUCCEEDED` ≥ 1 บน `acme` |
+| cleanup หลัง smoke | § 4-2 ข้อ 4 + SQL § 6.1 | ไม่มี endpoint ของ smoke เหลือ |
+| negative: plan gate ยังแคบ | § 4-3 | `403` + `FEATURE_LOCKED` **หรือ** บันทึก known gap ตาม § 5.3 |
 
-### 6.2 SQL ตรวจ/ล้าง `WebhookEndpoint` ของ demo tenant (ใช้ตอน audit เป็นระยะ)
+### 5.1 · SQL ตรวจ effect ของ RLS migration (read-only)
 
 ```sql
--- ตรวจ (read-only) — ควรว่างหลังจบ smoke
+SELECT tablename, policyname, cmd
+FROM pg_policies
+WHERE tablename IN ('WebhookEndpoint', 'WebhookDelivery')
+ORDER BY tablename;
+```
+
+คาดหวัง: policy `tenant_isolation` ครบทั้ง 2 ตาราง
+
+```sql
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname IN ('WebhookEndpoint', 'WebhookDelivery');
+```
+
+คาดหวัง: `relrowsecurity = true` และ `relforcerowsecurity = true` ทั้งคู่
+(migration ตั้ง FORCE ที่ `prisma/migrations/20260723000000_webhooks_rls/migration.sql:37, 53`)
+
+### 5.2 · SQL ยืนยันหลักฐาน delivery (read-only, tenant scope)
+
+```sql
+SELECT t."slug", wd."status", wd."createdAt"
+FROM "WebhookDelivery" wd
+JOIN "Tenant" t ON t."id" = wd."tenantId"
+WHERE t."slug" = 'acme'                      -- ← tenant scope
+ORDER BY wd."createdAt" DESC
+LIMIT 20;
+```
+
+### 5.3 · แบบฟอร์มบันทึก known gap (ใช้เมื่อ negative test ทำไม่ได้จริง)
+
+ถ้า § 2-5 ไม่ครบเงื่อนไข ให้เขียนลงรายงานปิด gate แบบนี้ (เติมค่าจริงจากผล query):
+
+```
+Known gap — negative test (§ 4-3) ทำไม่ได้บน prod
+เหตุผล: [ ] ไม่มี tenant ที่ plan < 'pro'
+        [ ] tenant ที่มีอยู่ถูกใส่ TenantFeature override ไว้
+        [ ] ไม่มี / เข้าถึงบัญชี OWNER-ADMIN ของ tenant นั้นไม่ได้
+หลักฐานประกอบ: ผล query § 2-5 (จำนวน tenant ต่อ plan) — แนบผลจริง
+ชดเชยด้วย: ผล § 2-1 (defaultEnabled = false) + § 2-3 (override 0 แถว)
+          → ยืนยันว่าไม่ได้เปิดทั้งระบบ แม้พิสูจน์ฝั่ง negative ทาง HTTP ไม่ได้
+⛔ ไม่ชดเชยด้วยการเปลี่ยน plan ของ tenant ใดเพื่อทดสอบ (เป็น entitlement/billing ของลูกค้าจริง)
+```
+
+---
+
+## 6. หมายเหตุ — demo reset **ไม่ล้าง** `WebhookEndpoint` (follow-up ไม่ใช่ blocker)
+
+### ข้อเท็จจริง
+
+- `prisma/seed-demo.ts` ยาว **891 บรรทัด** และ **ไม่มี `deleteMany` / `.delete(` แม้แต่บรรทัดเดียว**
+- เป็น **upsert-only reconciler** — header ระบุเอง: *"idempotent: upsert ทุก record ตาม unique key"*
+  (`prisma/seed-demo.ts:8–9`) · write ทุกจุดเป็น `upsert`
+  (`:618, 639, 662, 672, 685, 696, 717, 733, 749, 783, 828, 856`)
+- คำว่า `webhook` ใน `seed-demo.ts` โผล่ **ที่เดียว** คือเนื้อความ ticket ตัวอย่าง (`:212`) ไม่ใช่โค้ดจัดการ
+- **ไม่มี demo-reset script/route ในระบบเลย** — `package.json:8–22` ไม่มี npm script สำหรับ seed-demo/reset
+
+→ **อะไรที่ถูกสร้างขึ้นบน demo tenant จะค้างถาวร** ไม่มีอะไรมาล้างให้
+
+### ความเสี่ยง
+
+`acme`/`globex` เป็น demo public (`src/lib/demo.ts:8–13` — creds public-by-design) →
+ถ้ามีใครสร้าง `WebhookEndpoint` ชี้ไป URL ของตัวเอง มันจะรับ payload ของ demo tenant
+**ต่อไปเรื่อย ๆ ไม่มีวันหมดอายุ** = outbound traffic ที่เราไม่ได้ตั้งใจส่งและควบคุมไม่ได้
+
+### ทำไม **ไม่ใช่ blocker** ของงานนี้
+
+ช่องที่ทำให้เสี่ยงจริง (visitor สร้าง endpoint ได้) **ถูกปิดอยู่แล้ว 2 ชั้น**:
+
+1. route บังคับ OWNER/ADMIN (`src/app/api/webhook-endpoints/route.ts:136`)
+2. demo login บังคับ `role === "AGENT"` (`src/app/api/auth/demo/login/route.ts:19–21`)
+   + seed ตั้ง AGENT (`prisma/seed-demo.ts:674, 678, 698, 702`)
+
+บวก cap 10 endpoint/tenant (`src/lib/webhook-dispatch.ts:39`), rate limit 20/ชม.
+(`src/app/api/webhook-endpoints/route.ts:30–31`) และ SSRF guard (`:188`)
+
+**เงื่อนไขที่จะกลายเป็น blocker ทันที:** (ก) ให้ demo persona เป็น OWNER/ADMIN หรือ
+(ข) ผ่อน role gate ของ `/api/webhook-endpoints` ลงมาที่ `AGENT` → ต้องทำ S2 ก่อน
+
+### ข้อเสนอทางแก้ (⛔ **ห้าม implement ในงานนี้** — เป็นข้อเสนอเท่านั้น)
+
+- **S1 (เล็กสุด, ไม่แตะโค้ด):** เพิ่มข้อ "ตรวจ `WebhookEndpoint` ของ demo tenant" ในรายการตรวจเป็นระยะ
+  ใช้ query read-only § 6.1 — เหมาะที่สุดกับสถานะปัจจุบัน (visitor สร้างไม่ได้อยู่แล้ว)
+- **S2 (~10 บรรทัดใน `prisma/seed-demo.ts`):** `deleteMany` `WebhookEndpoint` **เฉพาะ `tenantId` ของ
+  demo tenant ที่กำลัง loop** ก่อน upsert
+  ⚠️ ผลข้างเคียงที่รู้แล้ว: `WebhookDelivery` ผูก composite FK `onDelete: Cascade`
+  (`prisma/schema.prisma:796`) → ลบ endpoint = ประวัติ delivery หายตาม (ยอมรับได้บน demo tenant)
+  ⚠️ และ seed-demo **ห้ามรันจากเครื่อง Dev** (ชี้ prod) → ประโยชน์จริงเกิดต่อเมื่อมี pipeline seed แยก
+- **S3 (เกิน scope):** TTL/expiry บน `WebhookEndpoint` ของ demo tenant + cron ล้าง
+
+### 6.1 · SQL ตรวจ (read-only, tenant scope) — ใช้หลัง smoke และเป็นระยะ
+
+```sql
 SELECT t."slug", we."id", we."description", we."url", we."enabled", we."createdAt"
 FROM "WebhookEndpoint" we
 JOIN "Tenant" t ON t."id" = we."tenantId"
-WHERE t."slug" IN ('acme', 'globex')
+WHERE t."slug" IN ('acme', 'globex')          -- ← tenant scope
 ORDER BY t."slug", we."createdAt" DESC;
 ```
 
-```sql
--- ล้างเฉพาะ demo tenant (ใช้เมื่อจำเป็น — ⚠️ tenant scope บังคับ ห้ามตัด WHERE ออก)
--- ⚠️ WebhookDelivery ผูกด้วย composite FK onDelete: Cascade (prisma/schema.prisma:796)
---    → ลบ endpoint = ประวัติ delivery ของมันหายตามไปด้วย (ยอมรับได้เพราะเป็น demo tenant)
-DELETE FROM "WebhookEndpoint" we
-USING "Tenant" t
-WHERE we."tenantId" = t."id"
-  AND t."slug" IN ('acme', 'globex');
-```
+**หลัง smoke ต้องไม่มี endpoint ของ smoke เหลือ** (ถูกลบไปแล้วที่ § 4-2 ข้อ 4)
+ถ้ามีของค้างที่ไม่รู้ที่มา → ลบผ่าน **API** `DELETE /api/webhook-endpoints/[id]`
+(`src/app/api/webhook-endpoints/[id]/route.ts:234`) **ไม่ใช่ SQL** — เพื่อให้ `audit.log()` ถูกเรียกตามกฎ
 
-### 6.3 R-1 — acme/globex เป็น demo public
+---
 
-ห้ามนำข้อมูลจริง/URL ภายในองค์กร/ระบบ production ของใครมาผูกกับ 2 tenant นี้
-URL ที่ใช้ smoke ต้องเป็น request-bin ทิ้งขว้างที่ไม่มีข้อมูลสำคัญ
+## 7. Checklist สรุป (ติ๊กตามลำดับ)
 
-### 6.4 หลัง smoke เสร็จ
-
-Feature ยังเปิดค้างอยู่ที่ acme/globex ต่อไป (ตั้งใจ — เพื่อให้ demo แสดงฟีเจอร์ได้)
-ถ้าไม่ต้องการให้เปิดค้าง ให้เดิน § 4-1 หลังเก็บหลักฐานครบ
+- [ ] § 2-1 `FeatureFlag('webhooks')` มีจริง · `defaultEnabled=false` · `requiredPlan='pro'`
+- [ ] § 2-2 บันทึก **`plan_name` จริงบน prod** ของ acme/globex (คำถามที่ยังไม่เคยถูกตอบ)
+- [ ] § 2-3 `TenantFeature` featureKey `webhooks` = 0 แถว (ถ้าไม่ใช่ → หยุด escalate)
+- [ ] § 2-4 ยืนยัน `owner@acme.test` เป็น OWNER + active
+- [ ] § 2-5 ตรวจว่ามี tenant สำหรับ negative test จริงไหม (ครบ 3 เงื่อนไข)
+- [ ] § 3 login สำเร็จ ได้ `hw_agent_session`
+- [ ] § 4-1 `GET /api/webhook-endpoints` = **200** (ไม่ใช่ `FEATURE_LOCKED` / `FORBIDDEN`)
+- [ ] § 4-2 create `201` → ticket ใหม่ → delivery `SUCCEEDED`
+- [ ] § 4-2 ข้อ 4 **ลบ endpoint smoke แล้ว** + § 6.1 ยืนยันว่าไม่เหลือ
+- [ ] § 4-3 negative test ผ่าน **หรือ** บันทึก known gap ตาม § 5.3
+- [ ] § 5.1 RLS policy + `relforcerowsecurity` ของ webhook tables ครบ
+- [ ] ลบ cookie jar / unset password (`rm -f "$JAR"; unset HW_PASS`)
