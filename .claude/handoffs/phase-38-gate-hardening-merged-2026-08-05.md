@@ -69,6 +69,9 @@ Working state:
   (และ Vercel Dashboard override `vercel.json` ได้อีกชั้น — Dev ยืนยันแล้วว่า Override ปิดทั้ง 4 ช่อง)
 - **อย่าใช้ปุ่ม demo login smoke webhooks** — demo persona = `AGENT` → ได้ `FORBIDDEN` เสมอ ไม่เกี่ยวกับ flag
 - **อย่าเปลี่ยน plan ของ tenant ใดเพื่อทำ negative test** — ถ้าไม่มี tenant ที่ plan < `pro` ให้บันทึก known gap (runbook § 5.3)
+- **push แล้วเจอ `remote rejected … Internal Server Error` = 500 ชั่วคราวของ GitHub → retry อย่างเดียว**
+  (เกิดจริง 2026-08-05 · githubstatus แสดง Git Operations ปกติ · retry แล้วผ่าน)
+  ⛔ อย่าเสียเวลาไล่หาสาเหตุใน repo/hook/สิทธิ์ — ไม่ใช่ปัญหาฝั่งเรา
 - **อย่าพยายาม `git push` เอง — Claude Code ทำไม่ได้ทุกทาง** (ทั้ง tool call และโหมด `!`)
   hook `~/.claude/hooks/block-dangerous-git.sh` บล็อกที่ชั้น PreToolUse → **Dev ต้องรันจาก Terminal จริงเสมอ**
   (hook จับที่ข้อความคำสั่งด้วย — commit message ที่มีคำว่า push ก็โดนบล็อก)
