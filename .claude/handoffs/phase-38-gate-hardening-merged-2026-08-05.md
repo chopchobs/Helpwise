@@ -22,7 +22,8 @@ Working state:
 - [x] ✅ **push แล้ว (Dev รันจาก Terminal จริง) — `origin/main` = `58c83d5`** ยืนยันด้วย `git ls-remote origin main`
       · Vercel deploy จาก `58c83d5` = **Ready · Production (live จริง)**
 - [x] ✅ **ค้าง (ก) ปิดแล้ว 2026-08-05** — ดู § ตารางหลักฐาน Phase 38
-- [ ] ค้าง (ข): smoke webhooks ตาม `.claude/specs/phase-38-webhooks-flag-runbook.md`
+- [ ] ค้าง (ข): smoke webhooks — § 4-1 ผ่าน (`200`) แต่ **§ 4-2 ไม่ผ่าน (QStash ตาย)** → **Phase 36 ยังปิด gate ไม่ได้**
+      · ของค้างบน prod ที่ยังไม่เก็บกวาด: **endpoint ของ smoke + delivery `PENDING`** (เก็บสภาพไว้เพื่อวินิจฉัย)
 
 ## ตารางหลักฐาน Phase 38 (ตามรูปแบบ `CLAUDE.md` § Post-merge gate)
 
@@ -32,7 +33,43 @@ Working state:
 | client env (`NEXT_PUBLIC_*`) | clause ในบรรทัดเดียวกัน | ✅ ยืนยัน **2 ค่า** (`SUPABASE_URL` + `ANON_KEY`) — ตรงตามที่ตั้งใจหลังย้าย `ROOT_DOMAIN` เป็น advisory |
 | Vercel Dashboard override | Dev เปิด Project Settings ดูเอง | ✅ Override **ปิดทั้ง 4 ช่อง** → `vercel.json` มีผลจริง |
 | FeatureFlag `webhooks` (Phase 36) — authz/gate | `GET /api/webhook-endpoints` บน `acme` (§ 4-1) | ✅ **200** + `{"data":{"endpoints":[]},"error":null}` (2026-08-05) — ยืนยัน **plan path + Redis + flag gate** ครั้งแรกบน prod |
-| FeatureFlag `webhooks` (Phase 36) — dispatch จริง | end-to-end § 4-2 (create → ticket → delivery) | ⏳ **ยังไม่ทำ** = ส่วนที่เหลือของค้าง (ข) — `200` พิสูจน์แค่ "ประตูเปิด" ยังไม่พิสูจน์ QStash dispatch ซึ่งเป็น fail-soft |
+| FeatureFlag `webhooks` (Phase 36) — dispatch จริง | end-to-end § 4-2 (create → ticket → delivery) | ❌ **ไม่ผ่าน** — create `201` · ticket `201` · delivery **`PENDING` ค้าง** · ปลายทางไม่ได้รับ request เลย → **Phase 36 ยังปิด gate ไม่ได้** (ดู § QStash ตายบน prod) |
+
+## 🔴 Finding: QStash ตายบน prod — dispatch ไม่เคยออกจากระบบ (2026-08-05)
+
+**หลักฐานจาก Vercel runtime log (production):**
+- log counts 45 นาที: `/api/tickets` 1 · `/api/webhook-deliveries` 2 · **ไม่มี `/api/jobs/webhook-deliver` เลยแม้แต่ครั้งเดียว**
+- error log ตอน `POST /api/tickets` (201):
+  `[webhook-dispatch] endpoint <id> failed: {"error":"user (…) not found in this region (eu-central-1). Check that you are using the correct endpoint …"}`
+
+**สาเหตุ:** ไม่ใช่ "ลืมตั้ง env" (ถ้าลืมจะได้ข้อความ `[queue] QSTASH_TOKEN is not set …` ซึ่ง **ไม่พบ**)
+แต่เป็น **credential/endpoint ของ QStash ไม่ตรง region ของบัญชี Upstash** → publish ถูกปฏิเสธตั้งแต่ต้นทาง
+→ ไม่มี message เข้า queue → worker ไม่เคยถูกเรียก → delivery ค้าง `PENDING` ถาวร
+· กลไกที่ทำให้เงียบ: `queue.ts` **throw** จริง แต่ถูก swallow ที่ `webhook-dispatch.ts:128` (`Promise.allSettled`) + `:164` (try/catch ครอบทั้งฟังก์ชัน โดยเจตนา) → API ตอบ 201 ตามปกติ
+
+**⚠️ Blast radius — ตายเงียบพร้อมกันมากกว่า webhooks (ทุกอย่างผ่าน `src/lib/queue.ts` ซึ่ง import `@upstash/qstash` ที่เดียวในทั้ง repo):**
+
+| feature | publish ที่ | ผู้ใช้เห็นอะไร | ระดับ |
+|---|---|---|---|
+| outbound webhooks (7 call sites) | `webhook-dispatch.ts:149` | 201 ปกติ · deliveries ค้าง `PENDING` | fail-soft |
+| **outbound email ตอบกลับลูกค้า** | `tickets/[id]/messages/route.ts:266` | agent เห็นข้อความถูกบันทึกปกติ แต่ **ลูกค้าไม่เคยได้รับเมล** · `emailSentAt` ค้าง `null` ตลอดไป | fail-soft |
+| **SLA sweep** (breach flag + notification + audit) | ไม่มี publish ในโค้ด — ขับด้วย **QStash schedule** | breach flag ไม่เคยถูกตั้ง · ไม่มีแจ้งเตือนใกล้/เกิน deadline · **ไม่มี error path ให้เห็นเลย** | fail-silent สนิท |
+| webhook replay | `webhook-deliveries/[id]/replay/route.ts:108` | กด replay ได้ **500** | fail-loud ✅ |
+
+ไม่กระทบ: inbound email (ประมวลผล inline), Stripe webhook, AI assist, in-app notification, magic-link portal
+
+**⚠️ ซ้อนอีกชั้น:** `src/lib/email.ts:59,70-72` — ถ้า `EMAIL_PROVIDER` ไม่ได้ตั้งบน prod `sendEmail` **throw** ทุกครั้ง
+→ แถว outbound email อาจตายอยู่แล้ว 2 ชั้น แก้ QStash อย่างเดียวไม่พอ (ต้องตรวจ env email ด้วย)
+
+**ไม่มี sweep/retry เก็บ `PENDING` ที่ค้าง** — `retries: 4` เป็นของ QStash ใช้ได้ต่อเมื่อ publish สำเร็จแล้ว ·
+ไม่มี cron สแกน PENDING · ทางเดียวคือ **replay ด้วยมือ** (ซึ่งเป็น fail-loud → ใช้เป็นเครื่องมือวินิจฉัยได้)
+
+**ตัวชี้ขาดใน DB:** `status='PENDING' AND attemptCount=0 AND lastAttemptAt IS NULL` = worker ไม่เคยเขียน DB เลย
+(ถ้า worker ยิงจริงแล้วล้ม จะเป็น `FAILED`/`DEAD` พร้อม `errorMessage` เสมอ — `webhook-deliver/route.ts:204-223`)
+
+> 📌 **นี่คือ failure ชั้น 3 ของจริง และเป็นชั้นที่ Phase 38 รู้อยู่แล้วว่าจับไม่ได้** (P1a สแกนแค่ client bundle · P6a เป็น CSP)
+> · หนักกว่าที่เคยคิด: **ไม่ใช่ "ลืมตั้ง env" แต่เป็น "ตั้งแล้วค่าใช้ไม่ได้"** → P2 (Phase 39) **ต้องเรียก provider จริง**
+> ไม่ใช่แค่เช็คว่า env มีค่า — ถ้าเช็คแค่ "มีค่าไหม" เคสนี้จะได้ PASS ทั้งที่ระบบตาย
 
 ### ผล pre-check § 2 บน prod (2026-08-05 · read-only)
 | § | ผลจริง | ความหมาย |
