@@ -31,7 +31,8 @@ Working state:
 | **gate ถูกเรียกจริงบน Vercel** | อ่าน build log ของ deploy `58c83d5` (Production · Ready · 1m 5s · 2026-08-05) | ✅ **VERIFIED** — พบบรรทัด `✅ [scan:bundle] สะอาด — … และยืนยัน 2 ค่า …` · ไม่มี `GATE OVERRIDDEN` |
 | client env (`NEXT_PUBLIC_*`) | clause ในบรรทัดเดียวกัน | ✅ ยืนยัน **2 ค่า** (`SUPABASE_URL` + `ANON_KEY`) — ตรงตามที่ตั้งใจหลังย้าย `ROOT_DOMAIN` เป็น advisory |
 | Vercel Dashboard override | Dev เปิด Project Settings ดูเอง | ✅ Override **ปิดทั้ง 4 ช่อง** → `vercel.json` มีผลจริง |
-| FeatureFlag `webhooks` (Phase 36) | smoke ตาม runbook ทาง A | ⏳ **ยังไม่ทำ** = ค้าง (ข) — pre-check § 2 ผ่านครบแล้ว |
+| FeatureFlag `webhooks` (Phase 36) — authz/gate | `GET /api/webhook-endpoints` บน `acme` (§ 4-1) | ✅ **200** + `{"data":{"endpoints":[]},"error":null}` (2026-08-05) — ยืนยัน **plan path + Redis + flag gate** ครั้งแรกบน prod |
+| FeatureFlag `webhooks` (Phase 36) — dispatch จริง | end-to-end § 4-2 (create → ticket → delivery) | ⏳ **ยังไม่ทำ** = ส่วนที่เหลือของค้าง (ข) — `200` พิสูจน์แค่ "ประตูเปิด" ยังไม่พิสูจน์ QStash dispatch ซึ่งเป็น fail-soft |
 
 ### ผล pre-check § 2 บน prod (2026-08-05 · read-only)
 | § | ผลจริง | ความหมาย |
@@ -105,6 +106,16 @@ Working state:
       = server env) ยังไม่มี assertion อัตโนมัติ** — P4 ใส่ docs แล้วก็จริงแต่ **docs ไม่ใช่ gate**
 - [ ] **Known gaps ที่ต้องบันทึกตอนปิด gate (ไม่ใช่ blocker):** smoke ได้เฉพาะ `acme` (globex ไม่มี OWNER/ADMIN)
       · negative test (`403 FEATURE_LOCKED` ของ tenant plan < `pro`) **ทำไม่ได้จริง** เพราะ prod ไม่มี tenant อื่นเลย
+- [ ] 🔴 **Backlog ระดับ security — session เพิกถอนไม่ได้:** agent session เป็น **JWT ไร้สถานะ**
+      (HS256 + `AUTH_SECRET`, `src/lib/auth.ts:147,333`, อายุ 8 ชม.) · `POST /api/auth/agent/logout`
+      **แค่ลบ cookie ฝั่ง client ไม่แตะ token** (คอมเมนต์ในไฟล์เขียนไว้ว่า "ลบ cookie เพียงพอ")
+      → **token ที่หลุดออกไปเพิกถอนไม่ได้เลย แม้เปลี่ยน password ก็ไม่ตาย** · "ออกจากทุกอุปกรณ์" ทำไม่ได้จริง
+      **ทางแก้ที่เสนอ:** claim `sessionVersion` ใน token เทียบกับค่าใน DB (bump = เตะทุก session ของ user นั้น)
+      · kill switch เดียวที่มีวันนี้ = rotate `AUTH_SECRET` + redeploy (เตะทุกคนพร้อมกัน)
+      · **ที่มา:** cookie ของ smoke session หลุดเข้าไปในภาพแคป 2026-08-05 (demo tenant · ข้อมูลทดสอบ ·
+      หมดอายุ 23:38 GMT วันเดียวกัน → ผลกระทบจำกัด แต่เปิดช่องโหว่เชิงออกแบบนี้ให้เห็น)
+- [ ] **Backlog:** repo **ไม่มี password-reset route** → กู้บัญชี agent ได้ทางเดียวคือแก้ `passwordHash`
+      ตรงบน prod ด้วยมือ (เจ็บมาแล้ว 2 รอบ — ล่าสุด `owner@acme.test` ตอน Phase 37 "ทาง A′")
 - [ ] **Backlog ใหม่:** `globex` **ไม่มี OWNER/ADMIN เลย** → demo persona ของ globex เข้า `/settings/webhooks`
       ไม่ได้ (route บังคับ OWNER/ADMIN) — **ต้องตัดสินว่าตั้งใจหรือหลุด** ถ้าตั้งใจให้จดว่าตั้งใจ
 - [ ] **Backlog:** test ที่ assert grep string (`✅ [scan:bundle] สะอาด …` / `GATE OVERRIDDEN`) ในตัว script
