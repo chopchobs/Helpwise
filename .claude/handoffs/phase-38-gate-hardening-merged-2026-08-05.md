@@ -31,7 +31,21 @@ Working state:
 | **gate ถูกเรียกจริงบน Vercel** | อ่าน build log ของ deploy `58c83d5` (Production · Ready · 1m 5s · 2026-08-05) | ✅ **VERIFIED** — พบบรรทัด `✅ [scan:bundle] สะอาด — … และยืนยัน 2 ค่า …` · ไม่มี `GATE OVERRIDDEN` |
 | client env (`NEXT_PUBLIC_*`) | clause ในบรรทัดเดียวกัน | ✅ ยืนยัน **2 ค่า** (`SUPABASE_URL` + `ANON_KEY`) — ตรงตามที่ตั้งใจหลังย้าย `ROOT_DOMAIN` เป็น advisory |
 | Vercel Dashboard override | Dev เปิด Project Settings ดูเอง | ✅ Override **ปิดทั้ง 4 ช่อง** → `vercel.json` มีผลจริง |
-| FeatureFlag `webhooks` (Phase 36) | smoke ตาม runbook ทาง A | ⏳ **ยังไม่ทำ** = ค้าง (ข) |
+| FeatureFlag `webhooks` (Phase 36) | smoke ตาม runbook ทาง A | ⏳ **ยังไม่ทำ** = ค้าง (ข) — pre-check § 2 ผ่านครบแล้ว |
+
+### ผล pre-check § 2 บน prod (2026-08-05 · read-only)
+| § | ผลจริง | ความหมาย |
+|---|---|---|
+| 2-1 | 1 แถว · `defaultEnabled=false` · `requiredPlan=pro` | flag ตรงกับ migration `20260722010000` |
+| 2-2 ⭐ | **acme = `pro` · globex = `pro`** (ทั้งคู่ `isActive=true`) | **ยืนยัน `Tenant.plan` จริงบน prod ครั้งแรก** — เลิก infer จาก `seed-demo.ts` ได้แล้ว |
+| 2-3 ⭐ | **0 แถว** | ไม่มี `TenantFeature` override → smoke ที่ได้ 200 จะพิสูจน์ **plan path จริง** ไม่ใช่ override |
+| 2-4 | acme มี OWNER (`owner@acme.test`) active · **globex ไม่มี OWNER/ADMIN เลย** | smoke ได้เฉพาะ `acme` (known gap ไม่ใช่ blocker) |
+| 2-5 | **0 แถว — prod มีแค่ `acme` + `globex` ไม่มี tenant ลูกค้าจริงสักราย** | **negative test ทำไม่ได้จริง** → known gap § 5.3 · ⛔ ห้ามแก้ plan ใครเพื่อทดสอบ |
+
+> 🔧 **แก้เหตุผลที่ผิดข้อเท็จจริง:** ตอนปฏิเสธทาง B เคยยกเหตุผลว่า *"เปิดที่ plan จะกระทบ entitlement
+> ของลูกค้าจริงทุกราย"* — § 2-5 พิสูจน์ว่า **ไม่จริง** (ไม่มีลูกค้าจริงบน prod) **ข้อสรุปยังเหมือนเดิม
+> ด้วยเหตุผลที่แข็งกว่า: ทาง A ตรวจตรงชั้นที่ค่าถูกใช้จริง ทาง B ไม่** — เหตุผลนี้ไม่ขึ้นกับจำนวนลูกค้า
+> (แก้ใน runbook § 0 แล้วด้วย — ห้ามปล่อยเหตุผลผิดข้อเท็จจริงค้างในเอกสาร)
 
 > 🏁 **`58c83d5` คือครั้งแรกที่ gate รันจริงบน Vercel** — ก่อนหน้านี้ `vercel.json` `buildCommand: "next build"`
 > override `package.json` อยู่ → `scan:bundle` ไม่เคยถูกเรียกในสาย build ของ production เลย
@@ -89,6 +103,10 @@ Working state:
 - [ ] **Residual gap — ห้ามเข้าใจว่า Phase 38 ปิดครบ:** บั๊ก presence มี **4 ชั้น** · Phase 38 ปิดแค่
       **ชั้น 2 (client env)** + **ชั้น 4 (CSP)** · **ชั้น 3 (`SUPABASE_REALTIME_JWT_PRIVATE_KEY`/`KID`
       = server env) ยังไม่มี assertion อัตโนมัติ** — P4 ใส่ docs แล้วก็จริงแต่ **docs ไม่ใช่ gate**
+- [ ] **Known gaps ที่ต้องบันทึกตอนปิด gate (ไม่ใช่ blocker):** smoke ได้เฉพาะ `acme` (globex ไม่มี OWNER/ADMIN)
+      · negative test (`403 FEATURE_LOCKED` ของ tenant plan < `pro`) **ทำไม่ได้จริง** เพราะ prod ไม่มี tenant อื่นเลย
+- [ ] **Backlog ใหม่:** `globex` **ไม่มี OWNER/ADMIN เลย** → demo persona ของ globex เข้า `/settings/webhooks`
+      ไม่ได้ (route บังคับ OWNER/ADMIN) — **ต้องตัดสินว่าตั้งใจหรือหลุด** ถ้าตั้งใจให้จดว่าตั้งใจ
 - [ ] **Backlog:** test ที่ assert grep string (`✅ [scan:bundle] สะอาด …` / `GATE OVERRIDDEN`) ในตัว script
       กัน drift กับเอกสาร 3 ไฟล์ · P1b build-time guard (ปิดช่อง advisory ของ ROOT_DOMAIN) ·
       demo reset ไม่ล้าง `WebhookEndpoint` (follow-up · จะเป็น blocker ถ้า demo persona ได้ OWNER/ADMIN) ·
