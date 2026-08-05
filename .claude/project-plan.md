@@ -46,14 +46,15 @@
 | 30 | Portfolio Demo Readiness — landing page + demo seed (acme/globex) + one-click demo-login + AI rate-limit fail-closed | `phase-30/portfolio-demo` | ✅ done | ✅ |
 | 34 | Tenant-isolation fuzz suite (37 case/8 axis) + ปิด XT-WRITE-05 (composite tenant FK) | (บน main โดยตรง) | ✅ done | ✅ |
 | 35 | Real-time presence/collision (Supabase Realtime) — token/RLS/presence/typing/collision; qa PASS-with-conditions | `feature/phase-35-realtime-presence` | ✅ done | ✅ |
-| 37 | Demo personas — visitor login เป็น agent คนที่ 2 (ไม่ใช้ password) + banner ชวนเปิด incognito ให้เห็น real-time presence จริง; security PASS · qa PASS-with-conditions · L-1/L-2 ปิดแล้ว · +166 tests (846→1012) | `feature/phase-37-demo-personas` | ✅ done (code) · ⏳ Gate 2 ยังไม่รัน | ✅ `68ad2e1` — **ยังไม่ push** |
-| 36 | Outbound webhooks — HMAC signing + SSRF guard + QStash retry/DLQ + replay (Portfolio #2); qa PASS-with-conditions (ปิดครบ) · security PASS (MEDIUM-1 rate-limit/cap + MEDIUM-2 RLS ปิดก่อน merge) · docs แปลอังกฤษแล้ว | `feature/phase-36-outbound-webhooks` | ✅ done | ✅ PR #16 (`af79bff`) |
+| 37 | Demo personas — visitor login เป็น agent คนที่ 2 (ไม่ใช้ password) + banner ชวนเปิด incognito ให้เห็น real-time presence จริง; security PASS · qa PASS-with-conditions · L-1/L-2 ปิดแล้ว · +166 tests (846→1012) | `feature/phase-37-demo-personas` | ✅ **ปิดครบ** — Gate 1 + Gate 2 ผ่าน (2026-08-04) | ✅ `68ad2e1` |
+| 36 | Outbound webhooks — HMAC signing + SSRF guard + QStash retry/DLQ + replay (Portfolio #2); qa PASS-with-conditions (ปิดครบ) · security PASS (MEDIUM-1 rate-limit/cap + MEDIUM-2 RLS ปิดก่อน merge) · docs แปลอังกฤษแล้ว | `feature/phase-36-outbound-webhooks` | ⏳ **done-with-open-gate** — smoke prod ยังไม่เคยรัน (runbook พร้อมแล้ว) | ✅ PR #16 (`af79bff`) |
+| 38 | Post-merge gate hardening — P1a (REQUIRED mode ใน `scan:bundle` ผูก build ของ Vercel) · P6a (`buildCsp()` + 12 tests) · P4/P5 (deploy-checklist/operations env + gate เป็นตารางหลักฐาน) · escape hatch `SCAN_BUNDLE_SKIP_REQUIRED` | `feature/phase-38-gate-hardening` | ⏳ **ปิดไม่ได้** — ค้าง 2 อย่างที่ต้องใช้คนรันบน prod (ดู § ⚠️ ค้าง ข้อ 11) | ✅ `1eafba3` — **ยังไม่ push** |
 
 > *Phase 20 = decision เชิงลบ (บันทึกว่า nonce CSP ใช้กับ `proxy.ts` ไม่ได้ — คง `unsafe-inline`) ไม่ใช่ feature ใหม่
 > **Chore branches** (merged, ไม่ใช่ phase): `chore/db-init-seed`, `fix/proxy-host-header`, `chore/theme-warm-palette`
 
 ## Git State (สำหรับ verify รอบหน้า)
-**Status: LAUNCHED — live ที่ gethelpwise.xyz · ทุกเฟส merge + push แล้ว (`main` = `origin/main` in-sync)**
+**Status: LAUNCHED — live ที่ gethelpwise.xyz · ⚠️ 2026-08-05: `main` = `1eafba3` (Phase 38 merged) แต่ **ยังไม่ push** — `main` นำ `origin/main` อยู่ (hook บล็อก `git push`, Dev ต้อง push เอง)**
 - main HEAD: `30ef022` (`docs: verify README accuracy`). Phase 31-33 (production-deploy → deploy-verify → post-launch docs) ทำตรงบน main (docs/handoff + `chore: swap root domain to gethelpwise.xyz` `f417541`) — ไม่ใช่ feature-branch
 - ทุก phase-branch (01-30) + chore-branch merge เข้า main + push ขึ้น `origin/main` แล้ว — ไม่มี branch ค้าง, ไม่มี commit ค้าง push
 - Phase 30 (landing + demo seed acme/globex + demo-login + AI fail-closed): security gate PASS (no High/Critical); acme = demo ล้วน 7 ticket (#1001-1007) หลัง cleanup junk. ดู memory `seed-demo-idempotency-acme-cruft`
@@ -132,3 +133,13 @@
      → verify แสดง "กำลังตรวจสอบ…" → **เด้งไป `/portal/tickets` เอง** → เห็น **#1001 (2 ข้อความ)** และ
      **#1004 (1 ข้อความ)** ของ Jane Cooper → ผ่านเกณฑ์เต็ม (ลงถูกหน้า + ข้อมูลถูกต้อง ไม่ใช่แค่ "ไม่ 404")
 10. นี่คือ plan/handoff ครั้งแรกของ project — ก่อนหน้านี้ไม่มี `project-plan.md`
+11. ⏳ **Phase 38 merged เข้า main แล้ว (`1eafba3`) แต่ยัง "ปิดไม่ได้"** — merge 2026-08-05 · tsc clean · lint 0 error · **1024 tests** · build ผ่าน
+    - 🔴 **`git push` ถูก hook ของเครื่องบล็อก (`~/.claude/hooks/block-dangerous-git.sh`) → Dev ต้อง push เอง** — จนกว่าจะ push จะ **ไม่มี deploy ใหม่บน Vercel** และข้อค้าง 2 ข้อล่างนี้เริ่มไม่ได้
+    - **ค้างข้อ 1 (ต้องใช้คนอ่าน):** หลัง push + deploy เสร็จ → เปิด **build log ของ deploy ที่มาจาก merge commit `1eafba3`** หาบรรทัด **`✅ [scan:bundle] สะอาด` ที่มี clause `และยืนยัน … ค่า NEXT_PUBLIC_*`** และต้อง**ไม่มี** `GATE OVERRIDDEN` — นี่คือการพิสูจน์ครั้งแรกว่า gate ถูกเรียกจริงบน Vercel (ก่อนหน้านี้ `vercel.json` `buildCommand: "next build"` override `package.json` อยู่ = gate ไม่เคยรัน)
+    - **ค้างข้อ 2 (ต้องใช้คนรัน):** smoke webhooks ตาม `.claude/specs/phase-38-webhooks-flag-runbook.md` (ทาง A — read-only ล้วน) เพื่อปิด gate ของ **Phase 36** ด้วย
+    - ✅ Dev ยืนยันแล้ว (2026-08-05): Vercel Dashboard **Override ปิดทั้ง 4 ช่อง** + env Production ครบ 3 ตัว → `vercel.json` มีผลจริง
+    - **Residual gap ที่ Phase 38 ไม่ได้ปิด (ห้ามเข้าใจว่าปิดครบ):** บั๊ก presence มี **4 ชั้น** — Phase 38 ปิด **ชั้น 2 (client env)** + **ชั้น 4 (CSP)** เท่านั้น · **ชั้น 3 (`SUPABASE_REALTIME_JWT_PRIVATE_KEY`/`KID` = server env) ยังไม่มี assertion อัตโนมัติ** P4 ใส่ไว้ใน docs แล้วก็จริง แต่ **docs ไม่ใช่ gate** → **Phase 39 = P2 (readiness endpoint สำหรับ server-side resource) + P3 (observable fail-soft)**
+    - 📌 **Case study ของ P5 (เก็บไว้เป็นบทเรียนถาวร):** Phase 36 ปิดโดยบันทึกว่า *"FeatureFlag `webhooks` ยังไม่เปิด"* ซึ่ง **ผิดข้อเท็จจริงมาเป็นเดือน** — migration `20260722010000` ผูก `requiredPlan='pro'` ไว้แล้ว และ demo tenant เป็น plan `pro` → feature เปิดอยู่แล้ว. รากเดียวกับ Phase 37 คนละหน้า: **37 = "เขียนว่าผ่านทั้งที่ยังไม่ตรวจ" · 36 = "เขียนว่ายังไม่ทำทั้งที่ทำไปแล้ว"** — ทั้งคู่คือ checkbox ที่ไม่เคยถูกเอาไปเทียบกับ prod (เหตุผลที่ P5 เปลี่ยน gate เป็น**ตารางหลักฐาน**)
+    - ⚠️ **ห้าม infer สถานะ prod จาก `seed-demo.ts`** — `Tenant.plan` จริงบน prod **ยังไม่มีใครยืนยัน** (seed ห้ามรันบน prod) → runbook § 2-2 คือ query ที่ตอบข้อนี้
+    - **Backlog ที่เกิดจากงานนี้เอง:** grep string (`✅ [scan:bundle] สะอาด …` / `GATE OVERRIDDEN`) ถูก duplicate ไว้ 3 ไฟล์ (`CLAUDE.md`, `docs/operations.md`, `docs/deploy-checklist.md`) → **ควรมี test ที่ assert string เหล่านี้ในตัว script** กัน drift ระหว่างโค้ดกับเอกสาร
+    - **Backlog เดิมที่ยังอยู่:** demo reset ไม่ล้าง `WebhookEndpoint` (follow-up ไม่ใช่ blocker — role gate 2 ชั้นปิดช่องอยู่ · จะเป็น blocker ทันทีถ้า demo persona ได้ OWNER/ADMIN) · P1b build-time guard (ปิดช่อง `NEXT_PUBLIC_ROOT_DOMAIN` ที่เป็น advisory เพราะมี fallback ใน source) · seed-demo hardening · R-2 XFF spoof
