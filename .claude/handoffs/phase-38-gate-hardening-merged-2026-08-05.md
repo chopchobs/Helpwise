@@ -19,10 +19,8 @@ Working state:
 - Env/process ค้าง: ไม่มี (ไม่มี migration ในเฟสนี้ · ไม่ได้แตะ DB)
 
 ⚠️ ต้อง verify ก่อนเริ่ม context ถัดไป:
-- [ ] 🔴 **`origin/main` ยังเป็น `43aca5f` — commit ของ Phase 38 ยังไม่ขึ้น remote**
-      (`git ls-remote origin main` ยืนยัน 2026-08-05 · `main` ahead 5) แม้ Dev แจ้งว่า push แล้ว
-      → **ยังไม่มี deploy ใหม่บน Vercel** · build log ที่เปิดดูตอนนี้จะเป็นของ deploy เก่า = **false reading**
-      · `git push` ถูก hook ของเครื่องบล็อก (`~/.claude/hooks/block-dangerous-git.sh`) → Dev ต้องทำเอง
+- [x] ✅ **push แล้ว (Dev รันจาก Terminal จริง) — `origin/main` = `58c83d5`** ยืนยันด้วย `git ls-remote origin main`
+      · Vercel deploy จาก `58c83d5` = **Ready · Production (live จริง)**
 - [ ] ค้าง (ก): อ่าน build log ของ deploy ที่มาจาก `1eafba3` — เกณฑ์อยู่ใน § Session Summary
 - [ ] ค้าง (ข): smoke webhooks ตาม `.claude/specs/phase-38-webhooks-flag-runbook.md`
 
@@ -59,6 +57,10 @@ Working state:
   (และ Vercel Dashboard override `vercel.json` ได้อีกชั้น — Dev ยืนยันแล้วว่า Override ปิดทั้ง 4 ช่อง)
 - **อย่าใช้ปุ่ม demo login smoke webhooks** — demo persona = `AGENT` → ได้ `FORBIDDEN` เสมอ ไม่เกี่ยวกับ flag
 - **อย่าเปลี่ยน plan ของ tenant ใดเพื่อทำ negative test** — ถ้าไม่มี tenant ที่ plan < `pro` ให้บันทึก known gap (runbook § 5.3)
+- **อย่าพยายาม `git push` เอง — Claude Code ทำไม่ได้ทุกทาง** (ทั้ง tool call และโหมด `!`)
+  hook `~/.claude/hooks/block-dangerous-git.sh` บล็อกที่ชั้น PreToolUse → **Dev ต้องรันจาก Terminal จริงเสมอ**
+  (hook จับที่ข้อความคำสั่งด้วย — commit message ที่มีคำว่า push ก็โดนบล็อก)
+  · หลัง Dev push แล้วให้ verify ด้วย `git ls-remote origin main` ไม่ใช่เชื่อคำบอก
 
 ## Session Summary
 ### เสร็จแล้ว
