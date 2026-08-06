@@ -445,6 +445,28 @@ curl -sS -i -b "$JAR_OTHER" https://<other-slug>.gethelpwise.xyz/api/webhook-end
 | cleanup หลัง smoke | § 4-2 ข้อ 4 + SQL § 6.1 | ไม่มี endpoint ของ smoke เหลือ |
 | negative: plan gate ยังแคบ | § 4-3 | `403` + `FEATURE_LOCKED` **หรือ** บันทึก known gap ตาม § 5.3 |
 
+### 5.0 · ✅ ผลจริงบน prod — ตารางหลักฐานที่กรอกครบแล้ว (ปิด gate Phase 36 · 2026-08-06)
+
+> **นี่คือหลักฐาน ไม่ใช่เจตนา** — ทุกแถวมาจากการ query/เรียกจริงบน prod ไม่มีแถวไหนอนุมานจากโค้ดหรือ seed
+
+| resource | ผลจริง | เมื่อไร |
+| --- | --- | --- |
+| migration `20260722010000` (FeatureFlag) | ✅ 1 แถว · `key='webhooks'` · `defaultEnabled=false` · `requiredPlan='pro'` | 2026-08-05 |
+| migration `20260723000000` (RLS) — **effect** | ✅ `pg_policies`: `tenant_isolation` (`cmd=ALL`) ครบทั้ง `WebhookEndpoint` + `WebhookDelivery` · `pg_class`: `relrowsecurity=true` **และ** `relforcerowsecurity=true` **ทั้งคู่** | **2026-08-06 (รันครั้งแรก)** |
+| entitlement ของ `acme` | ✅ `acme` = `pro` (join `Plan.name`) · `isActive=true` — (`globex` = `pro` เช่นกัน) | 2026-08-05 · re-verify 2026-08-06 |
+| ไม่มี override บังหน้า plan path | ✅ `TenantFeature` featureKey `webhooks` = **0 แถว** ⇒ smoke พิสูจน์ **plan path จริง** | 2026-08-05 · re-verify 2026-08-06 |
+| smoke read path (`GET /api/webhook-endpoints`) | ✅ **`200`** + `{"data":{"endpoints":[]},"error":null}` | 2026-08-05 |
+| smoke write path (`POST /api/webhook-endpoints`) | ✅ **`201`** + มี `plaintextSecret` | 2026-08-05 16:01:22 UTC |
+| **smoke end-to-end delivery** | ✅ **`SUCCEEDED`** · `attemptCount=1` · `responseStatus=200` · `lastAttemptAt=2026-08-06 10:58:50.567` UTC · ยืนยันซ้อนด้วย Upstash log `DELIVERED → /api/jobs/webhook-deliver` เวลาตรงกัน | **2026-08-06** (หลังแก้ `QSTASH_URL` — ดู incident snapshot) |
+| cleanup หลัง smoke | ✅ ลบผ่าน **API** (`{"deleted":true}` + `AuditLog webhook.endpoint_deleted` 11:04:14 UTC) · `GET` คืน `endpoints:[]` · DB: `WebhookEndpoint` = **0 แถว** | 2026-08-06 |
+| negative: plan gate ยังแคบ | ⚠️ **known gap § 5.3** — ทำไม่ได้จริง prod มีแค่ `acme`/`globex` ซึ่ง **เป็น `pro` ทั้งคู่** ⇒ ไม่มี tenant ที่ plan < `pro` ให้ทดสอบ · ⛔ ห้ามลด plan ใครเพื่อทดสอบ | 2026-08-06 |
+
+**สรุป: 8/9 แถวผ่านด้วยหลักฐานจริง · 1 แถวเป็น known gap ที่ทำไม่ได้เชิงโครงสร้าง (ไม่ใช่ข้ามเพราะขี้เกียจ) → ปิด gate Phase 36 ได้**
+
+⚠️ **สิ่งที่ทำให้ gate นี้เกือบผ่านแบบผิด ๆ:** แถว "end-to-end delivery" เคยถูกรายงานว่า *"create 201 · ticket 201"*
+ซึ่ง **ดูเหมือนผ่าน** แต่ delivery จริงค้าง `PENDING` ถาวรเพราะ QStash publish ไม่เคยออกจากระบบ
+⇒ **เกณฑ์ของแถวนี้ต้องเป็น `status=SUCCEEDED` ใน DB เท่านั้น ห้ามใช้ status code ของ API request เป็นหลักฐาน**
+
 ### 5.1 · SQL ตรวจ effect ของ RLS migration (read-only)
 
 ```sql

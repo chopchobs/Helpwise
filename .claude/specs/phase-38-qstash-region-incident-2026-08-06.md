@@ -96,11 +96,18 @@ WebhookDelivery: 1 แถวทั้งตาราง
   lastAttemptAt null       ← worker ไม่เคยถูกเรียก
   responseStatus null
   errorMessage  null       ← ไม่มีร่องรอย error ฝั่ง delivery เลย
-  createdAt     2026-08-05T09:03:17.738Z
+  createdAt     2026-08-05 16:03:17.738 UTC
 
-WebhookEndpoint: 1 แถว (acme · cmsg9y3yr000004jltuk8blp1 · createdAt 09:01:22.324Z)  ← ยังอยู่ (ตั้งใจ ดู § 5)
+WebhookEndpoint: 1 แถว (acme · cmsg9y3yr000004jltuk8blp1 · createdAt 2026-08-05 16:01:22.324 UTC)
 status counts: PENDING=1  (ไม่มี FAILED/DEAD/SUCCEEDED เลย)
 ```
+
+> ⚠️ **กับดักเวลาอ่าน timestamp ของโปรเจกต์นี้ (เจอจริงในเซสชันนี้):** คอลัมน์เวลาทั้งหมดเป็น
+> **`timestamp without time zone`** (DB `TimeZone = UTC` เก็บ wall clock เป็น UTC ถูกต้อง)
+> แต่ **`node-pg` แปลงเป็น `Date` โดยตีความว่าเป็น local time ของเครื่องที่รัน** → บนเครื่อง `+0700`
+> ค่าที่พิมพ์ออกมาจะ **เลื่อน −7 ชั่วโมง** และดูเหมือน UTC เพราะมี `Z` ต่อท้าย
+> ✅ **อ่านให้ถูกต้องด้วย `"createdAt"::text`** (เอา wall clock ดิบ ไม่ผ่าน driver)
+> 📌 รอบแรกของเซสชันนี้รายงานเป็น `09:03:17.738Z` / `09:01:22.324Z` ซึ่ง **ผิด** — แก้แล้วด้านบน
 
 ตรงกับตัวชี้ขาดที่ handoff Phase 38 ทำนายไว้เป๊ะ: `PENDING + attemptCount=0 + lastAttemptAt IS NULL` = **worker ไม่เคยถูกเรียก** (ถ้าถูกเรียกแล้วล้มจะเป็น `FAILED`/`DEAD` + `errorMessage` เสมอ)
 
@@ -256,6 +263,58 @@ redeploy ตัดสาขาที่สามทิ้งก่อน ⇒ เ
 **นิยาม "เสร็จ" ของงานนี้:** § 4-2 ผ่าน → ตารางหลักฐาน Phase 36 ครบตาม runbook § 5 → **ปิด gate Phase 36** →
 อัปเดต handoff + project-plan → จด backlog
 ⚠️ **แก้ QStash เสร็จยังไม่ใช่เสร็จ ถ้ายังไม่ปิด gate**
+
+## 9. ผลการแก้ — ✅ ผ่าน (2026-08-06)
+
+ตั้ง `QSTASH_URL = https://qstash-us-east-1.upstash.io` (Production + Preview) → redeploy → replay
+
+### 9.1 หลักฐาน
+
+**DB — ตัวชี้ขาด 3 field พลิกครบ** (`WebhookDelivery cmsga0l0q000404jrg5fkwbdu`):
+
+| field | ก่อน (baseline 2026-08-06 10:58:45 UTC) | หลัง |
+| --- | --- | --- |
+| `status` | `PENDING` | ✅ **`SUCCEEDED`** |
+| `attemptCount` | `0` | ✅ **`1`** |
+| `lastAttemptAt` | `null` | ✅ **`2026-08-06 10:58:50.567`** |
+| `responseStatus` | `null` | ✅ **`200`** |
+| `errorMessage` | `null` | `null` |
+
+⛔ **ห้ามบันทึก `responseBody`** ที่ใดก็ตาม — มี URL ของ bin ติดมาด้วย (runbook § 4-2 ห้ามไว้)
+
+**Upstash Console (US Region · us-east-1) → Logs:**
+`Aug 6 17:58:47 (UTC+7 = 10:58:47 UTC) · DELIVERED · acme.gethelpwise.xyz/api/jobs/webhook-deliver · 3s`
+ตรงกับ `date` header ของ replay (`10:58:47 GMT`) และกับ `AuditLog webhook.delivery_replayed` (`10:58:47.326` UTC) = **request เดียวกัน**
+
+### 9.2 สิ่งที่ปิดไปพร้อมกัน 3 ชั้น
+
+1. **publish ออกจากระบบได้จริง** — root cause § 3 ถูกแก้แล้ว
+2. **worker ถูกเรียกครั้งแรกตั้งแต่ Jun 21** — `/api/jobs/webhook-deliver` ไม่เคยรันมาก่อนเลย
+3. 🔑 **signature verification ผ่าน** ⇒ **residual § 2.3 ปิดสนิทด้วยหลักฐาน ไม่ใช่การอนุมาน**
+   — `DELIVERED` แปลว่า worker ตอบ 2xx · ถ้า signing key บน Vercel ไม่ตรงบัญชี US จะได้ `401` + retry
+   **นี่คือ runtime probe ที่ § 2.3 บอกว่าเป็นทางเดียวที่เหลือ — และมันทำงาน**
+   (ยืนยันไม่ได้ด้วยการเทียบค่า env เพราะ Vercel Sensitive อ่านไม่ได้ · ปิดด้วย effect แทน)
+
+### 9.3 ทำไม **ไม่** สร้าง ticket ใหม่ทดสอบซ้ำ
+
+- log 5 ส.ค. พิสูจน์แล้วว่า `dispatchWebhookEvent` **เดินไปถึงจุด publish จริง** (error region ถูก log ที่นั่น)
+- 6 ส.ค. พิสูจน์แล้วว่า **publish → worker → `SUCCEEDED`** ทำงานครบ
+- ⇒ **ต่อกันครบสายโดย composition** — ไม่มีช่วงไหนเหลือที่ยังไม่ถูกพิสูจน์
+- สร้าง ticket ใหม่ = **เพิ่มขยะถาวรบน demo tenant** (§ 6 ของ runbook ไม่มีอะไรล้างให้) แลกกับความมั่นใจที่มีอยู่แล้ว
+
+### 9.4 เก็บกวาด (Dev ทำเอง 2026-08-06)
+
+| รายการ | สถานะ |
+| --- | --- |
+| `DELETE /api/webhook-endpoints/cmsg9y3yr000004jltuk8blp1` | ✅ `{"deleted":true}` — ผ่าน **API ไม่ใช่ SQL** เพื่อให้ `audit.log()` ทำงาน (`AuditLog webhook.endpoint_deleted` 2026-08-06 11:04:14.545 UTC) |
+| `GET /api/webhook-endpoints` | ✅ `{"data":{"endpoints":[]},"error":null}` · verify อิสระจาก DB: `WebhookEndpoint` = 0 แถว |
+| bin ที่ webhook.site | ⚠️ **ลบ payload ในนั้นแล้ว แต่ตัว bin ยังอยู่** (ลบไม่ได้เพราะไม่ได้ login) — ไม่จำเป็นแล้วเพราะ endpoint ถูกลบ ⇒ ไม่มีอะไรยิงเข้าได้อีก · bin ว่างและจะหมดอายุเองใน ~7 วัน · **อย่าเขียนว่า "ลบ bin แล้ว"** |
+| cookie jar + password | ✅ ลบ/unset แล้ว |
+
+> 📌 **ผลข้างเคียงที่ต้องรู้: แถวหลักฐานถูกลบไปด้วย** — `WebhookDelivery` มี `onDelete: Cascade` ผูกกับ
+> `WebhookEndpoint` ⇒ ลบ endpoint แล้ว **delivery row หายตามทันที** (ยืนยันแล้ว: `WebhookDelivery` = 0 แถว)
+> ⇒ **ตัวเลขใน § 9.1 คือบันทึกเดียวที่เหลืออยู่ของเหตุการณ์นี้** — เหตุผลที่ต้องมี snapshot ก่อนเก็บกวาด
+> ⇒ ผลพลอยได้: ไม่มี `PENDING` ค้างเหลือในระบบแล้ว (แต่ backlog "ไม่มี sweep" ยังคงอยู่ ดู § 6)
 
 ---
 
