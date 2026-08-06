@@ -101,6 +101,8 @@ Working state:
 
 ## References
 - Master plan: `.claude/project-plan.md`
+- **Design brief สำหรับ Claude Design (Phase 39):** `.claude/specs/phase-39-design-brief-2026-08-06.md`
+  — self-contained · มีเกณฑ์ตัดสิน §8 + ทางที่ถูกปฏิเสธแล้ว §7 (ห้ามเสนอซ้ำ)
 - Incident snapshot (วัตถุดิบ P2): `.claude/specs/phase-38-qstash-region-incident-2026-08-06.md`
 - Runbook + ตารางหลักฐาน Phase 36: `.claude/specs/phase-38-webhooks-flag-runbook.md` §5.0
 - Handoff ก่อนหน้า: `.claude/handoffs/phase-38-gate-hardening-merged-2026-08-05.md` ⚠️ **มีข้อมูลผิด 3 จุด — ดู § Session Summary**
