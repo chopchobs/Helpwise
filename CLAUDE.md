@@ -261,4 +261,8 @@ const tickets = await db.ticket.findMany()
 
 - [ ] **ตรวจที่ชั้นเดียวกับที่ค่าถูกใช้จริง** — build-time value (`NEXT_PUBLIC_*` inline ตอน build → ต้อง redeploy) ตรวจที่ artifact · runtime value ตรวจที่ runtime. **ตรวจผิดชั้น = false PASS**
 - [ ] **feature ที่ออกแบบให้ fail-soft ต้องมี assertion ยืนยัน happy path บน prod เสมอ** — fail-soft = ไม่มี error ให้เห็นโดยธรรมชาติ (fail-soft ต่อผู้ใช้ · fail-loud ต่อผู้ดูแล)
+- [ ] **หลักฐานที่ผูก FK `onDelete: Cascade` กับของที่ต้องเก็บกวาด ต้องถูกบันทึกออกนอก DB ก่อนเก็บกวาดเสมอ**
+      — ลบ parent = ลบหลักฐานทิ้งพร้อมกัน กู้ไม่ได้ (บทเรียนจริง: ลบ `WebhookEndpoint` ของ smoke แล้ว
+      `WebhookDelivery` ที่เป็นหลักฐานปิด gate หายตามทันทีเหลือ 0 แถว — รอดเพราะบังเอิญเขียน snapshot ไว้ก่อน)
+      · ลำดับบังคับ: **บันทึกหลักฐาน → verify ว่าบันทึกครบ → แล้วจึงลบ**
 - [ ] **smoke ของจริงบน prod** อย่างน้อย 1 path ของ feature นั้น (ไม่ใช่ local/CI)

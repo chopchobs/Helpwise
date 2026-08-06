@@ -82,7 +82,16 @@ Demo creds เป็น **public-by-design** (role=AGENT) → ใครก็ย
 
 ### Queue (QStash)
 - [ ] `QSTASH_TOKEN`
-- [ ] `QSTASH_CURRENT_SIGNING_KEY` + `QSTASH_NEXT_SIGNING_KEY`
+- [ ] 🔴 **`QSTASH_URL`** — **บังคับถ้าบัญชี Upstash อยู่ region `us-east-1`** = `https://qstash-us-east-1.upstash.io`
+      · SDK **default ไปที่ EU** (`https://qstash.upstash.io`) เมื่อไม่ตั้งตัวแปรนี้ → publish ถูกปฏิเสธ `404`
+        `user (...) not found in this region (eu-central-1)` **แบบเงียบ** (fail-soft ทั้ง webhooks และ outbound email)
+      · ตรวจว่าตั้งถูกไหมด้วย `GET {QSTASH_URL}/v2/schedules` + `Authorization: Bearer $QSTASH_TOKEN` → ต้องได้ `200`
+      · ⛔ **ห้ามใช้ `QSTASH_REGION`** (migration mode) — SDK จะสลับไปอ่านตัวแปร prefix `US_EAST_1_QSTASH_*` ทั้งชุด
+        และ **override token ที่โค้ดส่งเข้า `new Client({token})` ทิ้ง** → ตั้งครึ่ง ๆ พังหนักกว่าเดิม
+      · ตั้งทั้ง **Production และ Preview** — ตั้งแค่ Production = ซ่อนบั๊กเดิมไว้ที่ Preview
+      · 📌 บทเรียน 2026-08-05: ตัวแปรนี้ **ไม่เคยอยู่ในเช็คลิสต์** → ไม่มีใครรู้ว่าต้องมี → webhooks/outbound email/
+        SLA sweep ตายเงียบ ~1.5 เดือน ทั้งที่ env ทุกตัวที่รู้จัก "มีค่าครบและถูกต้อง"
+- [ ] `QSTASH_CURRENT_SIGNING_KEY` + `QSTASH_NEXT_SIGNING_KEY` *(ต้องเป็นของบัญชี/region เดียวกับ `QSTASH_TOKEN` — ดึงค่าที่ถูกได้จาก `GET {QSTASH_URL}/v2/keys`)*
 - [ ] `QSTASH_TARGET_BASE_URL` = `https://acme.gethelpwise.xyz` *(URL จริง ไม่ใช่ `{slug}` template)*
 
 ### Stripe / Email / Storage
@@ -130,7 +139,11 @@ npx tsx prisma/seed-demo.ts # demo data acme/globex (idempotent)
 
 - [ ] **Stripe** — สร้าง webhook endpoint `https://.../api/webhooks/stripe/` → เอา signing secret ใส่ `STRIPE_WEBHOOK_SECRET` → redeploy
 - [ ] **Inbound email** — ตั้ง webhook URL `https://{slug}.gethelpwise.xyz/api/webhooks/email/` ที่ provider
-- [ ] **QStash schedule** — สร้าง cron ยิง `https://acme.gethelpwise.xyz/api/jobs/sla-sweep`
+- [ ] **QStash schedule** — สร้าง cron `*/15 * * * *` · `POST` · ยิง `https://acme.gethelpwise.xyz/api/jobs/sla-sweep`
+      · body เว้นว่าง · **ไม่ต้องใส่ header ใด ๆ** (QStash เซ็นให้เอง)
+      · ⚠️ URL ต้องตรงเป๊ะกับ `QSTASH_TARGET_BASE_URL` + path — route pin URL ตอน verify signature → ผิดแม้ trailing slash = `401` ทุกครั้ง
+      · cadence เลือก `*/15` (96 msg/วัน) ไม่ใช่ `*/5` (288) เพราะ Free plan = **1,000 msg/วัน และ retry นับด้วย** — ดู `docs/operations.md` § SLA Sweep Cron
+      · **verify หลังสร้าง:** `GET {QSTASH_URL}/v2/events` ต้องเห็น `DELIVERED → /api/jobs/sla-sweep` ตามรอบ (log retention 3 วัน)
 
 ---
 

@@ -198,8 +198,29 @@ periodically by an **Upstash QStash schedule**.
 - The response contains only aggregate counts — no tenant-specific data is exposed.
 
 Schedule: create a QStash schedule that `POST`s to
-`{QSTASH_TARGET_BASE_URL}/api/jobs/sla-sweep` (e.g. every 5 minutes). QStash signs each
-request automatically; no manual `Authorization` header is needed.
+`{QSTASH_TARGET_BASE_URL}/api/jobs/sla-sweep`. QStash signs each request automatically;
+no manual `Authorization` header is needed.
+
+> ⚠️ **The destination URL must match `getJobTargetUrl(SLA_SWEEP_WORKER_PATH)` exactly.**
+> The route pins the URL when verifying the signature (`src/lib/queue.ts:52`), so a
+> mismatched host, scheme, or trailing slash yields `401` on every invocation.
+
+**Cron cadence — mind the QStash quota.** The Free plan allows **1,000 messages/day**, and
+**every delivery attempt counts as one message, retries and schedule triggers included**.
+
+| cron | messages/day | share of Free quota |
+| --- | --- | --- |
+| `*/5 * * * *` | 288 | 28.8% |
+| **`*/15 * * * *`** (current) | **96** | **9.6%** |
+| `0 * * * *` | 24 | 2.4% |
+
+We run `*/15` rather than the `*/5` this document originally suggested: `*/5` leaves little
+headroom once retries and outbound webhook deliveries (up to 5 messages per event) are
+counted, and exhausting the daily quota makes **publish fail silently** — the same
+fail-soft outage class as the 2026-08-05 region-mismatch incident, but harder to spot
+because the feature worked before. Breach detection latency of ≤15 minutes is acceptable
+while no real-customer tenant exists; revisit this cadence (or the plan tier) before
+onboarding one.
 
 ---
 
