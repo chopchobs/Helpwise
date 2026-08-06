@@ -206,7 +206,9 @@ SDK จะเปลี่ยนไปอ่าน **ตัวแปร prefix �
 
 - [ ] **ไม่มี sweep/cron เก็บ `WebhookDelivery` ที่ค้าง `PENDING`** — แก้ QStash แล้วของค้างไม่หายเอง
       ต้อง replay ด้วยมือทีละอัน · วันนี้มี 1 อันเลยไม่เจ็บ แต่ต้องเป็นงานแยกก่อนจะสะสม
-- [ ] **สร้าง QStash schedule ของ SLA sweep** (§ 5.1) — งาน ops แยก
+- [x] ~~**สร้าง QStash schedule ของ SLA sweep**~~ ✅ **เสร็จแล้ว 2026-08-06** — verify 2 ชั้นผ่าน (§ 10)
+- [ ] 🔴 **ไม่มีการเฝ้า QStash quota** — sweep พังต่อเนื่องที่ `*/5` = **1,152 msg/วัน เกินโควตา 1,000**
+      ⇒ โควตาหมด → publish ตายเงียบ → ลาก webhooks + email ตายตาม (§ 10.3 มีตัวเลขรองรับ)
 - [ ] **เปลี่ยน near-breach จาก polling เป็น per-ticket scheduling** (§ 5.1.1 ชั้นที่ 3) —
       งานออกแบบ ไม่ใช่งาน ops · เข้า design brief คู่กับ P2
 - [ ] **ตรวจ `EMAIL_PROVIDER` ฝั่ง Vercel** — `.env` เครื่องไม่มีเลย → คาดว่า prod ก็ไม่มี (ชั้นซ้อน)
@@ -357,6 +359,61 @@ redeploy ตัดสาขาที่สามทิ้งก่อน ⇒ เ
 > `WebhookEndpoint` ⇒ ลบ endpoint แล้ว **delivery row หายตามทันที** (ยืนยันแล้ว: `WebhookDelivery` = 0 แถว)
 > ⇒ **ตัวเลขใน § 9.1 คือบันทึกเดียวที่เหลืออยู่ของเหตุการณ์นี้** — เหตุผลที่ต้องมี snapshot ก่อนเก็บกวาด
 > ⇒ ผลพลอยได้: ไม่มี `PENDING` ค้างเหลือในระบบแล้ว (แต่ backlog "ไม่มี sweep" ยังคงอยู่ ดู § 6)
+
+## 10. SLA sweep schedule — สร้างแล้วและ verify ผ่าน (2026-08-06)
+
+> ⏰ **บันทึกทันทีที่เห็นผล** — QStash log retention = **3 วัน** ⇒ หลัง **2026-08-09** หลักฐานนี้หายจากต้นทาง
+> เอกสารนี้จะเป็นบันทึกเดียวที่เหลือ (กฎเดียวกับ FK cascade ใน `CLAUDE.md` § Post-merge gate)
+
+### 10.1 ชั้นที่ 1 · schedule มีอยู่จริง (`GET /v2/schedules` → `200`)
+
+```
+scheduleId   scd_6JnXmVttr2Nyt3d4dyd5yKRskkT3
+cron         */5 * * * *          (UTC)
+destination  https://acme.gethelpwise.xyz/api/jobs/sla-sweep
+method       POST
+retries      3  (default)
+isPaused     false
+createdAt    2026-08-06T15:26:46.790Z
+```
+⇒ เดิม `/v2/schedules` = `[]` (§ 5.1) — **ปิด known gap "SLA sweep ไม่มี schedule" แล้ว**
+
+### 10.2 ชั้นที่ 2 · invocation จริงตามรอบ (`GET /v2/events` → `200`)
+
+| time (UTC) | state | responseStatus |
+| --- | --- | --- |
+| `2026-08-06T15:30:00.905Z` | `CREATED` | — |
+| `2026-08-06T15:30:00.995Z` | `ACTIVE` | — |
+| **`2026-08-06T15:30:28.012Z`** | ✅ **`DELIVERED`** | ✅ **`200`** |
+
+`messageId msg_7YoJxFpwkEy4DbXxJvcLMuMHjufJu2DkLzmjTKrePD2FN9eMzQRAJ` · `scheduleId` ตรงกับ § 10.1
+⇒ trigger ตรงนาทีที่ 30 พอดี = **cron ทำงานจริง ไม่ใช่แค่ schedule ถูกสร้าง**
+
+> 🔑 **`responseStatus 200` = signature verification ของ `/api/jobs/sla-sweep` ผ่าน**
+> route นี้ **fail-closed** (`verifyQStashSignature` ไม่ผ่าน → `401`) ⇒ `200` พิสูจน์ว่าคีย์ถูกต้อง
+> · เป็นการทดสอบ **route ที่สอง** (คนละ route กับ `webhook-deliver` แต่ใช้ signing key ชุดเดียวกัน)
+> · และเป็นครั้งแรกที่ `/api/jobs/sla-sweep` เคยถูกเรียกสำเร็จเลย
+
+**ข้อสังเกต (ไม่ใช่ปัญหา ณ ตอนนี้):** ใช้เวลา `ACTIVE → DELIVERED` ≈ **27 วินาที**
+(cold start + loop ทุก tenant ทีละราย) — ยังห่างจากเพดาน Free (max HTTP response duration 15 นาที) มาก
+แต่เป็นตัวเลขที่ควรจับตาถ้าจำนวน tenant โต **เพราะเวลาที่นานขึ้นจะชน timeout ก่อนชนโควตา**
+
+**หมายเหตุ:** Console เติม `Content-Type: application/json` ให้เอง — ไม่กระทบ เพราะ route verify ด้วย **rawBody** ไม่ได้ parse body
+
+### 10.3 🔴 ตัวเลขที่ทำให้ backlog "ไม่มีการเฝ้า quota" ไม่ใช่ความเสี่ยงลอย ๆ
+
+**retry default = 3** ⇒ ถ้า sweep พังต่อเนื่อง (เช่น DB ล่ม → route คืน `500`):
+
+| cron | ปกติ (msg/วัน) | **กรณีพังต่อเนื่อง** `× (1+3)` | เทียบโควตา Free = 1,000 |
+| --- | --- | --- | --- |
+| `*/15` | 96 | 384 | 38% |
+| **`*/5` (ปัจจุบัน)** | 288 | **1,152** | 🔴 **เกินโควตา — หมดภายในวันเดียว** |
+| `*/3` | 480 | **1,920** | 🔴 เกินเกือบ 2 เท่า |
+
+⇒ **โควตาหมด = publish ถูกปฏิเสธเงียบ ๆ ⇒ ลาก webhooks + outbound email ตายตามทั้งหมด**
+= **failure class เดียวกับ § 3 เป๊ะ** แต่ **หายากกว่า** เพราะ "เคยทำงานแล้ว"
+⇒ เป็นเหตุผลเพิ่มอีกชั้นว่าทำไม `*/3` รับไม่ได้ (พังต่อเนื่อง = 1,920)
+⇒ และเป็นเหตุผลว่าทำไม **การเฝ้า quota ต้องเป็นงานจริง ไม่ใช่ความตั้งใจ** (ดู § 6)
 
 ---
 
