@@ -384,7 +384,22 @@ subdomain) — ข้ามได้ถ้า § 2-4 พบว่า globex ไ�
 
    **ผ่านเมื่อ:** มี delivery `status = SUCCEEDED` (enum `prisma/schema.prisma:101–104`)
 
-4. ⛔ **ลบ endpoint ที่สร้างตอน smoke ทิ้งทันที** (บังคับ — เหตุผลใน § 6)
+4. ⛔ **ลบ endpoint ที่สร้างตอน smoke — แต่ลบ "หลัง verify ผ่าน" เท่านั้น** (บังคับ — เหตุผลใน § 6)
+
+   **เงื่อนไขการลบ (อย่าอ่านข้อนี้ว่า "ลบทันที" และอย่าอ่านว่า "ห้ามลบ"):**
+
+   | สภาพตอนนี้ | ทำอะไร |
+   | --- | --- |
+   | ข้อ 3 ได้ `SUCCEEDED` แล้ว | ✅ **ลบทันที** ตามคำสั่งด้านล่าง — smoke จบแล้ว ไม่มีเหตุให้เก็บ |
+   | ข้อ 3 **ยังไม่ผ่าน / กำลัง debug อยู่** | ⛔ **ห้ามลบ เก็บไว้เป็นหลักฐาน** — endpoint + delivery ที่ค้างคือ **เครื่องมือวัดผลชิ้นเดียว** ที่พิสูจน์ว่า fix ได้ผลจริง (replay แล้วต้องได้ `SUCCEEDED`) · ลบตอนนี้ = ต้องสร้าง bin ใหม่ + ticket ใหม่ + ทำ § 4-2 ซ้ำทั้งชุด |
+
+   ⚠️ ระหว่างที่ยัง debug: ความเสี่ยงของการเก็บไว้ = **ศูนย์ ถ้า bin ยังไม่เคยได้รับ payload เลย**
+   (ตรวจจาก `WebhookDelivery.attemptCount = 0`) — เหตุผล "ทิ้งสำเนาข้อมูลไว้บนบริการภายนอก" ด้านล่าง
+   **ใช้ไม่ได้เมื่อยังไม่มีข้อมูลถูกส่งออกไป**. ถ้า `attemptCount > 0` เมื่อไหร่ เหตุผลนั้นกลับมามีผลทันที
+   ⏰ และ bin ส่วนใหญ่ (webhook.site) **หมดอายุเอง ~7 วัน** → ถ้า debug ไม่จบในกรอบนั้น ต้องทำ § 4-2 ใหม่อยู่ดี
+
+   > 📌 เคสจริง 2026-08-05/06: delivery ค้าง `PENDING` (`attemptCount=0`) เพราะ QStash publish ไม่ออก
+   > → เก็บ endpoint ไว้ตามเงื่อนไขนี้ · ดู `.claude/specs/phase-38-qstash-region-incident-2026-08-06.md`
 
    ```bash
    curl -sS -i -b "$JAR" -X DELETE \
@@ -532,7 +547,8 @@ WHERE t."slug" IN ('acme', 'globex')          -- ← tenant scope
 ORDER BY t."slug", we."createdAt" DESC;
 ```
 
-**หลัง smoke ต้องไม่มี endpoint ของ smoke เหลือ** (ถูกลบไปแล้วที่ § 4-2 ข้อ 4)
+**หลัง smoke ผ่านแล้ว ต้องไม่มี endpoint ของ smoke เหลือ** (ถูกลบไปแล้วที่ § 4-2 ข้อ 4)
+⚠️ ถ้า smoke **ยังไม่ผ่าน / กำลัง debug** — endpoint ที่ค้างอยู่คือของที่ **ตั้งใจเก็บไว้** ตามตารางเงื่อนไขใน § 4-2 ข้อ 4 ไม่ใช่ของค้างที่ต้องลบ
 ถ้ามีของค้างที่ไม่รู้ที่มา → ลบผ่าน **API** `DELETE /api/webhook-endpoints/[id]`
 (`src/app/api/webhook-endpoints/[id]/route.ts:234`) **ไม่ใช่ SQL** — เพื่อให้ `audit.log()` ถูกเรียกตามกฎ
 
@@ -548,7 +564,8 @@ ORDER BY t."slug", we."createdAt" DESC;
 - [ ] § 3 login สำเร็จ ได้ `hw_agent_session`
 - [ ] § 4-1 `GET /api/webhook-endpoints` = **200** (ไม่ใช่ `FEATURE_LOCKED` / `FORBIDDEN`)
 - [ ] § 4-2 create `201` → ticket ใหม่ → delivery `SUCCEEDED`
-- [ ] § 4-2 ข้อ 4 **ลบ endpoint smoke แล้ว** + § 6.1 ยืนยันว่าไม่เหลือ · **ปิด/ลบ request-bin ทิ้งด้วย** (`unset BIN_URL`)
+- [ ] § 4-2 ข้อ 4 **ลบ endpoint smoke แล้ว (หลัง verify ผ่านเท่านั้น)** + § 6.1 ยืนยันว่าไม่เหลือ · **ปิด/ลบ request-bin ทิ้งด้วย** (`unset BIN_URL`)
+      — ถ้ายัง debug อยู่ ข้อนี้ยัง**ไม่ต้องติ๊ก** และ**ห้ามลบ** (ดูตารางเงื่อนไขใน § 4-2 ข้อ 4)
 - [ ] § 4-3 negative test ผ่าน **หรือ** บันทึก known gap ตาม § 5.3
 - [ ] § 5.1 RLS policy + `relforcerowsecurity` ของ webhook tables ครบ
 - [ ] ลบ cookie jar / unset password (`rm -f "$JAR"; unset HW_PASS`)
