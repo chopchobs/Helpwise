@@ -139,10 +139,12 @@ npx tsx prisma/seed-demo.ts # demo data acme/globex (idempotent)
 
 - [ ] **Stripe** — สร้าง webhook endpoint `https://.../api/webhooks/stripe/` → เอา signing secret ใส่ `STRIPE_WEBHOOK_SECRET` → redeploy
 - [ ] **Inbound email** — ตั้ง webhook URL `https://{slug}.gethelpwise.xyz/api/webhooks/email/` ที่ provider
-- [ ] **QStash schedule** — สร้าง cron `*/15 * * * *` · `POST` · ยิง `https://acme.gethelpwise.xyz/api/jobs/sla-sweep`
-      · body เว้นว่าง · **ไม่ต้องใส่ header ใด ๆ** (QStash เซ็นให้เอง)
+- [ ] **QStash schedule** — สร้าง cron `*/5 * * * *` · `POST` · ยิง `https://acme.gethelpwise.xyz/api/jobs/sla-sweep`
+      · body เว้นว่าง · **ไม่ต้องใส่ header ใด ๆ** (QStash เซ็นให้เอง) · retries = default
       · ⚠️ URL ต้องตรงเป๊ะกับ `QSTASH_TARGET_BASE_URL` + path — route pin URL ตอน verify signature → ผิดแม้ trailing slash = `401` ทุกครั้ง
-      · cadence เลือก `*/15` (96 msg/วัน) ไม่ใช่ `*/5` (288) เพราะ Free plan = **1,000 msg/วัน และ retry นับด้วย** — ดู `docs/operations.md` § SLA Sweep Cron
+      · ⚠️ **ก่อนเปลี่ยนค่า cron อ่าน `docs/operations.md` § SLA Sweep Cron ก่อน** — มีข้อผูกมัด 2 ทางที่ดึงคนละทิศ:
+        **quota** (Free = 1,000 msg/วัน · retry นับด้วย · `*/5` = 28.8%) และ
+        **สูตรความครอบคลุม near-breach: `interval ≤ 0.2 × window สั้นสุด`** (ตอนนี้ = 3 นาที)
       · **verify หลังสร้าง:** `GET {QSTASH_URL}/v2/events` ต้องเห็น `DELIVERED → /api/jobs/sla-sweep` ตามรอบ (log retention 3 วัน)
 
 ---

@@ -205,22 +205,57 @@ no manual `Authorization` header is needed.
 > The route pins the URL when verifying the signature (`src/lib/queue.ts:52`), so a
 > mismatched host, scheme, or trailing slash yields `401` on every invocation.
 
-**Cron cadence — mind the QStash quota.** The Free plan allows **1,000 messages/day**, and
-**every delivery attempt counts as one message, retries and schedule triggers included**.
+### Choosing the cron cadence
+
+**Current: `*/5 * * * *`.** Two constraints pull in opposite directions.
+
+**1. Quota (pulls the interval up).** The QStash Free plan allows **1,000 messages/day**, and
+**every delivery attempt counts as one message — retries and schedule triggers included**.
 
 | cron | messages/day | share of Free quota |
 | --- | --- | --- |
-| `*/5 * * * *` | 288 | 28.8% |
-| **`*/15 * * * *`** (current) | **96** | **9.6%** |
-| `0 * * * *` | 24 | 2.4% |
+| `*/15 * * * *` | 96 | 9.6% |
+| **`*/5 * * * *`** (current) | **288** | **28.8%** |
+| `*/3 * * * *` | 480 | 48% |
 
-We run `*/15` rather than the `*/5` this document originally suggested: `*/5` leaves little
-headroom once retries and outbound webhook deliveries (up to 5 messages per event) are
-counted, and exhausting the daily quota makes **publish fail silently** — the same
-fail-soft outage class as the 2026-08-05 region-mismatch incident, but harder to spot
-because the feature worked before. Breach detection latency of ≤15 minutes is acceptable
-while no real-customer tenant exists; revisit this cadence (or the plan tier) before
-onboarding one.
+Exhausting the daily quota makes **publish fail silently** — the same fail-soft outage class
+as the 2026-08-05 region-mismatch incident, but *harder* to spot because the feature worked
+before. `*/3` was rejected on these grounds: it buys marginal coverage (see below) by
+raising the risk of the exact failure mode we just spent a phase eliminating.
+
+**2. Near-breach coverage (pulls the interval down).** Near-breach fires only while
+`0 < remaining ≤ NEAR_BREACH_RATIO × window` (`NEAR_BREACH_RATIO = 0.2`). That is a
+**transient** window of `0.2 × window` minutes, and the flag is **one-shot** — so a sweep
+must happen to land inside it.
+
+> **Rule of thumb: `interval ≤ 0.2 × (shortest SLA window)` for reliable near-breach coverage.**
+
+With the default policy (`DEFAULT_SLA_MINUTES`, `src/lib/sla.ts`), first-response windows are:
+
+| priority | window | near-breach window (0.2×) | covered at `*/15` | at `*/5` | at `*/3` |
+| --- | --- | --- | --- | --- | --- |
+| URGENT | 15 min | **3 min** | ✗ (~20%) | partial (~60%) | ✓ |
+| HIGH | 60 min | 12 min | ✗ (~80%) | ✓ | ✓ |
+| NORMAL | 240 min | 48 min | ✓ | ✓ | ✓ |
+| LOW | 480 min | 96 min | ✓ | ✓ | ✓ |
+
+**Known gap accepted at `*/5`:** near-breach for **URGENT first-response** (3-minute window)
+fires for roughly 60% of cases. This is a **design limitation of polling + a one-shot flag**,
+not a bug, and **cannot be fixed by tuning the cron** — any interval leaves a probability.
+A real fix computes or schedules a per-ticket timer instead of polling. The percentages are a
+*lower bound during business hours*: `remaining` is measured in **business minutes**, so a
+window straddling a business-hours boundary stays open far longer in wall-clock terms.
+
+> ⚠️ **Non-determinism is worse than an outright failure to diagnose.** A near-breach that
+> fires *sometimes* looks healthy — someone sees one notification and concludes the feature
+> works. Do not treat an observed near-breach notification as proof of coverage.
+
+**Breach detection is not affected by any of this.** Its condition (`dueAt < now`) is
+**monotonic** — once past due it stays past due until flagged — so the breach flag, its
+`AuditLog` entry, and its notification **always fire**, with the cron interval affecting only
+latency (≤ interval). Cadence tuning is purely a near-breach concern.
+
+Revisit this cadence (or the plan tier) before onboarding a real-customer tenant.
 
 ---
 
