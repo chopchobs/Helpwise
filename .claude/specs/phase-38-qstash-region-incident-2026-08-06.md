@@ -211,6 +211,8 @@ SDK จะเปลี่ยนไปอ่าน **ตัวแปร prefix �
       ⇒ โควตาหมด → publish ตายเงียบ → ลาก webhooks + email ตายตาม (§ 10.3 มีตัวเลขรองรับ)
 - [ ] **เปลี่ยน near-breach จาก polling เป็น per-ticket scheduling** (§ 5.1.1 ชั้นที่ 3) —
       งานออกแบบ ไม่ใช่งาน ops · เข้า design brief คู่กับ P2
+- [ ] 🔴 **sla-sweep ไม่มี per-tenant checkpoint** (§ 10.2.1) — timeout กลางทาง = tenant ท้าย ๆ ไม่มีวันถูก sweep
+      · baseline 27 วิ / 2 tenant · มองเห็นทางเดียวคือ DLQ ที่ไม่มีใครเฝ้า
 - [ ] **ตรวจ `EMAIL_PROVIDER` ฝั่ง Vercel** — `.env` เครื่องไม่มีเลย → คาดว่า prod ก็ไม่มี (ชั้นซ้อน)
 - [ ] **P2 ต้อง probe provider จริง** — ดูเกณฑ์ตัดสินหัวไฟล์
 
@@ -394,9 +396,19 @@ createdAt    2026-08-06T15:26:46.790Z
 > · เป็นการทดสอบ **route ที่สอง** (คนละ route กับ `webhook-deliver` แต่ใช้ signing key ชุดเดียวกัน)
 > · และเป็นครั้งแรกที่ `/api/jobs/sla-sweep` เคยถูกเรียกสำเร็จเลย
 
-**ข้อสังเกต (ไม่ใช่ปัญหา ณ ตอนนี้):** ใช้เวลา `ACTIVE → DELIVERED` ≈ **27 วินาที**
-(cold start + loop ทุก tenant ทีละราย) — ยังห่างจากเพดาน Free (max HTTP response duration 15 นาที) มาก
-แต่เป็นตัวเลขที่ควรจับตาถ้าจำนวน tenant โต **เพราะเวลาที่นานขึ้นจะชน timeout ก่อนชนโควตา**
+### 🔴 10.2.1 · `ACTIVE → DELIVERED` = 27 วินาที — ไม่ใช่แค่ข้อสังเกต แต่เป็นบั๊กเชิงโครงสร้างที่รอเวลา
+
+**baseline: 27 วินาที / 2 tenant** (`15:30:00.995 → 15:30:28.012`, cold start + loop ทุก tenant ทีละราย)
+ยังห่างเพดาน Free (max HTTP response duration 15 นาที) มาก **แต่ตัวเลขไม่ใช่ประเด็น — โครงสร้างต่างหาก:**
+
+`sla-sweep` **วนทุก tenant ใน invocation เดียวโดยไม่มี per-tenant progress/checkpoint** ⇒
+1. ชน Vercel timeout เมื่อไร → **ตายกลางทาง** ⇒ tenant **หลังจุดนั้นไม่เคยถูก sweep เลย**
+2. **retry เริ่มจาก tenant แรกใหม่ทุกครั้ง** ⇒ ถ้าเวลารวมเกิน timeout ตลอด **tenant ท้าย ๆ ไม่มีวันถึง**
+3. สิ่งเดียวที่มองเห็นอาการได้คือ **QStash DLQ** ซึ่ง **ไม่มีใครเฝ้า + retention แค่ 3 วัน**
+
+⇒ **จะชน timeout ก่อนชนโควตา** เมื่อจำนวน tenant โต · **วันนี้ไม่เจ็บ (2 tenant) แต่โตแล้วเจ็บแบบเงียบ**
+⇒ **คลาสเดียวกับ per-ticket scheduling (§ 5.1.1) และ quota (§ 10.3): กลไกที่ดูเหมือนทำงานแต่พิสูจน์ไม่ได้**
+⇒ ใช้ **27 วินาที / 2 tenant เป็น baseline เทียบ** เมื่อ tenant เพิ่ม
 
 **หมายเหตุ:** Console เติม `Content-Type: application/json` ให้เอง — ไม่กระทบ เพราะ route verify ด้วย **rawBody** ไม่ได้ parse body
 
