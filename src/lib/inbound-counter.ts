@@ -102,11 +102,37 @@ let lastFlushAt = Date.now();
 /** bucket ที่รู้แล้วว่า saturate — ไม่ต้องเขียนซ้ำ (เพดานของ write ต่อวัน) */
 const saturatedBuckets = new Set<string>();
 
+/**
+ * 🔴 flag ว่า **write ของ counter เคยล้ม** — ต้องเดินทางออกไปถึงสถานะของ P2
+ *
+ * ทำไมจำเป็น: write ล้มแต่ read ยังได้ ⇒ ตัวเลขโควตา**ต่ำกว่าความจริงแบบเงียบ**
+ * ⇒ readiness ดูสุขภาพดี ⇒ **false-PASS บนเกณฑ์ brief §8 ข้อ 2** ซึ่งเป็นเกณฑ์ที่
+ * กลไกนับทั้งหมดนี้สร้างขึ้นมาเพื่อผ่าน · `console.error` อย่างเดียวไม่นับเป็นทางออก —
+ * บน Vercel มันลงไปอยู่ใน log ที่ไม่มีใครเปิด = pattern เดียวกับ `EMAIL_PROVIDER` (brief §2.3)
+ *
+ * ⚠️ **ข้อจำกัดที่ต้องรู้: flag นี้เป็น per-instance และหายไปเมื่อ instance ตาย**
+ *    ⇒ ครอบไม่ครบ (ดู erratum §H-4) — แต่ดีกว่าเงียบสนิท · sticky โดยตั้งใจ:
+ *    ไม่ decay เอง เพราะ "หายเอง" คือคุณสมบัติที่ทำให้สัญญาณเชื่อถือไม่ได้
+ */
+let writeFailure: string | null = null;
+
+/** counter เคยเขียนพลาดใน instance นี้หรือไม่ — readiness อ่านค่านี้ทุกรอบ live probe */
+export function getCounterWriteFailure(): string | null {
+  return writeFailure;
+}
+
 /** ล้าง state ระดับ module — ใช้ใน test เท่านั้น */
 export function __resetInboundCounterForTest(): void {
   pending = { signed_invalid: 0, unsigned: 0 };
   lastFlushAt = Date.now();
   saturatedBuckets.clear();
+  writeFailure = null;
+}
+
+/** บันทึกว่า write ล้ม — log **และ** ตั้ง flag ที่ readiness จะอ่านเจอ */
+function markWriteFailure(scope: string, err: unknown): void {
+  writeFailure = `${scope}: ${(err as Error).message.slice(0, 120)}`;
+  console.error(`[inbound-counter] ${writeFailure}`);
 }
 
 /**
@@ -153,7 +179,9 @@ async function flushPending(): Promise<void> {
       );
     }
   } catch (err) {
-    console.error("[inbound-counter] flush failed:", (err as Error).message);
+    // 🔴 write ล้ม → ต้องไปโผล่ที่สถานะของ P2 ไม่ใช่แค่ log (§F: catch ที่กลืน error
+    //    ในไฟล์ของ P2 เอง ต้องมีทางออกไปถึงสถานะ)
+    markWriteFailure("flush failed", err);
   }
 }
 
@@ -192,7 +220,7 @@ export async function recordInboundAttempt(
       await flushPending();
     }
   } catch (err) {
-    console.error("[inbound-counter] record failed:", (err as Error).message);
+    markWriteFailure("record failed", err);
   }
 }
 
@@ -215,7 +243,15 @@ export interface InboundCounters {
 
 async function readBucket(key: string): Promise<number> {
   const raw = await redis.get(key);
-  return raw ? Number.parseInt(raw, 10) || 0 : 0;
+  if (raw === null) return 0; // key ยังไม่เคยถูกสร้าง = 0 จริง
+
+  const value = Number.parseInt(raw, 10);
+  if (Number.isNaN(value)) {
+    // ⛔ ห้ามคืน 0 เงียบ ๆ — ค่าเสียจะถูกอ่านเป็น "ไม่มี traffic เลย" ซึ่งดูสุขภาพดี
+    //    ทั้งที่ของจริงคือวัดไม่ได้ ⇒ throw ให้ caller ยกเป็น reason ที่ถึงสถานะ
+    throw new Error(`corrupt counter bucket: ${key}`);
+  }
+  return value;
 }
 
 /** อ่าน counter ทั้งหมด — ใช้ในทางเดินที่ auth ของ readiness probe เท่านั้น */
@@ -276,7 +312,9 @@ export interface InboundEvaluation {
  */
 export function evaluateInboundCounters(
   counters: InboundCounters,
-  heartbeat: HeartbeatFreshness
+  heartbeat: HeartbeatFreshness,
+  /** ข้อความจาก `getCounterWriteFailure()` — `null` = ยังไม่เคยเขียนพลาด */
+  writeFailed: string | null = null
 ): InboundEvaluation {
   const reasons: string[] = [];
   let level: InboundEvaluation["level"] = "OK";
@@ -295,9 +333,16 @@ export function evaluateInboundCounters(
     escalate("DEGRADED");
   }
 
+  // ── write ล้ม: ตัวเลขที่อ่านได้ต่ำกว่าความจริง ⇒ กฎเดียวกับเคส signed_invalid ──
+  //    (write ล้มแต่ read ได้ = counter ดูสุขภาพดีทั้งที่นับไม่ครบ = false-PASS)
+  if (writeFailed !== null) {
+    reasons.push("inbound_counter_write_failed");
+    escalate("DEGRADED"); // ห้ามเป็น OK ตลอดช่วงที่ flag ติด
+  }
+
   // ── counter 2 คลาส (1): signed-but-invalid ────────────────────────────────
-  const quotaUnderReported = counters.signedInvalidThisHour > 0;
-  if (quotaUnderReported) {
+  const quotaUnderReported = counters.signedInvalidThisHour > 0 || writeFailed !== null;
+  if (counters.signedInvalidThisHour > 0) {
     // §C: ตลอดช่วงที่คลาส (1) ไม่เป็นศูนย์ ตัวเลขโควตาต่ำกว่าความจริง
     // และสถานะรวม **ห้ามเป็น OK** (DEGRADED เป็นอย่างต่ำ)
     if (heartbeat === "stale") {
@@ -310,8 +355,9 @@ export function evaluateInboundCounters(
       reasons.push("signed_invalid_corroboration_unavailable");
       escalate("DEGRADED"); // ลำดับ 4 ยังไม่มี — ไม่เงียบ แต่ยังไม่ตัดสินว่าพัง
     }
-    reasons.push("quota_under_reported");
   }
+
+  if (quotaUnderReported) reasons.push("quota_under_reported");
 
   // ── counter 2 คลาส (2): unsigned — rate-based เท่านั้น ────────────────────
   if (counters.unsignedThisHour > UNSIGNED_RATE_DEGRADED_PER_HOUR) {

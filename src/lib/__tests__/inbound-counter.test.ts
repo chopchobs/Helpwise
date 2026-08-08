@@ -26,6 +26,7 @@ import {
   readInboundCounters,
   evaluateInboundCounters,
   __resetInboundCounterForTest,
+  getCounterWriteFailure,
   BUCKET_SATURATE_AT,
   FLUSH_MAX_PENDING,
   QSTASH_DAILY_QUOTA,
@@ -204,5 +205,48 @@ describe("readInboundCounters — อ่านจาก bucket ที่ถู�
     const c = await readInboundCounters();
     expect(c.quotaUsed).toBe(0); // คนนอกดันตัวเลขโควตาไม่ได้
     expect(c.unsignedThisHour).toBe(5000);
+  });
+});
+
+describe("§F — write ล้มต้องไปถึงสถานะ ไม่ใช่แค่ console.error", () => {
+  it("flush ล้ม → ตั้ง flag (ไม่ throw ออกไปทำให้ worker ล้ม)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.incrby.mockRejectedValue(new Error("redis write down"));
+
+    await expect(
+      (async () => {
+        for (let i = 0; i < FLUSH_MAX_PENDING; i++) {
+          await recordInboundAttempt("unsigned");
+        }
+      })()
+    ).resolves.toBeUndefined();
+
+    expect(getCounterWriteFailure()).toContain("flush failed");
+  });
+
+  it("write ล้ม → สถานะห้ามเป็น OK + mark ว่าโควตาต่ำกว่าความจริง", () => {
+    const r = evaluateInboundCounters(counters(), "fresh", "flush failed: redis down");
+    expect(r.level).not.toBe("OK");
+    expect(r.level).toBe("DEGRADED");
+    expect(r.reasons).toContain("inbound_counter_write_failed");
+    expect(r.quotaUnderReported).toBe(true);
+    expect(r.reasons).toContain("quota_under_reported");
+  });
+
+  it("ไม่มี write failure + counter สะอาด → OK (flag ไม่ได้ติดค้างเอง)", () => {
+    const r = evaluateInboundCounters(counters(), "fresh", null);
+    expect(r.level).toBe("OK");
+  });
+
+  it("verified เขียนล้ม → ตั้ง flag เหมือนกัน", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.incrby.mockRejectedValue(new Error("redis write down"));
+    await recordInboundAttempt("verified");
+    expect(getCounterWriteFailure()).toContain("record failed");
+  });
+
+  it("bucket ที่มีค่าเสีย → throw (ห้ามอ่านเป็น 0 ซึ่งดูเหมือนไม่มี traffic)", async () => {
+    mocks.get.mockResolvedValue("not-a-number");
+    await expect(readInboundCounters()).rejects.toThrow(/corrupt counter bucket/);
   });
 });
