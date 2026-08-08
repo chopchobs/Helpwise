@@ -293,8 +293,11 @@ schedule ว่าง · DLQ/queues/topics ว่าง) ⇒ **ไม่มี r
 > → **ผ่านไปเฉย ๆ ไม่ redirect**
 >
 > **สาเหตุจริงของ `302`:** **Vercel Deployment Protection** (SSO บน `*.vercel.app`)
-> ⚠️ **ยังไม่มีใครตรวจค่าจริงของ setting นี้ — เป็นสมมติฐานจนกว่า Dev จะ confirm ใน Vercel Project Settings**
-> ห้ามอ้างข้อนี้เป็นข้อเท็จจริงจนกว่าจะ confirm
+> ✅ **confirm แล้ว 2026-08-08 (Dev ตรวจใน Vercel Project Settings)** — Vercel Authentication = **ON** โหมด **"Standard Protection"**
+> · วัดเพิ่มได้ว่า `https://gethelpwise.xyz/api/health` → **200** และ `https://acme.gethelpwise.xyz/api/health` → **200**
+> ขณะที่ `*.vercel.app` → **302** (ค่าที่บันทึกไว้ข้างบน)
+> ⇒ **อนุมานจากการวัด 3 จุดนี้** ว่า Standard Protection ครอบ deployment URL / preview แต่ไม่ครอบโดเมน production ของโปรเจกต์
+> (เป็นการอนุมานจากผลวัด **ไม่ใช่ข้อความจากเอกสาร Vercel**) · หลักฐานเต็มชุด → erratum §G ข้อ 5
 >
 > **ข้อสังเกตเดิมยังคงอยู่:** *"เทียบ artifact ข้าม host (production alias ↔ deployment URL) ทำไม่ได้"*
 > ยังเป็นข้อจำกัดจริง — เปลี่ยนแค่ **เหตุผล** · ผลต่างที่สำคัญ: proxy แก้ที่โค้ดของเรา แต่ Deployment Protection

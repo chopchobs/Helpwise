@@ -74,17 +74,27 @@ v2.1 · 2026-08-08 · **ส่วนต่อท้าย** ของ `phase-39-
 
 ### (ค) prerequisite ตัวจริงของ rehearsal (แทนที่ v2 §5 ข้อ 1)
 
-**prerequisite ตัวจริงคือ: Deployment Protection ของ Preview จะขวางการยิง probe เข้าไปที่ `*.vercel.app`** (⚠️ **สมมติฐาน รอ Dev confirm** — ถ้า confirm แล้วพบว่าปิดอยู่ ข้อนี้ตกไปทั้งข้อและ rehearsal เริ่มได้เลย)
+**prerequisite ตัวจริงคือ: Deployment Protection ของ Preview จะขวางการยิง probe เข้าไปที่ `*.vercel.app`**
 
-สองทางที่ผ่านได้:
+✅ **confirm แล้ว 2026-08-08 (Dev)** — Vercel Authentication = ON โหมด "Standard Protection" · หลักฐานการวัดครบชุดอยู่ที่ **§G ข้อ 5** (ไม่ลอกมาซ้ำที่นี่)
 
-| ทาง | ข้อดี | ข้อเสีย |
+**ล็อกที่ทาง A — Protection Bypass token** (ส่ง `x-vercel-protection-bypass` เป็น header หรือ query param ไปกับ request ที่ยิง probe · ตั้งเป็น system env `VERCEL_AUTOMATION_BYPASS_SECRET`)
+เหตุผล: มีให้ใช้จริงบน plan ปัจจุบัน (confirm แล้ว) · ไม่แตะ setting ของโปรเจกต์ · ไม่มีหน้าต่างเวลาที่ Preview เปิดสาธารณะ · ทำซ้ำได้ทุกครั้งโดยไม่ต้องมีคนไปกดอะไร (ตรงกับเจตนา "rehearsal ที่ทำซ้ำได้" ใน v2 §5)
+ราคาที่จ่าย: เพิ่ม secret ที่ต้องดูแลอีก 1 ตัว · **ยังไม่ได้ generate — เป็นงานที่ต้องทำก่อนลำดับ 7**
+
+⛔ **ทาง B (ปิด Protection ชั่วคราวแล้วเปิดคืน) ถูกตัดออกแล้ว ห้ามรื้อกลับมา** — เป็น escape hatch ที่พึ่งคนจำไปเปิดคืน ซึ่ง brief §7 ปฏิเสธไว้ตรง ๆ ("คนลืม revert = เสีย gate ถาวรแบบเงียบ") และไม่มีเหตุให้ใช้แล้วเพราะทาง A ใช้ได้จริง
+
+#### ผลตามมาของการ confirm — ขอบเขตที่ต้องใช้ bypass
+
+| ลำดับงาน (§E) | ยิงที่ host ไหน | ต้องใช้ bypass ไหม |
 | --- | --- | --- |
-| **A. Protection Bypass token** (ส่ง token ไปกับ request ที่ยิง probe) | ไม่แตะ setting ของโปรเจกต์ · ไม่มีหน้าต่างเวลาที่ Preview เปิดสาธารณะ · ทำซ้ำได้ทุกครั้งโดยไม่ต้องมีคนไปกดอะไร (ตรงกับเจตนา "rehearsal ที่ทำซ้ำได้" ใน v2 §5) | เพิ่ม secret ที่ต้องดูแลอีก 1 ตัว · ต้อง confirm ว่า plan ปัจจุบันมีฟีเจอร์นี้ให้ใช้ |
-| **B. ปิด Protection ชั่วคราวแล้วเปิดคืน** | ไม่ต้องเพิ่ม secret · ทำได้ทันทีทุก plan | 🔴 **เป็น escape hatch ที่พึ่งคนจำไปเปิดคืน** ซึ่ง brief §7 ปฏิเสธไว้ตรง ๆ ("คนลืม revert = เสีย gate ถาวรแบบเงียบ") · ระหว่างนั้น Preview เปิดสาธารณะ |
+| **7. rehearsal บน Preview** | `*.vercel.app` (ถูก Protection กัน) | ✅ **ต้องใช้** |
+| **5. cron + post-deploy alias identity poll** | โดเมน production | ❌ ไม่ต้อง — ไม่ถูกกัน (วัดได้ `200`) |
+| **6. external pinger** | โดเมน production | ❌ ไม่ต้อง — เหตุผลเดียวกัน |
 
-**แนะนำ: ทาง A** — เหตุผลเดียวที่ชี้ขาดคือ B เป็นรูปแบบเดียวกับที่ brief §7 ปฏิเสธไปแล้ว
-⚠️ **ขึ้นกับผล confirm ของ Dev** — ถ้า Dev confirm ว่า plan ปัจจุบันไม่มี bypass token ให้ใช้ ⇒ ตกไปที่ B **โดยต้องผูกการเปิดคืนไว้กับขั้นตอนสุดท้ายของ rehearsal (v2 §5 ข้อ 7) เป็น step บังคับ ไม่ใช่คำแนะนำ**
+⚠️ **ข้อบังคับที่ตามมา — post-deploy identity poll ต้อง poll ที่โดเมน production เท่านั้น ห้าม poll ที่ `*.vercel.app`**
+เหตุผล: `*.vercel.app` ตอบ `302` จาก Protection ⇒ สิ่งที่อ่านได้ไม่ใช่ response ของแอปเรา ⇒ **อ่านผลผิด** (และถ้าไม่ระวังจะไปชนกฎ `INCONCLUSIVE` ข้างล่างทุกรอบ)
+→ เพิ่มเข้าเช็คลิสต์ **§F** แล้ว
 
 #### กฎแยกผลลัพธ์ — `INCONCLUSIVE` (เพิ่มเข้า v2 §5 ข้อ 5–6)
 
@@ -270,6 +280,8 @@ blind spot 9.6% นี้ **bounded ก็ต่อเมื่อ min-interval 
 - [ ] counter คลาส unsigned ต้องเป็น **bucket write ที่ bounded + saturate** ตาม §C
 - [ ] **จำแนกคลาสด้วยการอ่าน header เอง ห้ามอนุมานจาก `valid === false` ของ `verifyQStashSignature()`** — ค่านั้นเหมือนกันหมดทั้งสามกรณี (§C ข้อ 3) ⇒ อนุมานเมื่อไร กฎ §C ตายเงียบทั้งข้อ
 - [ ] **min-interval ของ live probe ต้อง implement จริง** — เป็นเงื่อนไขความถูกต้องของตัวเลขโควตา (§D) ไม่ใช่แค่กัน DoS
+- [ ] **post-deploy identity poll ต้อง poll ที่โดเมน production เท่านั้น ห้าม poll ที่ `*.vercel.app`** — `*.vercel.app` ถูก Deployment Protection กัน (`302`) ⇒ อ่านผลผิด (§B(ค) · หลักฐาน §G ข้อ 5)
+- [ ] **generate Protection Bypass secret + ตั้ง `VERCEL_AUTOMATION_BYPASS_SECRET`** ก่อนเริ่มลำดับ 7 — ยังไม่ได้ทำ · จำเป็นเฉพาะ rehearsal บน Preview เท่านั้น ลำดับ 5/6 ไม่ต้องใช้
 
 ---
 
@@ -281,7 +293,22 @@ blind spot 9.6% นี้ **bounded ก็ต่อเมื่อ min-interval 
 2. **`SUPABASE_REALTIME_JWT_PRIVATE_KEY` / `SUPABASE_REALTIME_JWT_KID` ไม่ถูกครอบใน Phase 39** — v2 §2.6 ถูกตัดออกด้วยเหตุผลดีไซน์ (§D) · presence ตายเงียบยังเป็น failure mode ที่ไม่มีอะไรเฝ้า จนกว่าจะทำ runtime probe ตัวจริงใน phase ถัดไป
 3. **blind spot ~9.6 percentage point ของตัวเลขโควตา** — ถ้าสมมติฐาน "read call ไม่กินโควตา" ผิด counter จะรายงาน headroom สูงกว่าจริงเสมอโดยโครงสร้าง (§D) · **bounded ก็ต่อเมื่อ min-interval (v2 §3 ข้อ 6) ถูก implement จริง** — สองข้อนี้ผูกกัน ห้ามแยก
 4. **"signing key rotate แล้วไม่ตรง" — จับได้ แต่มีหน้าต่างที่เงียบ**: จับได้เมื่อมี attempt เข้ามา (คลาส 1 + heartbeat ค้าง ⇒ FAIL ตาม §C) แต่ช่วงที่ยังไม่มี message ถูก publish เลยจะไม่มีสัญญาณ ⇒ ความเงียบยาวได้เท่าคาบของ mechanism ที่ถี่ที่สุด
-5. **Vercel Deployment Protection ยังเป็นสมมติฐาน** — ยังไม่มีใครตรวจค่าจริง · **รอ Dev confirm** · ถ้าผลออกมาต่างจากที่สันนิษฐาน §B(ค) ทั้งข้อต้องเขียนใหม่ (และ erratum note ใน incident §8.3 ต้องอัปเดตตาม)
+5. ~~**Vercel Deployment Protection ยังเป็นสมมติฐาน**~~ → **ปิดข้อนี้แล้ว 2026-08-08 (Dev confirm)** — ไม่ใช่ open item อีกต่อไป
+
+   **สิ่งที่วัดได้จริง (บันทึกเป็นผลการวัด ไม่ใช่พฤติกรรมของ Vercel):**
+
+   | จุดที่วัด | ผลที่ได้ |
+   | --- | --- |
+   | Vercel Project Settings → Deployment Protection | **Vercel Authentication = ON**, โหมด **"Standard Protection"** |
+   | Protection Bypass for Automation (บนหน้าเดียวกัน) | **มีให้ใช้จริงบน plan Hobby** — ปุ่ม `+ Add Secret` กดได้ ไม่มีป้าย Upgrade · **ยังไม่ได้ generate secret** · กลไก: ส่งเป็น header หรือ query param `x-vercel-protection-bypass` · ตั้งเป็น system env `VERCEL_AUTOMATION_BYPASS_SECRET` ได้ |
+   | `curl https://gethelpwise.xyz/api/health` | **200** |
+   | `curl https://acme.gethelpwise.xyz/api/health` | **200** |
+   | `*.vercel.app` (จาก incident §8.3 ที่บันทึกไว้ก่อนหน้า) | **302** |
+
+   **ข้อสรุปที่อนุมานได้จาก 3 จุดวัดสุดท้าย:** Standard Protection ครอบ deployment URL / preview แต่**ไม่ครอบโดเมน production ของโปรเจกต์**
+   ⚠️ ประโยคนี้เป็น **การอนุมานจากการวัด 3 จุด** ไม่ใช่ข้อความที่ยกมาจากเอกสารของ Vercel — ถ้าจะขยายไปใช้กับกรณีอื่น ต้องวัดเพิ่มก่อน
+
+   ผลตามมา → **§B(ค) ล็อกที่ทาง A แล้ว** (bypass token) และ **§F มีข้อบังคับเพิ่มเรื่อง host ที่ใช้ poll**
 
 **ของ v2 §8 ที่ยังมีผลทั้งหมด — ให้ยึดตามที่ v2 เขียน ไม่คัดลอกมาซ้ำ:**
 root cause ของ §3 ข้อ 3 (near-breach polling window) · root cause ของ §3 ข้อ 4 (sweep ไม่มี checkpoint) · ความไม่แม่นของ headroom ระหว่างช่วงที่ verify ไม่ผ่าน · สมมติฐาน "read call ไม่กินโควตา" ที่ยังไม่ verify · ชื่อ Vercel system env ที่ยังต้อง confirm · ช่วง "P2 หยุดถาวร" ที่ครอบได้ก็ต่อเมื่อรับ external pinger (ตัดสินแล้วว่ารับ — §A ข้อ 2) · 60-day auto-disable ของ GitHub Actions · ไม่ครอบ email provider เพราะยังไม่เลือก · ไม่ครอบ traffic-triggered check
