@@ -34,7 +34,13 @@ vi.mock("@/lib/redis", () => ({
 }));
 
 import { GET } from "../route";
-import { READINESS_MARKER, READINESS_AUTH_HEADER } from "@/lib/readiness";
+import {
+  READINESS_MARKER,
+  READINESS_AUTH_HEADER,
+  SNAPSHOT_MEMO_TTL_MS,
+  SNAPSHOT_STALE_AFTER_SECONDS,
+  __resetSnapshotMemoForTest,
+} from "@/lib/readiness";
 
 const URL_ = "https://gethelpwise.xyz/api/health/readiness";
 const TOKEN = "test-readiness-token";
@@ -54,6 +60,7 @@ function installFakeRedis() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  __resetSnapshotMemoForTest(); // memo อยู่ระดับ module — ต้องล้างระหว่างเคส
   installFakeRedis();
   mocks.probeQStashReadOnly.mockResolvedValue({ ok: true, detail: "schedules.list ok" });
   process.env.READINESS_PROBE_TOKEN = TOKEN;
@@ -115,14 +122,72 @@ describe("readiness — §F: shape ที่ไม่ auth ห้ามมี te
     expect(json.data.reasons).toBeUndefined();
     // key ที่อนุญาตเท่านั้น
     expect(Object.keys(json.data).sort()).toEqual(
-      ["ageSeconds", "checkedAt", "deploymentId", "marker", "staleAfterSeconds", "status"].sort()
+      ["ageSeconds", "checkedAt", "marker", "staleAfterSeconds", "status"].sort()
     );
   });
 
-  it("ไม่มี commitSha ในทางเดินที่ไม่ auth", async () => {
+  it("ไม่มี deployment identity เลยในทางเดินที่ไม่ auth (ทั้ง deploymentId และ commitSha)", async () => {
     await callWith({ [READINESS_AUTH_HEADER]: TOKEN });
     const { json } = await callWith();
-    expect(JSON.stringify(json)).not.toContain("abcdef0123456789");
+    const serialized = JSON.stringify(json);
+    expect(serialized).not.toContain("dpl_test123");
+    expect(serialized).not.toContain("abcdef0123456789");
+  });
+});
+
+describe("readiness — เพดานของ read path (memo)", () => {
+  it("ยิงแบบไม่ auth 20 ครั้งใน window เดียว → redis.get ครั้งเดียว", async () => {
+    for (let i = 0; i < 20; i++) await callWith();
+
+    const snapshotReads = mocks.get.mock.calls.filter((c) =>
+      String(c[0]).includes("readiness:snapshot")
+    );
+    expect(snapshotReads).toHaveLength(1);
+  });
+
+  it("memo ครอบทั้งกรณี 'ไม่มี snapshot' ด้วย (กรณีที่คนนอกยิงตอนยังไม่เคยวัด)", async () => {
+    // ไม่มีใคร live probe เลย ⇒ readSnapshotRaw คืน none — ต้องยัง memo
+    for (let i = 0; i < 10; i++) {
+      const { json } = await callWith();
+      expect(json.data.status).toBe("STALE");
+    }
+    expect(mocks.get.mock.calls.filter((c) => String(c[0]).includes("readiness:snapshot")))
+      .toHaveLength(1);
+  });
+
+  it("memo ครอบกรณี Redis ล่มด้วย (ยังคง FAIL ทุกครั้ง ไม่ใช่ยิง Redis ซ้ำ)", async () => {
+    mocks.get.mockRejectedValue(new Error("redis down"));
+    for (let i = 0; i < 10; i++) {
+      const { json } = await callWith();
+      expect(json.data.status).toBe("FAIL");
+    }
+    expect(mocks.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("memo หมดอายุแล้วอ่าน Redis ใหม่", async () => {
+    await callWith();
+    vi.setSystemTime(Date.now() + SNAPSHOT_MEMO_TTL_MS + 1);
+    await callWith();
+    vi.useRealTimers();
+
+    expect(mocks.get.mock.calls.filter((c) => String(c[0]).includes("readiness:snapshot")))
+      .toHaveLength(2);
+  });
+
+  it("INVARIANT: memo ต้องสั้นกว่าเกณฑ์ STALE มาก (memo ห้ามกลายเป็นตัวถ่วงของ STALE)", () => {
+    // memo ≤ 1% ของหน้าต่าง STALE ⇒ ค่าที่เสิร์ฟไม่มีทางเก่าจนพลิกการตัดสิน
+    expect(SNAPSHOT_MEMO_TTL_MS / 1000).toBeLessThanOrEqual(
+      SNAPSHOT_STALE_AFTER_SECONDS * 0.01
+    );
+  });
+
+  it("live probe เขียน snapshot แล้วดันเข้า memo ทันที (ไม่เสิร์ฟค่าที่เก่ากว่าที่เพิ่งเขียน)", async () => {
+    const live = await callWith({ [READINESS_AUTH_HEADER]: TOKEN });
+    mocks.get.mockClear();
+    const anon = await callWith();
+
+    expect(anon.json.data.checkedAt).toBe(live.json.data.checkedAt);
+    expect(mocks.get).not.toHaveBeenCalled();
   });
 });
 
@@ -193,9 +258,10 @@ describe("readiness — deployment identity", () => {
     });
   });
 
-  it("shape ที่ไม่ auth คืนเฉพาะ deploymentId (ลำดับ 5 ใช้ระบุ alias)", async () => {
+  it("shape ที่ไม่ auth ไม่คืน identity เลย (ลำดับ 5 ถือ token อยู่แล้ว → ใช้ shape ที่ auth)", async () => {
     const { json } = await callWith();
-    expect(json.data.deploymentId).toBe("dpl_test123");
+    expect(json.data.deploymentId).toBeUndefined();
+    expect(json.data.deployment).toBeUndefined();
   });
 });
 

@@ -56,6 +56,23 @@ export const SNAPSHOT_STALE_AFTER_SECONDS = 1800;
 /** TTL ของ snapshot ใน Redis — ยาวกว่า stale threshold มาก เพื่อให้ "เก่า" ต่างจาก "หาย" */
 const SNAPSHOT_TTL_SECONDS = 86_400;
 
+/**
+ * เพดานของ **read path**: memo snapshot ใน process นานเท่านี้ (มิลลิวินาที)
+ *
+ * ทำไมต้องมี: shape ที่ไม่ auth เปิดสาธารณะโดยจำเป็น (external pinger ลำดับ 6 ใช้)
+ * ⇒ ถ้าอ่าน Redis ทุก request คนนอกยิงรัว ๆ = คำสั่ง Redis ไม่จำกัด
+ * และ **Redis ไม่ใช่ของ P2 คนเดียว** — `src/proxy.ts` ใช้ทำ tenant lookup ทุก request
+ * ของทั้งแอป ⇒ โควตา Redis หมด = ทั้งเว็บล่ม ไม่ใช่แค่ P2 ตาย
+ * (รูปทรงเดียวกับบั๊ก counter คลาส 2 ที่ erratum §C แก้: คนนอกกดทรัพยากรที่มีมิเตอร์
+ * ผ่าน endpoint สาธารณะ)
+ *
+ * นี่คือหลักการเดียวกับ min-interval ย้ายมาใช้กับ read path — ไม่ใช่กลไกใหม่
+ *
+ * ⚠️ **invariant: memo ต้องสั้นกว่าเกณฑ์ STALE มาก** ไม่งั้น memo จะกลายเป็นตัวถ่วง
+ *    ที่ทำให้ค่าที่เสิร์ฟเก่าจนกระทบการตัดสิน STALE (มี test ค้ำ invariant นี้ไว้)
+ */
+export const SNAPSHOT_MEMO_TTL_MS = 10_000;
+
 const SNAPSHOT_KEY = "readiness:snapshot:v1";
 const LIVE_PROBE_LOCK_KEY = "readiness:live-lock:v1";
 
@@ -212,14 +229,53 @@ async function readMechanismHeartbeats(): Promise<ComponentReport> {
  * 🔁 **ลำดับ 4 ต้องย้ายมาที่ตารางจริง** — สองฟังก์ชันข้างล่างคือ seam ที่ใช้ย้าย
  */
 
-async function readSnapshot(): Promise<ReadinessSnapshot | null> {
-  const raw = await redis.get(SNAPSHOT_KEY);
-  if (!raw) return null;
+/** ผลของการอ่าน snapshot — แยก "ไม่มี" ออกจาก "อ่านไม่ได้" เพราะสองอันนี้คนละสถานะ */
+type SnapshotRead =
+  | { kind: "value"; snapshot: ReadinessSnapshot }
+  | { kind: "none" }
+  | { kind: "error"; message: string };
+
+/** memo ระดับ process — เพดานของ read path (ดู SNAPSHOT_MEMO_TTL_MS) */
+let snapshotMemo: { at: number; result: SnapshotRead } | null = null;
+
+/** ล้าง memo — ใช้ใน test เท่านั้น (process จริงไม่ต้องเรียก) */
+export function __resetSnapshotMemoForTest(): void {
+  snapshotMemo = null;
+}
+
+async function readSnapshotRaw(): Promise<SnapshotRead> {
+  let raw: string | null;
   try {
-    return JSON.parse(raw) as ReadinessSnapshot;
-  } catch {
-    return null; // ค่าเสีย = ถือว่าไม่มี → STALE (ไม่ใช่ OK)
+    raw = await redis.get(SNAPSHOT_KEY);
+  } catch (err) {
+    return { kind: "error", message: (err as Error).message.slice(0, 200) };
   }
+  if (!raw) return { kind: "none" };
+  try {
+    return { kind: "value", snapshot: JSON.parse(raw) as ReadinessSnapshot };
+  } catch {
+    return { kind: "none" }; // ค่าเสีย = ถือว่าไม่มี → STALE (ไม่ใช่ OK)
+  }
+}
+
+/**
+ * อ่าน snapshot ผ่าน memo — request ไม่จำกัดยุบเหลือ Redis read ที่มีเพดาน
+ *
+ * memo ทั้งสามสถานะ (`value`/`none`/`error`) โดยตั้งใจ:
+ * ถ้า memo เฉพาะกรณีเจอค่า คนนอกที่ยิงตอนยังไม่มี snapshot (หรือตอน Redis ล่ม)
+ * จะยังทะลุไปถึง Redis ทุก request ⇒ เพดานหายไปในกรณีที่ต้องการเพดานที่สุด
+ *
+ * ⚠️ ราคาที่จ่าย: Redis ล่มจะถูกมองเห็นช้าได้ไม่เกิน `SNAPSHOT_MEMO_TTL_MS`
+ *    (10 วินาที เทียบกับเกณฑ์ STALE 1800 วินาที — ไม่กระทบการตัดสิน)
+ */
+async function readSnapshot(): Promise<SnapshotRead> {
+  const now = Date.now();
+  if (snapshotMemo && now - snapshotMemo.at < SNAPSHOT_MEMO_TTL_MS) {
+    return snapshotMemo.result;
+  }
+  const result = await readSnapshotRaw();
+  snapshotMemo = { at: now, result };
+  return result;
 }
 
 async function writeSnapshot(snapshot: ReadinessSnapshot): Promise<void> {
@@ -229,6 +285,8 @@ async function writeSnapshot(snapshot: ReadinessSnapshot): Promise<void> {
     "EX",
     SNAPSHOT_TTL_SECONDS
   );
+  // live probe เพิ่งวัดสด — ดันเข้า memo ทันที ไม่ให้ memo เก่ากว่าค่าที่เพิ่งเขียน
+  snapshotMemo = { at: Date.now(), result: { kind: "value", snapshot } };
 }
 
 /**
@@ -358,24 +416,22 @@ function httpStatusFor(status: ReadinessStatus): number {
  * ผู้ใช้ทางเดินนี้คือ external pinger (ลำดับ 6) ที่เฝ้าเฉพาะความสดของ `checkedAt`
  */
 export async function buildAnonymousReport(): Promise<ReadinessReport> {
-  const identity = getDeploymentIdentity();
+  const read = await readSnapshot();
+
   let status: ReadinessStatus;
   let checkedAt: string | null = null;
   let age: number | null = null;
 
-  try {
-    const snapshot = await readSnapshot();
-    if (!snapshot) {
-      // ไม่เคยมีใคร live probe เลย = วัดไม่ได้ ไม่ใช่ระบบพัง → STALE (ดังเท่า FAIL)
-      status = "STALE";
-    } else {
-      checkedAt = snapshot.checkedAt;
-      age = ageSeconds(snapshot.checkedAt);
-      status = age > SNAPSHOT_STALE_AFTER_SECONDS ? "STALE" : snapshot.status;
-    }
-  } catch {
+  if (read.kind === "error") {
     // อ่าน snapshot ไม่ได้ = Redis พัง = ระบบพังจริง → FAIL (ไม่ใช่ STALE)
     status = "FAIL";
+  } else if (read.kind === "none") {
+    // ไม่เคยมีใคร live probe เลย = วัดไม่ได้ ไม่ใช่ระบบพัง → STALE (ดังเท่า FAIL)
+    status = "STALE";
+  } else {
+    checkedAt = read.snapshot.checkedAt;
+    age = ageSeconds(read.snapshot.checkedAt);
+    status = age > SNAPSHOT_STALE_AFTER_SECONDS ? "STALE" : read.snapshot.status;
   }
 
   return {
@@ -388,9 +444,9 @@ export async function buildAnonymousReport(): Promise<ReadinessReport> {
         checkedAt,
         ageSeconds: age,
         staleAfterSeconds: SNAPSHOT_STALE_AFTER_SECONDS,
-        // deploymentId เท่านั้น — ลำดับ 5 ใช้ระบุว่า alias ชี้ deployment ไหน
-        // ไม่ใส่ commitSha/env ในทางเดินที่ไม่ auth (ลดข้อมูลที่ไม่จำเป็นต่อคนนอก)
-        deploymentId: identity.deploymentId,
+        // ⛔ ไม่มี deployment identity ในทางเดินนี้ — ผู้บริโภคทั้งหมดของ identity
+        //    (ลำดับ 5 alias poll) ถือ token อยู่แล้วจึงอ่าน shape ที่ auth ได้
+        //    ⇒ ไม่มีเหตุให้คนนอกเห็นข้อมูล infra (ตัดสิน 2026-08-08)
       },
       error: null,
     },
@@ -417,7 +473,9 @@ export async function buildAuthorizedReport(): Promise<ReadinessReport> {
       source = "live";
     } else {
       skippedReason = "min-interval";
-      snapshot = await readSnapshot();
+      const read = await readSnapshot();
+      if (read.kind === "error") throw new Error(read.message);
+      snapshot = read.kind === "value" ? read.snapshot : null;
     }
   } catch (err) {
     // Redis พัง ⇒ ไม่มี min-interval ⇒ **ห้ามยิง live probe** (เพดานโควตาจะหาย)
