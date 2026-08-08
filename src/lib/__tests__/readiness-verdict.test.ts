@@ -16,6 +16,8 @@ import {
   identityMatches,
   LOUD_VERDICTS,
   READINESS_MARKER,
+  isPreviewProbeHost,
+  isProductionProbeHost,
   shouldAlert,
   type Verdict,
 } from "@/lib/readiness-verdict";
@@ -180,5 +182,33 @@ describe("in-band gap check", () => {
     const r = detectGap("ไม่ใช่วันที่", now, 15);
     expect(r.gapped).toBe(false);
     expect(r.detail).toContain("unreadable");
+  });
+});
+
+describe("§H-6 — เซต host ของสองเส้นทางต้องตัดกันเป็นเซตว่าง", () => {
+  const hosts = [
+    "gethelpwise.xyz",
+    "acme.gethelpwise.xyz",
+    "helpwise-abc123-scope.vercel.app",
+    "helpwise.vercel.app",
+    "localhost:3000",
+    "example.com",
+  ];
+
+  it("ไม่มี host ไหนที่ทั้งสองเส้นทางยอมรับพร้อมกัน", () => {
+    // นี่คือคุณสมบัติที่ทำให้ "cron เรียก rehearsal ไม่ได้" เป็นจริงเชิงโครงสร้าง
+    // ไม่ใช่ข้อตกลง — สลับ env กันแล้วสคริปต์ต้องปฏิเสธ ไม่ใช่ทำงานผิดเงียบ ๆ
+    const both = hosts.filter((h) => isProductionProbeHost(h) && isPreviewProbeHost(h));
+    expect(both).toEqual([]);
+  });
+
+  it("เส้นทาง production ปฏิเสธ *.vercel.app ทุกรูปแบบ", () => {
+    expect(isProductionProbeHost("helpwise-abc123-scope.vercel.app")).toBe(false);
+    expect(isProductionProbeHost("gethelpwise.xyz")).toBe(true);
+  });
+
+  it("เส้นทาง rehearsal ปฏิเสธโดเมน production", () => {
+    expect(isPreviewProbeHost("gethelpwise.xyz")).toBe(false);
+    expect(isPreviewProbeHost("helpwise-abc123-scope.vercel.app")).toBe(true);
   });
 });

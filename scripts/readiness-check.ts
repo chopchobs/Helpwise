@@ -31,6 +31,7 @@ import {
   classifyProbeResponse,
   detectGap,
   identityMatches,
+  isProductionProbeHost,
   LOUD_VERDICTS,
   shouldAlert,
   verdictHeadline,
@@ -93,7 +94,7 @@ function assertProductionHost(baseUrl: string): void {
   } catch {
     throw new Error(`PROD_BASE_URL ไม่ใช่ URL ที่ถูกต้อง: ${baseUrl}`);
   }
-  if (host.endsWith(".vercel.app")) {
+  if (!isProductionProbeHost(host)) {
     throw new Error(
       `⛔ PROD_BASE_URL ชี้ไปที่ ${host} — ห้าม poll *.vercel.app (Deployment Protection ตอบ 302 ⇒ อ่านผลผิด) · ต้องใช้โดเมน production (erratum §F)`
     );

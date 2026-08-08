@@ -216,3 +216,23 @@ export function detectGap(
     detail: `last run ${Math.round(elapsedMinutes)} min ago (interval ${intervalMinutes} min)`,
   };
 }
+
+// =============================================================================
+// HOST GUARDS — สองเซตที่ต้องตัดกันเป็นเซตว่าง (erratum §H-6)
+// =============================================================================
+
+/**
+ * host ที่ **เส้นทาง production** (`scripts/readiness-check.ts`) ยอมรับ
+ * ⛔ ปฏิเสธ `*.vercel.app` — Deployment Protection ตอบ `302` ⇒ อ่านผลผิดทุกรอบ (§F)
+ */
+export function isProductionProbeHost(host: string): boolean {
+  return host !== "" && !host.endsWith(".vercel.app");
+}
+
+/**
+ * host ที่ **เส้นทาง rehearsal** (`scripts/readiness-rehearsal.ts`) ยอมรับ
+ * บังคับว่าต้องเป็น `*.vercel.app` — กันเคสที่ร้ายที่สุด: เผลอรันซ้อมใส่ production
+ */
+export function isPreviewProbeHost(host: string): boolean {
+  return host.endsWith(".vercel.app");
+}
