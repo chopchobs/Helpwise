@@ -46,12 +46,12 @@ import {
 /**
  * marker ที่พิสูจน์ว่า response มาจากโค้ดของเราจริง
  *
- * ⚠️ นี่คือหลักฐานชิ้นเดียวที่กฎ `INCONCLUSIVE` (erratum §B(ค)) ใช้: ผู้อ่านผล probe
- *    **ห้ามใช้ status code เป็นหลักฐาน** — ไม่พบ marker ในเนื้อ response ⇒ `INCONCLUSIVE`
- *    (ไม่ใช่ PASS ไม่ใช่ FAIL) เพราะเป็นกรณีที่ Deployment Protection / CDN ตอบแทนแอปเรา
- *    ห้ามเปลี่ยนค่านี้โดยไม่แก้ทุกฝั่งที่อ่าน (GitHub Actions ลำดับ 5, external pinger ลำดับ 6)
+ * ⚠️ **ค่าอยู่ที่ `@/lib/readiness-verdict` ที่เดียว** — ฝั่งเขียน (ไฟล์นี้) กับฝั่งอ่าน
+ *    (`scripts/readiness-check.ts` ของลำดับ 5) จึง import ค่าเดียวกันเสมอ
+ *    ถ้าแยกกันเมื่อไร กฎ `INCONCLUSIVE` จะตายเงียบทันที (marker mismatch ทุกรอบ)
  */
-export const READINESS_MARKER = "helpwise.readiness.v1";
+export { READINESS_MARKER } from "@/lib/readiness-verdict";
+import { READINESS_MARKER } from "@/lib/readiness-verdict";
 
 /**
  * ระยะห่างขั้นต่ำระหว่าง live probe สองครั้ง (วินาที) — v2 §3 ข้อ 6
