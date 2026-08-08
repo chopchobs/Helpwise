@@ -129,6 +129,31 @@ interface SignedRequest {
 }
 
 /**
+ * ชื่อ header ลายเซ็นของ QStash — **source of truth เดียวของทั้งระบบ**
+ *
+ * ⚠️ erratum §C ข้อบังคับที่ 1: การจำแนกคลาสของ inbound attempt ต้องอ่านชื่อ header
+ *    **จากที่เดียวกับที่ verify อ่าน** ไม่ใช่จากเอกสารของผู้ให้บริการและไม่ใช่จากเอกสารดีไซน์
+ *    เหตุผล: ถ้า SDK เปลี่ยนชื่อ header ในอนาคต แล้วสองที่ไม่ได้อ่านค่าเดียวกัน
+ *    การจำแนกจะเพี้ยนเงียบ ๆ (ทุกอย่างกลายเป็นคลาส unsigned) โดยไม่มี type error ให้จับ
+ */
+export const QSTASH_SIGNATURE_HEADER = "upstash-signature";
+
+/**
+ * คลาสของ inbound delivery attempt (erratum §C) — ใช้เป็น input ของ counter ลำดับ 3
+ *
+ *   verified       — มี header + verify ผ่าน → นับเข้าตัวเลขโควตา
+ *   signed_invalid — **มี header** แต่ verify ไม่ผ่าน → สัญญาณจริง (ครอบเคส signing key ไม่ตรง)
+ *                    แต่ยัง forge ได้ ⇒ ต้อง corroborate กับ heartbeat ก่อน FAIL
+ *   unsigned       — **ไม่มี header เลย** → ขยะจากภายนอก · QStash ไม่เคยส่งแบบนี้
+ *                    ⇒ ❌ ห้ามทำให้เป็น FAIL (ไม่งั้นคนนอกตรึงสถานะได้)
+ *
+ * ⛔ **ห้ามอนุมานคลาสจาก `valid === false`** — ค่านั้นเหมือนกันหมดทั้งสามกรณีที่ verify
+ *    ปฏิเสธ (ไม่มี header / signature ผิด / signing key ฝั่งเราไม่ได้ตั้ง)
+ *    ⇒ อนุมานเมื่อไร กฎ §C ตายเงียบทั้งข้อ · คลาสจึงถูกคำนวณจากการอ่าน header ตรง ๆ
+ */
+export type InboundAttemptClass = "verified" | "signed_invalid" | "unsigned";
+
+/**
  * ผล verify: ถ้า valid คืน rawBody (ใช้ parse payload ต่อ) ไม่งั้น valid=false
  * คืน rawBody มาด้วยเพราะ verify ต้องอ่าน body (stream consume ครั้งเดียว) —
  * caller จะ re-read ไม่ได้ จึงส่งกลับให้ใช้ต่อ
@@ -136,6 +161,8 @@ interface SignedRequest {
 export interface QStashVerifyResult {
   valid: boolean;
   rawBody: string;
+  /** คลาสของ attempt นี้ — คำนวณจากการอ่าน header เอง ไม่ใช่จาก `valid` */
+  attemptClass: InboundAttemptClass;
 }
 
 /**
@@ -159,6 +186,13 @@ export async function verifyQStashSignature(
   // อ่าน body ครั้งเดียว — ต้องใช้ทั้ง verify และ parse payload
   const rawBody = await request.text();
 
+  // §C: อ่าน header **ก่อน** ทุกทางแยก — คลาสต้องถูกกำหนดจากการมีอยู่ของ header เท่านั้น
+  // ไม่ขึ้นกับว่า verify จะจบทางไหน (โดยเฉพาะเคส "signing key ฝั่งเราไม่ได้ตั้ง"
+  // ซึ่งต้องตกเป็นคลาส signed_invalid เพราะ QStash แนบ header มาเสมอ ⇒ corroboration
+  // กับ heartbeat ยังทำงานถูกต้อง — §C ข้อบังคับที่ 3)
+  const signature = request.headers.get(QSTASH_SIGNATURE_HEADER);
+  const hasSignatureHeader = Boolean(signature);
+
   const currentSigningKey = process.env.QSTASH_CURRENT_SIGNING_KEY;
   const nextSigningKey = process.env.QSTASH_NEXT_SIGNING_KEY;
 
@@ -167,18 +201,25 @@ export async function verifyQStashSignature(
       console.error(
         "[send-email] QSTASH signing keys are not set — rejecting in production"
       );
-      return { valid: false, rawBody };
+      return {
+        valid: false,
+        rawBody,
+        attemptClass: hasSignatureHeader ? "signed_invalid" : "unsigned",
+      };
     }
     // dev: allow แต่ warn
     console.warn(
       "[send-email] QSTASH signing keys are not set — allowing in dev mode (NOT SAFE for production)"
     );
-    return { valid: true, rawBody };
+    return {
+      valid: true,
+      rawBody,
+      attemptClass: hasSignatureHeader ? "verified" : "unsigned",
+    };
   }
 
-  const signature = request.headers.get("upstash-signature");
   if (!signature) {
-    return { valid: false, rawBody };
+    return { valid: false, rawBody, attemptClass: "unsigned" };
   }
 
   const receiver = new Receiver({ currentSigningKey, nextSigningKey });
@@ -197,10 +238,14 @@ export async function verifyQStashSignature(
       body: rawBody,
       url: targetUrl ?? getWorkerTargetUrl(),
     });
-    return { valid, rawBody };
+    return {
+      valid,
+      rawBody,
+      attemptClass: valid ? "verified" : "signed_invalid",
+    };
   } catch {
-    // SignatureError → invalid (fail-closed)
-    return { valid: false, rawBody };
+    // SignatureError → invalid (fail-closed) · มี header อยู่ ⇒ คลาส signed_invalid
+    return { valid: false, rawBody, attemptClass: "signed_invalid" };
   }
 }
 
