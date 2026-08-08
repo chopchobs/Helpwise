@@ -112,23 +112,23 @@ enum WebhookDeliveryStatus {
 // Plan — global, ไม่ผูกกับ tenant ใดเป็นพิเศษ
 // เก็บ metadata ของแต่ละ plan (price เป็น Int = satang/cents)
 model Plan {
-  id             String   @id @default(cuid())
-  name           String   @unique // เช่น "starter", "pro", "enterprise"
-  displayName    String
+  id                   String   @id @default(cuid())
+  name                 String   @unique // เช่น "starter", "pro", "enterprise"
+  displayName          String
   // ราคาเก็บเป็น Int (satang/cents) — ห้าม Float กับข้อมูลการเงิน
-  pricePerMonth  Int      @default(0)
-  pricePerYear   Int      @default(0)
+  pricePerMonth        Int      @default(0)
+  pricePerYear         Int      @default(0)
   // ข้อจำกัดของ plan (ใช้ 0 = unlimited)
-  maxAgents      Int      @default(0)
-  maxSlaPolicies Int      @default(1)
-  features       String[] // array of feature keys ที่ plan นี้รวมไว้ (สำหรับ reference)
+  maxAgents            Int      @default(0)
+  maxSlaPolicies       Int      @default(1)
+  features             String[] // array of feature keys ที่ plan นี้รวมไว้ (สำหรับ reference)
   // Stripe Price IDs — null หมายความว่ายังไม่ผูก Stripe Price กับ plan นี้
   // Postgres อนุญาต multiple NULL ใน unique constraint — ปลอดภัย
-  stripePriceIdMonthly String? @unique // Stripe Price ID (รายเดือน)
-  stripePriceIdYearly  String? @unique // Stripe Price ID (รายปี)
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  stripePriceIdMonthly String?  @unique // Stripe Price ID (รายเดือน)
+  stripePriceIdYearly  String?  @unique // Stripe Price ID (รายปี)
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   tenants Tenant[]
 }
@@ -178,35 +178,35 @@ model User {
 //     "days": [{"day": "MON", "start": "09:00", "end": "18:00"}] },
 //     "branding": { "logoUrl": "...", "accentColor": "#3B5BDB" } }
 model Tenant {
-  id        String   @id @default(cuid())
+  id            String   @id @default(cuid())
   // slug ใช้ subdomain routing — validate ด้วย /^[a-z0-9-]+$/ ที่ app layer
-  slug      String   @unique
-  name      String
-  planId    String
-  plan      Plan     @relation(fields: [planId], references: [id])
+  slug          String   @unique
+  name          String
+  planId        String
+  plan          Plan     @relation(fields: [planId], references: [id])
   // Json เก็บ business hours + portal branding
-  settings  Json     @default("{}")
-  isActive  Boolean  @default(true)
+  settings      Json     @default("{}")
+  isActive      Boolean  @default(true)
   // atomic counter สำหรับ ticketNumber ต่อ tenant — increment ใน tx (UPDATE ... ticketCounter = ticketCounter + 1 RETURNING)
-  ticketCounter Int  @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  ticketCounter Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  members         TenantMember[]
-  contacts        Contact[]
-  tickets         Ticket[]
-  slapolicies     SlaPolicy[]
-  subscription    Subscription?
-  tenantFeatures  TenantFeature[]
-  processedEmails ProcessedInboundEmail[]
-  auditLogs       AuditLog[]
-  attachments     Attachment[]
-  csatResponses   CsatResponse[]
-  apiKeys         ApiKey[]
-  cannedResponses CannedResponse[]
-  tags            Tag[]
-  ticketTags      TicketTag[]
-  notifications   Notification[]
+  members           TenantMember[]
+  contacts          Contact[]
+  tickets           Ticket[]
+  slapolicies       SlaPolicy[]
+  subscription      Subscription?
+  tenantFeatures    TenantFeature[]
+  processedEmails   ProcessedInboundEmail[]
+  auditLogs         AuditLog[]
+  attachments       Attachment[]
+  csatResponses     CsatResponse[]
+  apiKeys           ApiKey[]
+  cannedResponses   CannedResponse[]
+  tags              Tag[]
+  ticketTags        TicketTag[]
+  notifications     Notification[]
   webhookEndpoints  WebhookEndpoint[]
   webhookDeliveries WebhookDelivery[]
 
@@ -233,17 +233,17 @@ model TenantMember {
   updatedAt DateTime   @updatedAt
 
   // ticket ที่ assign ให้ member นี้
-  assignedTickets Ticket[]        @relation("TicketAssignee")
+  assignedTickets         Ticket[]          @relation("TicketAssignee")
   // messages ที่ member นี้ส่ง
-  messages        TicketMessage[] @relation("MessageAuthorMember")
+  messages                TicketMessage[]   @relation("MessageAuthorMember")
   // audit logs ที่ member นี้เป็น actor
-  auditLogs       AuditLog[]      @relation("AuditMemberActor")
+  auditLogs               AuditLog[]        @relation("AuditMemberActor")
   // API key ที่ member นี้เป็นผู้สร้าง
-  createdApiKeys  ApiKey[]        @relation("ApiKeyCreatedBy")
+  createdApiKeys          ApiKey[]          @relation("ApiKeyCreatedBy")
   // canned response ที่ member นี้เป็นผู้สร้าง
-  createdCannedResponses CannedResponse[] @relation("CannedResponseCreatedBy")
+  createdCannedResponses  CannedResponse[]  @relation("CannedResponseCreatedBy")
   // notification ที่ member นี้เป็น recipient (scope การมองเห็น)
-  notifications          Notification[]   @relation("NotificationRecipient")
+  notifications           Notification[]    @relation("NotificationRecipient")
   // webhook endpoint ที่ member นี้เป็นผู้สร้าง
   webhookEndpointsCreated WebhookEndpoint[] @relation("WebhookEndpointCreatedBy")
 
@@ -367,19 +367,19 @@ model Ticket {
 
   // === SLA Tracking Fields ===
   // deadline คำนวณจาก SlaPolicy + business hours ของ tenant
-  firstResponseDueAt    DateTime? // deadline first response
-  resolutionDueAt       DateTime? // deadline resolution
-  firstRespondedAt      DateTime? // timestamp ที่ agent ตอบครั้งแรก (PUBLIC message)
-  resolvedAt            DateTime? // timestamp ที่ status เปลี่ยนเป็น SOLVED/CLOSED
+  firstResponseDueAt              DateTime? // deadline first response
+  resolutionDueAt                 DateTime? // deadline resolution
+  firstRespondedAt                DateTime? // timestamp ที่ agent ตอบครั้งแรก (PUBLIC message)
+  resolvedAt                      DateTime? // timestamp ที่ status เปลี่ยนเป็น SOLVED/CLOSED
   // breach flags — set โดย BullMQ job เมื่อเกิน deadline
-  firstResponseBreached Boolean   @default(false)
-  resolutionBreached    Boolean   @default(false)
+  firstResponseBreached           Boolean   @default(false)
+  resolutionBreached              Boolean   @default(false)
   // near-breach notified แล้ว (กันยิงซ้ำ) — idempotency ของ near-breach warning
-  firstResponseNearBreachNotified Boolean @default(false)
-  resolutionNearBreachNotified    Boolean @default(false)
+  firstResponseNearBreachNotified Boolean   @default(false)
+  resolutionNearBreachNotified    Boolean   @default(false)
   // === SLA Pause/Resume (เมื่อ status = PENDING) ===
-  slaPausedAt           DateTime? // เวลาที่ pause SLA timer ล่าสุด
-  slaPausedDurationMin  Int       @default(0) // รวมเวลาที่ pause ทั้งหมด (นาที)
+  slaPausedAt                     DateTime? // เวลาที่ pause SLA timer ล่าสุด
+  slaPausedDurationMin            Int       @default(0) // รวมเวลาที่ pause ทั้งหมด (นาที)
 
   // email threading — Message-ID ของ email แรกที่สร้าง ticket นี้
   emailMessageId String?
@@ -396,9 +396,9 @@ model Ticket {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  messages    TicketMessage[]
-  attachments Attachment[]
-  auditLogs   AuditLog[]
+  messages      TicketMessage[]
+  attachments   Attachment[]
+  auditLogs     AuditLog[]
   // one-to-one optional: inverse ของ CsatResponse.ticketId @unique
   csat          CsatResponse?
   ticketTags    TicketTag[]
@@ -801,9 +801,9 @@ model WebhookDelivery {
   // payload envelope เต็มที่จะส่ง (snapshot ณ เวลา enqueue)
   payload   Json
 
-  status        WebhookDeliveryStatus @default(PENDING)
-  attemptCount  Int                   @default(0)
-  lastAttemptAt DateTime?
+  status         WebhookDeliveryStatus @default(PENDING)
+  attemptCount   Int                   @default(0)
+  lastAttemptAt  DateTime?
   // ผลลัพธ์ attempt ล่าสุด (ไว้ debug ใน UI)
   responseStatus Int?
   // ตัด 500 ตัวอักษรก่อนเก็บ (กัน payload ใหญ่/PII เกินจำเป็น)
@@ -817,4 +817,44 @@ model WebhookDelivery {
   @@index([tenantId, endpointId]) // list delivery ของ endpoint หนึ่ง
   @@index([tenantId, status]) // DLQ view: WHERE status = 'DEAD'
   @@index([tenantId, eventId]) // trace ทุก delivery ของ event เดียวกัน
+}
+
+// =============================================================================
+// PHASE 39 — SERVER-ENV READINESS (P2)
+// =============================================================================
+// ⚠️ ทั้งสองโมเดลนี้เป็น GLOBAL โดยตั้งใจ (ไม่มี tenantId)
+//    เพราะเฝ้า "กลไกระดับระบบ" ไม่ใช่ข้อมูลของ tenant ใด — heartbeat ราย tenant
+//    เป็นงานของ Phase 40 (erratum §A ข้อ 1)
+// ⛔ ห้ามใส่ข้อมูลที่ระบุ tenant ลงสองตารางนี้เด็ดขาด — shape ที่ไม่ auth ของ
+//    /api/health/readiness เสิร์ฟค่าจากตารางนี้ต่อสาธารณะ (erratum §F)
+
+// MechanismHeartbeat — "กลไกนี้ทำงานล่าสุดเมื่อไร"
+// เป็นด้านที่สองของ corroboration ใน erratum §C: attempt ที่ signature ไม่ผ่าน
+// จะยกระดับเป็น FAIL ได้ก็ต่อเมื่อ heartbeat ของกลไกนั้นค้างด้วย
+model MechanismHeartbeat {
+  // ชื่อกลไก เช่น "sla-sweep", "send-email", "webhook-deliver", "readiness-probe"
+  mechanism               String   @id
+  lastBeatAt              DateTime
+  // คาบที่คาดว่าจะเต้น (วินาที) — null = event-driven (ตัดสิน stale ไม่ได้โดยธรรมชาติ)
+  expectedIntervalSeconds Int?
+  updatedAt               DateTime @updatedAt
+
+  @@index([lastBeatAt])
+}
+
+// ReadinessState — snapshot ผลตรวจล่าสุดของ P2 (แถวเดียวทั้งระบบ)
+// ย้ายมาจาก Redis ตาม erratum §H-1: สถานะของ P2 ต้องไม่อาศัยอยู่ใน dependency
+// ที่ P2 เฝ้าเอง · min-interval lock ยังอยู่บน Redis (ต้องการ SET NX EX แบบ atomic)
+model ReadinessState {
+  // singleton — บังคับให้มีแถวเดียวด้วยค่า id คงที่
+  id           String   @id
+  status       String // "OK" | "DEGRADED" | "FAIL" | "STALE"
+  // เวลาที่ live probe รอบล่าสุดวัดเสร็จ = lastCheckAt ของ P2 เอง
+  // (external pinger ลำดับ 6 เฝ้า field นี้ผ่าน shape ที่ไม่ auth)
+  lastCheckAt  DateTime
+  reasons      Json
+  components   Json
+  counters     Json?
+  deploymentId String?
+  updatedAt    DateTime @updatedAt
 }
