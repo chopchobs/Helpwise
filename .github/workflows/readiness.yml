@@ -1,0 +1,111 @@
+# .github/workflows/readiness.yml
+# Phase 39 ลำดับ 5 (erratum §E) — ผู้เฝ้า readiness probe (P2)
+#
+# ═══════════════════════════════════════════════════════════════════════════
+# README — ต้องตั้งอะไรที่ไหนบ้าง (ยังไม่ตั้ง = workflow ล้มทันทีพร้อมชื่อ env ที่ขาด)
+#
+# 1) GitHub → Settings → Secrets and variables → Actions → New repository secret
+#    ┌──────────────────────────┬────────────────────────────────────────────┐
+#    │ PROD_BASE_URL            │ origin ของ **โดเมน production** เท่านั้น    │
+#    │                          │ เช่น https://gethelpwise.xyz               │
+#    │                          │ ⛔ ห้ามใส่ *.vercel.app — script ปฏิเสธเอง │
+#    ├──────────────────────────┼────────────────────────────────────────────┤
+#    │ READINESS_PROBE_TOKEN    │ ต้องตรงกับ env ชื่อเดียวกันบน Vercel        │
+#    │                          │ (Production scope) — ไม่ตรง = 401 ทุกรอบ   │
+#    ├──────────────────────────┼────────────────────────────────────────────┤
+#    │ SLACK_WEBHOOK_URL        │ Incoming Webhook ของช่องที่จะรับแจ้งเตือน   │
+#    └──────────────────────────┴────────────────────────────────────────────┘
+#
+# 2) Vercel → Project Settings → Environment Variables (Production)
+#    READINESS_PROBE_TOKEN = ค่าเดียวกับข้อ 1
+#    ⚠️ ต้อง **redeploy** หลังตั้ง — ไม่งั้น runtime ยังไม่เห็นค่า
+#
+# 3) trigger `deployment_status` มาจาก Vercel GitHub integration ที่ต่อไว้อยู่แล้ว
+#    ไม่ต้องตั้งอะไรเพิ่ม
+#
+# ⚠️ **60-day auto-disable**: GitHub ปิด scheduled workflow อัตโนมัติเมื่อ repo เงียบ 60 วัน
+#    ⇒ ตัวเฝ้าหายไปเงียบ ๆ ได้เอง · in-band gap check ในสคริปต์จับได้เฉพาะตอน "กลับมารัน"
+#    ⇒ ชั้นที่ครอบเคส "ไม่รันเลย" คือ external pinger (ลำดับ 6) ซึ่งอยู่นอก GitHub ทั้งหมด
+#    สองชั้นนี้เสริมกัน **ไม่ทดแทนกัน**
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: Readiness (P2)
+
+on:
+  # Vercel ยิง deployment_status เข้ามาเมื่อ deploy เปลี่ยนสถานะ
+  deployment_status:
+  # ทุก 15 นาที — ต้องตรงกับ CRON_INTERVAL_MINUTES ใน scripts/readiness-check.ts
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+# กันสองรอบทับกัน (cron ชนกับ post-deploy) — state ข้ามรอบจะเพี้ยนถ้ารันพร้อมกัน
+concurrency:
+  group: readiness
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # post-deploy: เฉพาะ production ที่ deploy สำเร็จ
+    # (deployment_status ยิงทุกสถานะ รวม pending/error — และยิงจาก preview ด้วย)
+    if: >-
+      github.event_name != 'deployment_status' ||
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment_status.environment == 'Production')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # state ข้ามรอบ (verdict ก่อนหน้า + เวลารันรอบก่อน)
+      # key ไม่ซ้ำทุกรอบ + restore-keys prefix ⇒ ได้ cache ล่าสุดเสมอ
+      # (cache ของ GitHub เขียนทับ key เดิมไม่ได้ จึงต้องใช้รูปแบบนี้)
+      - name: Restore readiness state
+        uses: actions/cache/restore@v4
+        with:
+          path: .readiness-state
+          key: readiness-state-${{ github.run_id }}
+          restore-keys: |
+            readiness-state-
+
+      - name: Post-deploy identity poll + probe
+        if: github.event_name == 'deployment_status'
+        env:
+          PROD_BASE_URL: ${{ secrets.PROD_BASE_URL }}
+          READINESS_PROBE_TOKEN: ${{ secrets.READINESS_PROBE_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          # sha ของ deployment ที่เพิ่งขึ้น — ใช้ยืนยันว่า alias สลับมาแล้วจริง
+          EXPECTED_SHA: ${{ github.event.deployment_status.deployment.sha || github.sha }}
+        run: npx tsx scripts/readiness-check.ts post-deploy
+
+      - name: Scheduled probe + in-band gap check
+        if: github.event_name != 'deployment_status'
+        env:
+          PROD_BASE_URL: ${{ secrets.PROD_BASE_URL }}
+          READINESS_PROBE_TOKEN: ${{ secrets.READINESS_PROBE_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: npx tsx scripts/readiness-check.ts scheduled
+
+      # ⚠️ ต้องเซฟแม้ step ก่อนหน้าจะแดง — ไม่งั้นรอบที่ FAIL จะไม่ถูกจำ
+      #    แล้วรอบถัดไปจะมองว่าเป็น transition ใหม่ ⇒ แจ้งซ้ำทุก 15 นาที = alert fatigue
+      #    ซึ่งเป็นความเสียหายที่ transition-only ถูกออกแบบมาเพื่อกันพอดี
+      - name: Save readiness state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .readiness-state
+          key: readiness-state-${{ github.run_id }}
