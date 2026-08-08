@@ -53,21 +53,58 @@ Phase 38: QStash region เปลี่ยน ⇒ กลไกพื้นหล
       GitHub → Settings → Secrets and variables → Actions
       ยืนยัน: เห็นชื่อ secret ในรายการ (ค่าดูไม่ได้ — ยืนยันได้แค่ว่ามี)
 
-### ขั้น C — 🔴 ทำให้ Preview อยู่ในสภาพที่ probe ทำงานได้จริง
+### ขั้น C — 🔴 รัน **post-merge gate ของ migration จริง** (ไม่ใช่ prep ของการซ้อม)
 
-> **ขั้นนี้คือข้อที่ยังไม่มีใครเขียนไว้ในดีไซน์เดิม — และเป็นข้อที่ทำให้ซ้อมอ่านผิดได้ง่ายที่สุด**
+> **ตัดสิน 2026-08-08:** migration นี้ต้องลง prod อยู่แล้วตอนปิดเฟส — ไม่ใช่ทางอ้อมที่สร้างเพื่อการซ้อม
+> `safety class GREEN` (CREATE TABLE ล้วน ไม่มี FK ไม่แตะของเดิม) · **ตารางว่างที่ยังไม่มีโค้ดใช้ = ไม่มีผล**
+> · Prisma ควร apply ก่อนโค้ดที่ใช้มันอยู่แล้ว
+> ⇒ **รันขั้น gate จริงตรงนี้เลย เก็บผลเป็นหลักฐานปิดเฟส** แล้วการซ้อมได้ประโยชน์ตามมา — ไม่ต้องทำสองรอบ
 
-- [ ] **C1. `prisma migrate deploy` ต้องถูก apply กับ DB ที่ Preview ใช้**
-      ⚠️ migrate **ไม่ได้อยู่ใน build pipeline** (ตรวจแล้ว — erratum §F · backlog B-2)
-      ⇒ deploy สำเร็จได้โดยที่ตาราง `MechanismHeartbeat` / `ReadinessState` ยังไม่มี
-      **ถ้าไม่ทำข้อนี้:** probe จะ `FAIL` เพราะอ่านตารางไม่ได้ ⇒ ได้ `INVALID`
-      (สคริปต์จับให้ — แต่ถ้าเกณฑ์เป็นแค่ "FAIL" จะอ่านผิดว่าซ้อมสำเร็จ)
-      ยืนยัน: query `_prisma_migrations` ของ DB นั้นตรง ๆ — `20260808000000_add_readiness_heartbeat`
-      มี `finished_at` ไม่ null และ `rolled_back_at` null
-      ⛔ **ห้ามเชื่อ `prisma migrate status`** (รายงานผิดเมื่อมี failed migration)
-      ❓ **ต้องตอบก่อน:** Preview ใช้ DB ตัวเดียวกับ production หรือไม่
-      — ถ้าใช่ ข้อนี้ = apply migration ลง prod จริง ⇒ **เป็นการตัดสินใจของ Dev ไม่ใช่ขั้นตอนอัตโนมัติ**
-      (เกี่ยวกับ backlog B-1 โดยตรง)
+#### C0. ❓ ตอบก่อน: `DATABASE_URL` ถูก scope แยกหรือไม่
+
+Vercel → Project Settings → Environment Variables → ดูรายการ `DATABASE_URL` / `DIRECT_URL`
+
+- [ ] **จดผลลงที่นี่:** `DATABASE_URL` มีกี่แถว และ scope อะไรบ้าง (Production / Preview / Development)
+
+⚠️ **ห้ามเดา** — ทั้งสองกรณีเป็นไปได้ และเช็คลิสต์ต่างกัน:
+
+| กรณี | ความหมาย | ต้องทำ |
+| --- | --- | --- |
+| **กรณี 1 — ค่าเดียวใช้ทุก scope** | Preview ใช้ DB ตัวเดียวกับ production | apply **ครั้งเดียว** · verify ครั้งเดียว · ทำ C1 ชุดเดียว |
+| **กรณี 2 — แยก Production / Preview** | Preview มี DB ของตัวเอง | **apply สองที่ · verify สองที่** · ทำ C1 ครบทั้งสองชุด ⛔ ข้ามชุดใดชุดหนึ่งไม่ได้ — ข้าม Preview = ซ้อมได้ `INVALID` · ข้าม Production = gate ปิดไม่ได้ |
+
+#### C1. apply + verify (ทำตามกรณีที่ตอบใน C0)
+
+**C1a — apply**
+- [ ] Production DB: `DATABASE_URL=<prod> npx prisma migrate deploy`
+- [ ] *(กรณี 2 เท่านั้น)* Preview DB: `DATABASE_URL=<preview> npx prisma migrate deploy`
+
+⚠️ migrate **ไม่ได้อยู่ใน build pipeline** (ตรวจแล้ว — erratum §F · backlog B-2) ⇒ deploy สำเร็จได้
+โดยตารางยังไม่ถูกสร้าง · นี่คือเหตุผลที่ขั้นนี้ต้องทำด้วยมือและต้องมีหลักฐาน
+
+**C1b — verify แถวใน `_prisma_migrations`** *(ทำกับทุก DB ที่ apply)*
+```sql
+select migration_name, finished_at, rolled_back_at
+from _prisma_migrations
+where migration_name = '20260808000000_add_readiness_heartbeat';
+```
+- [ ] ✅ ผ่านเมื่อ: `finished_at` **ไม่ null** และ `rolled_back_at` **เป็น null**
+- ⛔ **ห้ามเชื่อ `prisma migrate status`** — รายงานผิดเมื่อมี failed migration
+
+**C1c — verify ผลของ migration ไม่ใช่แค่แถวใน `_prisma_migrations`** *(ทำกับทุก DB ที่ apply)*
+```sql
+select table_name from information_schema.tables
+where table_schema = 'public'
+  and table_name in ('MechanismHeartbeat', 'ReadinessState');
+```
+- [ ] ✅ ผ่านเมื่อ: ได้ **2 แถว**
+
+**C1d — เก็บหลักฐาน**
+- [ ] คัดผลลัพธ์ของ C1b + C1c (ต่อ DB) ใส่เป็น**ตารางหลักฐาน**ในเอกสารปิดเฟส
+      ตาม `CLAUDE.md` § Post-merge gate ("ตารางหลักฐาน external resource — ไม่ใช่ checkbox ของเจตนา")
+
+#### C2–C4 — env ของ probe
+
 - [ ] **C2. ตั้ง `READINESS_PROBE_TOKEN` บน Vercel — scope ที่ Preview เห็น**
       ยืนยัน: หลัง C4 ยิง probe แล้วได้ shape เต็ม (มี `components`) ไม่ใช่ `401`
 - [ ] **C3. ตั้ง `READINESS_PROBE_TOKEN` เป็น GitHub secret ค่าเดียวกัน**
@@ -108,5 +145,7 @@ Phase 38: QStash region เปลี่ยน ⇒ กลไกพื้นหล
 
 - ไม่ได้พิสูจน์ว่า cron ของลำดับ 5 ทำงาน (คนละ trigger คนละเส้นทาง)
 - ไม่ได้พิสูจน์ว่า external pinger ของลำดับ 6 ดังจริง (ดู `phase-39-pinger-runbook.md` ข้อ 5)
-- ไม่ได้พิสูจน์อะไรเกี่ยวกับ **production** เลย — Preview scope ล้วน
-  ⇒ post-merge gate ของเฟสนี้ยังต้องทำแยกครบทุกแถว (`CLAUDE.md` § Post-merge gate)
+- **การซ้อมเอง (ขั้น D–F) ไม่ได้พิสูจน์อะไรเกี่ยวกับ production เลย** — Preview scope ล้วน
+  ⚠️ ข้อยกเว้นเดียว: **ขั้น C เป็น gate จริงของ production** (migration + หลักฐาน) ไม่ใช่ prep ของการซ้อม
+  ⇒ ผลของ C นับเป็นหลักฐานปิดเฟสได้ · ส่วนแถวอื่นของ post-merge gate ยังต้องทำแยกครบ
+  (`CLAUDE.md` § Post-merge gate — server env / provider · FeatureFlag · smoke บน prod)
