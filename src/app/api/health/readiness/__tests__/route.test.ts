@@ -19,6 +19,11 @@ const mocks = vi.hoisted(() => ({
   set: vi.fn(),
   get: vi.fn(),
   ping: vi.fn(),
+  // snapshot store ย้ายมาที่ Postgres แล้ว (erratum §H-1 / ลำดับ 4)
+  stateFindUnique: vi.fn(),
+  stateUpsert: vi.fn(),
+  heartbeatFindMany: vi.fn(),
+  heartbeatUpsert: vi.fn(),
 }));
 
 vi.mock("@/lib/queue", () => ({
@@ -30,6 +35,19 @@ vi.mock("@/lib/redis", () => ({
     get: mocks.get,
     set: mocks.set,
     ping: mocks.ping,
+  },
+}));
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    readinessState: {
+      findUnique: mocks.stateFindUnique,
+      upsert: mocks.stateUpsert,
+    },
+    mechanismHeartbeat: {
+      findMany: mocks.heartbeatFindMany,
+      upsert: mocks.heartbeatUpsert,
+    },
   },
 }));
 
@@ -45,8 +63,23 @@ import {
 const URL_ = "https://gethelpwise.xyz/api/health/readiness";
 const TOKEN = "test-readiness-token";
 
-/** จำลอง Redis จริงพอที่ SET NX / EX จะมีความหมาย */
-function installFakeRedis() {
+/** แถว singleton ของ ReadinessState ที่จำลองไว้ใน memory */
+let stateRow: Record<string, unknown> | null = null;
+
+/** จำลอง store: Postgres (snapshot + heartbeat) + Redis (lock + ping) */
+function installFakeStores() {
+  stateRow = null;
+  mocks.stateFindUnique.mockImplementation(async () => stateRow);
+  mocks.stateUpsert.mockImplementation(
+    async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
+      stateRow = stateRow ? { ...stateRow, ...update } : { ...create };
+      return stateRow;
+    }
+  );
+  // heartbeat: ค่าเริ่มต้น = ไม่มีแถวเลย ⇒ missing ⇒ FAIL ตาม §F
+  mocks.heartbeatFindMany.mockResolvedValue([]);
+  mocks.heartbeatUpsert.mockResolvedValue({});
+
   mocks.redisStore.clear();
   mocks.get.mockImplementation(async (k: string) => mocks.redisStore.get(k) ?? null);
   mocks.set.mockImplementation(async (k: string, v: string, ...args: string[]) => {
@@ -61,7 +94,7 @@ function installFakeRedis() {
 beforeEach(() => {
   vi.clearAllMocks();
   __resetSnapshotMemoForTest(); // memo อยู่ระดับ module — ต้องล้างระหว่างเคส
-  installFakeRedis();
+  installFakeStores();
   mocks.probeQStashReadOnly.mockResolvedValue({ ok: true, detail: "schedules.list ok" });
   process.env.READINESS_PROBE_TOKEN = TOKEN;
   process.env.VERCEL_DEPLOYMENT_ID = "dpl_test123";
@@ -122,7 +155,7 @@ describe("readiness — §F: shape ที่ไม่ auth ห้ามมี te
     expect(json.data.reasons).toBeUndefined();
     // key ที่อนุญาตเท่านั้น
     expect(Object.keys(json.data).sort()).toEqual(
-      ["ageSeconds", "checkedAt", "marker", "staleAfterSeconds", "status"].sort()
+      ["ageSeconds", "lastCheckAt", "marker", "staleAfterSeconds", "status"].sort()
     );
   });
 
@@ -136,13 +169,10 @@ describe("readiness — §F: shape ที่ไม่ auth ห้ามมี te
 });
 
 describe("readiness — เพดานของ read path (memo)", () => {
-  it("ยิงแบบไม่ auth 20 ครั้งใน window เดียว → redis.get ครั้งเดียว", async () => {
+  it("ยิงแบบไม่ auth 20 ครั้งใน window เดียว → query snapshot ครั้งเดียว", async () => {
     for (let i = 0; i < 20; i++) await callWith();
 
-    const snapshotReads = mocks.get.mock.calls.filter((c) =>
-      String(c[0]).includes("readiness:snapshot")
-    );
-    expect(snapshotReads).toHaveLength(1);
+    expect(mocks.stateFindUnique).toHaveBeenCalledTimes(1);
   });
 
   it("memo ครอบทั้งกรณี 'ไม่มี snapshot' ด้วย (กรณีที่คนนอกยิงตอนยังไม่เคยวัด)", async () => {
@@ -151,27 +181,25 @@ describe("readiness — เพดานของ read path (memo)", () => {
       const { json } = await callWith();
       expect(json.data.status).toBe("STALE");
     }
-    expect(mocks.get.mock.calls.filter((c) => String(c[0]).includes("readiness:snapshot")))
-      .toHaveLength(1);
+    expect(mocks.stateFindUnique).toHaveBeenCalledTimes(1);
   });
 
-  it("memo ครอบกรณี Redis ล่มด้วย (ยังคง FAIL ทุกครั้ง ไม่ใช่ยิง Redis ซ้ำ)", async () => {
-    mocks.get.mockRejectedValue(new Error("redis down"));
+  it("memo ครอบกรณี store ล่มด้วย (ยังคง FAIL ทุกครั้ง ไม่ใช่ยิง query ซ้ำ)", async () => {
+    mocks.stateFindUnique.mockRejectedValue(new Error("db down"));
     for (let i = 0; i < 10; i++) {
       const { json } = await callWith();
       expect(json.data.status).toBe("FAIL");
     }
-    expect(mocks.get).toHaveBeenCalledTimes(1);
+    expect(mocks.stateFindUnique).toHaveBeenCalledTimes(1);
   });
 
-  it("memo หมดอายุแล้วอ่าน Redis ใหม่", async () => {
+  it("memo หมดอายุแล้วอ่าน store ใหม่", async () => {
     await callWith();
     vi.setSystemTime(Date.now() + SNAPSHOT_MEMO_TTL_MS + 1);
     await callWith();
     vi.useRealTimers();
 
-    expect(mocks.get.mock.calls.filter((c) => String(c[0]).includes("readiness:snapshot")))
-      .toHaveLength(2);
+    expect(mocks.stateFindUnique).toHaveBeenCalledTimes(2);
   });
 
   it("INVARIANT: memo ต้องสั้นกว่าเกณฑ์ STALE มาก (memo ห้ามกลายเป็นตัวถ่วงของ STALE)", () => {
@@ -183,11 +211,11 @@ describe("readiness — เพดานของ read path (memo)", () => {
 
   it("live probe เขียน snapshot แล้วดันเข้า memo ทันที (ไม่เสิร์ฟค่าที่เก่ากว่าที่เพิ่งเขียน)", async () => {
     const live = await callWith({ [READINESS_AUTH_HEADER]: TOKEN });
-    mocks.get.mockClear();
+    mocks.stateFindUnique.mockClear();
     const anon = await callWith();
 
-    expect(anon.json.data.checkedAt).toBe(live.json.data.checkedAt);
-    expect(mocks.get).not.toHaveBeenCalled();
+    expect(anon.json.data.lastCheckAt).toBe(live.json.data.lastCheckAt);
+    expect(mocks.stateFindUnique).not.toHaveBeenCalled();
   });
 });
 
@@ -211,7 +239,7 @@ describe("readiness — §F: min-interval ของ live probe ต้องม�
   });
 
   it("Redis พัง → ห้ามยิง live probe (min-interval หาย = เพดานโควตาหาย) และรายงาน FAIL", async () => {
-    mocks.set.mockRejectedValue(new Error("redis down"));
+    mocks.set.mockRejectedValue(new Error("redis down")); // lock ยังอยู่บน Redis
     const { json } = await callWith({ [READINESS_AUTH_HEADER]: TOKEN });
 
     expect(mocks.probeQStashReadOnly).not.toHaveBeenCalled();

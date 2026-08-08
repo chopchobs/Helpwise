@@ -24,6 +24,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { tenantPrisma } from "@/lib/tenant";
 import { verifyQStashSignature, type SendEmailJob } from "@/lib/queue";
 import { recordInboundAttempt } from "@/lib/inbound-counter";
+import { recordHeartbeat } from "@/lib/heartbeat";
 import { sendEmail } from "@/lib/email";
 import { MessageVisibility } from "@prisma/client";
 
@@ -183,6 +184,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { status: 500 }
       );
     }
+
+    // Phase 39 ลำดับ 4: กลไกนี้ทำงานสำเร็จจริง → เต้น heartbeat
+    //  (เต้นหลังงานสำเร็จเท่านั้น — ถ้าเต้นตอนรับ request จะสดทั้งที่งานล้ม
+    //   ⇒ corroboration ใน §C พัง: เคส signing key ไม่ตรงต้องทำให้ heartbeat ค้างจริง)
+    await recordHeartbeat("send-email");
 
     return NextResponse.json(
       { data: { sent: true, messageId: message.id }, error: null },

@@ -24,9 +24,16 @@
 
 import { timingSafeEqual } from "node:crypto";
 import { redis } from "@/lib/redis";
+import { prisma } from "@/lib/prisma";
+import {
+  getHeartbeatWriteFailure,
+  readHeartbeats,
+  recordHeartbeat,
+} from "@/lib/heartbeat";
 import { probeQStashReadOnly } from "@/lib/queue";
 import {
   evaluateInboundCounters,
+  getCounterWriteFailure,
   readInboundCounters,
   type HeartbeatFreshness,
   type InboundCounters,
@@ -59,9 +66,6 @@ export const LIVE_PROBE_MIN_INTERVAL_SECONDS = 300;
  */
 export const SNAPSHOT_STALE_AFTER_SECONDS = 1800;
 
-/** TTL ของ snapshot ใน Redis — ยาวกว่า stale threshold มาก เพื่อให้ "เก่า" ต่างจาก "หาย" */
-const SNAPSHOT_TTL_SECONDS = 86_400;
-
 /**
  * เพดานของ **read path**: memo snapshot ใน process นานเท่านี้ (มิลลิวินาที)
  *
@@ -79,7 +83,17 @@ const SNAPSHOT_TTL_SECONDS = 86_400;
  */
 export const SNAPSHOT_MEMO_TTL_MS = 10_000;
 
-const SNAPSHOT_KEY = "readiness:snapshot:v1";
+/**
+ * id ของแถว singleton ใน `ReadinessState` — ทั้งระบบมีแถวเดียว (v2 §3 ข้อ 7)
+ */
+const SNAPSHOT_ROW_ID = "singleton";
+
+/**
+ * ⚠️ lock ของ min-interval **ยังอยู่บน Redis** หลังย้าย snapshot ไป Postgres แล้ว
+ * เพราะต้องการ `SET NX EX` แบบ atomic ที่ราคาถูกและถูกต้องข้าม instance
+ * ⇒ Redis ล่ม = จองคิวไม่ได้ = **ห้ามยิง live probe** (เพดานโควตาหาย) ⇒ FAIL
+ *   แต่ snapshot ยังอยู่ครบใน Postgres ⇒ ไม่เสียความจำไปพร้อมกัน (erratum §H-1)
+ */
 const LIVE_PROBE_LOCK_KEY = "readiness:live-lock:v1";
 
 /** ชื่อ header ของ shared secret ที่เปิดสิทธิ์ live probe */
@@ -217,21 +231,12 @@ export function probeTokenConfigured(): boolean {
  *    ห้าม "ปิดชั่วคราว" ให้ผ่าน
  */
 async function readMechanismHeartbeats(): Promise<ComponentReport> {
-  return {
-    status: "missing",
-    detail: "heartbeat store not implemented (erratum §E ลำดับ 4)",
-  };
+  // ⚠️ ไม่จับ error ที่นี่ — อ่านตาราง heartbeat ไม่ได้ = วัด corroboration ไม่ได้
+  //    ต้องขึ้นไปถึงสถานะ (caller แปลงเป็น component error = FAIL) ห้ามกลืนเป็น ok
+  const report = await readHeartbeats();
+  return { status: report.status, detail: report.detail };
 }
 
-/**
- * แปลงสถานะ heartbeat เป็นความสดที่ §C ใช้ corroborate คลาส (1)
- *
- * 🚧 ลำดับ 4 ยังไม่มี ⇒ `missing` → `"unknown"` = **corroborate ไม่ได้**
- *    ไม่ใช่ `"fresh"` (จะกลบเคส signing key ไม่ตรงให้เหลือ DEGRADED เงียบ ๆ)
- *    และไม่ใช่ `"stale"` (จะให้คนนอกที่ยิง forged header ตรึงเป็น FAIL ได้ทันที
- *    ซึ่งคือบั๊กที่ §C แก้อยู่พอดี)
- *    ⇒ นี่คือ seam: ลำดับ 4 แค่เปลี่ยนฟังก์ชันนี้ให้คืน fresh/stale จริง กฎที่เหลือไม่ต้องแตะ
- */
 function heartbeatFreshness(report: ComponentReport): HeartbeatFreshness {
   if (report.status === "ok") return "fresh";
   if (report.status === "error") return "stale";
@@ -242,14 +247,15 @@ function heartbeatFreshness(report: ComponentReport): HeartbeatFreshness {
 // SNAPSHOT STORE
 // =============================================================================
 /**
- * ที่เก็บ snapshot ปัจจุบันคือ **Redis** ไม่ใช่ตารางใน DB
+ * ที่เก็บ snapshot = ตาราง `ReadinessState` แถวเดียว (Postgres) — **ย้ายจาก Redis
+ * แล้วในลำดับ 4** ตามที่ erratum §H-1 กำหนดไว้
  *
- * เหตุผล: ตาราง heartbeat/`lastCheckAt` เป็น **ลำดับ 4** ของ erratum §E ⇒ ลำดับ 2
- * ต้องไม่สร้าง migration ล่วงหน้า (จะดึง post-merge migration gate เข้ามาก่อนเวลา)
- * · Redis เป็น shared store ที่มีอยู่แล้วและ serverless instance ทุกตัวเห็นตรงกัน
- * ซึ่งเป็นเงื่อนไขที่ min-interval ต้องการ
+ * ผลที่ได้จากการย้าย: สถานะของ P2 ไม่อาศัยอยู่ใน dependency ที่ P2 เฝ้าอีกต่อไป
+ * ⇒ Redis ล่ม = จองคิว live probe ไม่ได้ (FAIL ถูกต้อง) **แต่ยังอ่านผลตรวจล่าสุดได้**
+ * ⇒ ไม่เสียทั้งการวัดและความจำพร้อมกันเหมือนตอนอยู่บน Redis
  *
- * 🔁 **ลำดับ 4 ต้องย้ายมาที่ตารางจริง** — สองฟังก์ชันข้างล่างคือ seam ที่ใช้ย้าย
+ * memo (§H-2) ยังคงอยู่และสำคัญเท่าเดิม — ตอนนี้มันเป็นเพดานของ read path ที่ยิงลง
+ * Postgres แทน ซึ่ง**ตรงกับสมมติฐานเดิมของ v2 §3 ข้อ 6** ("ยิงรัว ๆ ได้แค่ query DB ของเราเอง")
  */
 
 /** ผลของการอ่าน snapshot — แยก "ไม่มี" ออกจาก "อ่านไม่ได้" เพราะสองอันนี้คนละสถานะ */
@@ -267,28 +273,37 @@ export function __resetSnapshotMemoForTest(): void {
 }
 
 async function readSnapshotRaw(): Promise<SnapshotRead> {
-  let raw: string | null;
   try {
-    raw = await redis.get(SNAPSHOT_KEY);
+    const row = await prisma.readinessState.findUnique({
+      where: { id: SNAPSHOT_ROW_ID },
+    });
+    if (!row) return { kind: "none" };
+
+    return {
+      kind: "value",
+      snapshot: {
+        status: row.status as ReadinessStatus,
+        checkedAt: row.lastCheckAt.toISOString(),
+        reasons: row.reasons as unknown as string[],
+        components: row.components as unknown as Record<string, ComponentReport>,
+        counters: row.counters as unknown as InboundCounters | null,
+        deploymentId: row.deploymentId,
+      },
+    };
   } catch (err) {
+    // อ่าน store ไม่ได้ = ระบบพังจริง → FAIL (§F: ต้องมีทางออกไปถึงสถานะ)
     return { kind: "error", message: (err as Error).message.slice(0, 200) };
-  }
-  if (!raw) return { kind: "none" };
-  try {
-    return { kind: "value", snapshot: JSON.parse(raw) as ReadinessSnapshot };
-  } catch {
-    return { kind: "none" }; // ค่าเสีย = ถือว่าไม่มี → STALE (ไม่ใช่ OK)
   }
 }
 
 /**
- * อ่าน snapshot ผ่าน memo — request ไม่จำกัดยุบเหลือ Redis read ที่มีเพดาน
+ * อ่าน snapshot ผ่าน memo — request ไม่จำกัดยุบเหลือ query ที่มีเพดาน
  *
  * memo ทั้งสามสถานะ (`value`/`none`/`error`) โดยตั้งใจ:
- * ถ้า memo เฉพาะกรณีเจอค่า คนนอกที่ยิงตอนยังไม่มี snapshot (หรือตอน Redis ล่ม)
- * จะยังทะลุไปถึง Redis ทุก request ⇒ เพดานหายไปในกรณีที่ต้องการเพดานที่สุด
+ * ถ้า memo เฉพาะกรณีเจอค่า คนนอกที่ยิงตอนยังไม่มี snapshot (หรือตอน store ล่ม)
+ * จะยังทะลุไปถึง store ทุก request ⇒ เพดานหายไปในกรณีที่ต้องการเพดานที่สุด
  *
- * ⚠️ ราคาที่จ่าย: Redis ล่มจะถูกมองเห็นช้าได้ไม่เกิน `SNAPSHOT_MEMO_TTL_MS`
+ * ⚠️ ราคาที่จ่าย: store ล่มจะถูกมองเห็นช้าได้ไม่เกิน `SNAPSHOT_MEMO_TTL_MS`
  *    (10 วินาที เทียบกับเกณฑ์ STALE 1800 วินาที — ไม่กระทบการตัดสิน)
  */
 async function readSnapshot(): Promise<SnapshotRead> {
@@ -302,12 +317,21 @@ async function readSnapshot(): Promise<SnapshotRead> {
 }
 
 async function writeSnapshot(snapshot: ReadinessSnapshot): Promise<void> {
-  await redis.set(
-    SNAPSHOT_KEY,
-    JSON.stringify(snapshot),
-    "EX",
-    SNAPSHOT_TTL_SECONDS
-  );
+  const payload = {
+    status: snapshot.status,
+    lastCheckAt: new Date(snapshot.checkedAt),
+    reasons: snapshot.reasons,
+    components: snapshot.components as unknown as object,
+    counters: (snapshot.counters ?? undefined) as unknown as object | undefined,
+    deploymentId: snapshot.deploymentId,
+  };
+
+  await prisma.readinessState.upsert({
+    where: { id: SNAPSHOT_ROW_ID },
+    create: { id: SNAPSHOT_ROW_ID, ...payload },
+    update: payload,
+  });
+
   // live probe เพิ่งวัดสด — ดันเข้า memo ทันที ไม่ให้ memo เก่ากว่าค่าที่เพิ่งเขียน
   snapshotMemo = { at: Date.now(), result: { kind: "value", snapshot } };
 }
@@ -391,6 +415,11 @@ async function runLiveProbe(): Promise<ReadinessSnapshot> {
     heartbeat,
   };
 
+  // P2 เต้น heartbeat ของตัวเอง — ทำ **หลัง** อ่าน heartbeat แล้ว เพื่อไม่ให้รอบนี้
+  // ประเมินจังหวะเต้นของตัวเองที่เพิ่งเขียนไปในรอบเดียวกัน
+  // (external pinger ลำดับ 6 เฝ้า lastCheckAt ที่เขียนพร้อม snapshot ด้านล่าง)
+  await recordHeartbeat("readiness-probe");
+
   // ── ลำดับ 3: inbound counter 2 ตัว (กฎ §C) ────────────────────────────────
   let counters: InboundCounters | null = null;
   const degradedReasons: string[] = [];
@@ -398,7 +427,9 @@ async function runLiveProbe(): Promise<ReadinessSnapshot> {
     counters = await readInboundCounters();
     const evaluation = evaluateInboundCounters(
       counters,
-      heartbeatFreshness(heartbeat)
+      heartbeatFreshness(heartbeat),
+      // write ของ counter เคยล้มไหม — ถ้าล้ม ตัวเลขที่อ่านได้ต่ำกว่าความจริง
+      getCounterWriteFailure()
     );
     if (evaluation.level === "FAIL") {
       // counter เรียกร้อง FAIL — เดินผ่าน component เพื่อให้ rollUp ยกระดับให้
@@ -413,6 +444,11 @@ async function runLiveProbe(): Promise<ReadinessSnapshot> {
     // อ่าน counter ไม่ได้ = วัด headroom ไม่ได้ ⇒ ห้ามเงียบ (ไม่ใช่ OK)
     degradedReasons.push("inbound_counters_unavailable");
     console.error("[readiness] counter read failed:", (err as Error).message);
+  }
+
+  // heartbeat เขียนพลาด = จังหวะเต้นที่อ่านได้อาจเก่ากว่าความจริง ⇒ ห้ามเงียบเช่นกัน
+  if (getHeartbeatWriteFailure() !== null) {
+    degradedReasons.push("heartbeat_write_failed");
   }
 
   if (!probeTokenConfigured()) {
@@ -485,7 +521,9 @@ export async function buildAnonymousReport(): Promise<ReadinessReport> {
       data: {
         marker: READINESS_MARKER,
         status,
-        checkedAt,
+        // ชื่อ field = lastCheckAt ตามคำศัพท์ของดีไซน์ — external pinger (ลำดับ 6)
+        // เฝ้า field นี้ · ตรงกับคอลัมน์ ReadinessState.lastCheckAt
+        lastCheckAt: checkedAt,
         ageSeconds: age,
         staleAfterSeconds: SNAPSHOT_STALE_AFTER_SECONDS,
         // ⛔ ไม่มี deployment identity ในทางเดินนี้ — ผู้บริโภคทั้งหมดของ identity
@@ -535,7 +573,7 @@ export async function buildAuthorizedReport(): Promise<ReadinessReport> {
           marker: READINESS_MARKER,
           status: "FAIL",
           source: "unavailable",
-          checkedAt: null,
+          lastCheckAt: null,
           ageSeconds: null,
           liveProbeSkippedReason: "redis unavailable — live probe suppressed",
           reasons: ["redis_error"],
@@ -558,7 +596,7 @@ export async function buildAuthorizedReport(): Promise<ReadinessReport> {
           marker: READINESS_MARKER,
           status: "STALE",
           source: "stored",
-          checkedAt: null,
+          lastCheckAt: null,
           ageSeconds: null,
           liveProbeSkippedReason: skippedReason,
           reasons: ["no_snapshot"],
@@ -585,7 +623,7 @@ export async function buildAuthorizedReport(): Promise<ReadinessReport> {
         marker: READINESS_MARKER,
         status,
         source,
-        checkedAt: snapshot.checkedAt,
+        lastCheckAt: snapshot.checkedAt,
         ageSeconds: age,
         staleAfterSeconds: SNAPSHOT_STALE_AFTER_SECONDS,
         liveProbeSkippedReason: skippedReason,

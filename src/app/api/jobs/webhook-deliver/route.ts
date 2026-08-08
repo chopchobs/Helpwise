@@ -33,6 +33,7 @@ import {
   type WebhookDeliveryJob,
 } from "@/lib/queue";
 import { recordInboundAttempt } from "@/lib/inbound-counter";
+import { recordHeartbeat } from "@/lib/heartbeat";
 import {
   assertSafeDestination,
   buildSignatureHeader,
@@ -224,6 +225,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         errorMessage,
       },
     });
+
+    // Phase 39 ลำดับ 4: กลไก webhook-deliver เดินครบรอบแล้ว → เต้น heartbeat
+    // ⚠️ เต้นตรงนี้ (หลังบันทึกผล attempt) ไม่ใช่เฉพาะตอน succeeded — ปลายทางล่ม
+    //    คือความล้มเหลว "ของ receiver" ไม่ใช่ของกลไกเรา · heartbeat วัดว่ากลไกเรายังเดิน
+    await recordHeartbeat("webhook-deliver");
 
     if (succeeded) {
       return NextResponse.json(
