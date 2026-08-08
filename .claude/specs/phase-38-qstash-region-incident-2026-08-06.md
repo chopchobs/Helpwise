@@ -283,6 +283,25 @@ schedule ว่าง · DLQ/queues/topics ว่าง) ⇒ **ไม่มี r
   จับ host ที่ไม่ใช่ tenant แล้ว redirect ทิ้ง ⇒ ไม่มีทางเทียบ build ระหว่างสองที่อยู่ได้เลย
   📌 **ข้อจำกัดถาวรของโปรเจกต์นี้** — ใครจะออกแบบ gate ที่ต้องเทียบ artifact ข้าม host ต้องรู้ข้อนี้ก่อน
 
+> ### 📌 ERRATUM 2026-08-08 — คำอธิบายสาเหตุของ `302` ข้างบนผิด (ข้อความเดิมคงไว้ตามที่เขียนไว้ ไม่ลบ)
+>
+> **ผิดตรงไหน:** การ attribute `302` ไปที่ `src/proxy.ts` **ไม่ถูกต้อง** — ตรวจโค้ดยืนยันแล้วว่า
+> `grep -n "redirect" src/proxy.ts next.config.ts` เจอผลลัพธ์เดียวคือ **คอมเมนต์** ที่ `src/proxy.ts:11`
+> (*"ไม่รองรับ request rewrite/redirect แบบ edge granularity (ไม่มี NextResponse.rewrite)"*)
+> ⇒ **ไม่มี `NextResponse.redirect` อยู่ในโค้ดเลยสักบรรทัด** และ `next.config.ts` ก็ไม่มี redirect config
+> · พฤติกรรมจริงของ host ที่ไม่ใช่ `{slug}.gethelpwise.xyz` คือ `slug = null` → `nextWithoutTenantHeaders()`
+> → **ผ่านไปเฉย ๆ ไม่ redirect**
+>
+> **สาเหตุจริงของ `302`:** **Vercel Deployment Protection** (SSO บน `*.vercel.app`)
+> ⚠️ **ยังไม่มีใครตรวจค่าจริงของ setting นี้ — เป็นสมมติฐานจนกว่า Dev จะ confirm ใน Vercel Project Settings**
+> ห้ามอ้างข้อนี้เป็นข้อเท็จจริงจนกว่าจะ confirm
+>
+> **ข้อสังเกตเดิมยังคงอยู่:** *"เทียบ artifact ข้าม host (production alias ↔ deployment URL) ทำไม่ได้"*
+> ยังเป็นข้อจำกัดจริง — เปลี่ยนแค่ **เหตุผล** · ผลต่างที่สำคัญ: proxy แก้ที่โค้ดของเรา แต่ Deployment Protection
+> แก้ที่ Vercel setting / bypass token ⇒ ถ้าไม่แก้บันทึกนี้ คนถัดไปจะไปแก้โค้ดที่ไม่ใช่ต้นเหตุ
+>
+> **อ้างอิง:** `.claude/specs/phase-39-design-doc-v2.1-errata-2026-08-08.md` §B (E-1)
+
 ⛔ **สิ่งที่ห้ามใช้เป็นหลักฐาน:** `project.updatedAt` ขยับหลัง `deployment.created` ~85 วินาที
 **ไม่ชี้ขาดอะไรเลย** — เข้ากับ *"ตั้ง env หลัง deploy"* และ *"build ปกติจบแล้วอัปเดต alias"* (build ก่อนหน้าใช้ 1m 5s)
 ได้พอ ๆ กัน **แยกสองสมมติฐานไม่ออก** · เคยถูกยกมาเป็น "บ่งชี้" ในบทสนทนา — เป็นการตีความเกินหลักฐาน
