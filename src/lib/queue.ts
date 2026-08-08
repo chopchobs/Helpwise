@@ -69,6 +69,22 @@ export function getWorkerTargetUrl(): string {
 }
 
 // =============================================================================
+// CLIENT FACTORY
+// =============================================================================
+
+/**
+ * สร้าง QStash client — **จุดเดียวในระบบที่ construct `Client`**
+ *
+ * ⚠️ Phase 39 §F บังคับว่า readiness probe ต้องใช้ "client ตัวเดียวกับที่ publish ใช้จริง"
+ *    การ construct ที่จุดเดียวทำให้ข้อนั้นเป็นจริง **เชิงโครงสร้าง** ไม่ใช่เชิง convention —
+ *    ถ้ามีคนเปลี่ยน config ของ client (baseUrl/retry/region) ตอน publish
+ *    probe จะเปลี่ยนตามอัตโนมัติ ⇒ probe วัดของจริงเสมอ ไม่ใช่วัด client คนละตัว
+ */
+function createQStashClient(token: string): Client {
+  return new Client({ token });
+}
+
+// =============================================================================
 // PRODUCER — publish job
 // =============================================================================
 
@@ -95,7 +111,7 @@ export async function publishSendEmailJob(job: SendEmailJob): Promise<void> {
     return;
   }
 
-  const client = new Client({ token });
+  const client = createQStashClient(token);
   await client.publishJSON({
     url: getWorkerTargetUrl(),
     body: job,
@@ -238,10 +254,52 @@ export async function publishWebhookDeliveryJob(
     return;
   }
 
-  const client = new Client({ token });
+  const client = createQStashClient(token);
   await client.publishJSON({
     url: getJobTargetUrl(WEBHOOK_DELIVER_WORKER_PATH),
     body: job,
     retries: WEBHOOK_QSTASH_RETRIES,
   });
+}
+
+// =============================================================================
+// READINESS PROBE — read-only reachability check (Phase 39 ลำดับ 2)
+// =============================================================================
+
+/** ผลของ read-only probe ที่ยิงไป QStash */
+export interface QStashProbeResult {
+  ok: boolean;
+  /** เหตุผลแบบสั้น ปลอดภัยต่อการ log — **ห้ามใส่ token หรือ URL ที่มี credential** */
+  detail: string;
+}
+
+/**
+ * ยิง read-only call ไป QStash เพื่อดูว่า token + connectivity ยังใช้ได้จริง
+ *
+ * ทำไมต้องเป็น `schedules.list()`:
+ *   - **read-only เด็ดขาด** — ไม่สร้าง message, ไม่กินโควตา publish (สมมติฐานที่ §D
+ *     ติดป้ายไว้ว่ายังไม่ verify — blind spot 9.6pp ผูกกับข้อนี้)
+ *   - แตะ **path เดียวกับที่ publish ใช้จริง** (auth ด้วย QSTASH_TOKEN ตัวเดียวกัน,
+ *     ผ่าน `createQStashClient()` ตัวเดียวกัน) ⇒ token เพี้ยน/หมดอายุจับได้
+ *   - ⛔ **ห้ามประกอบ URL ของ QStash เอง** — ผิดกฎ §F ข้อ 1 และทำให้ probe
+ *     วัดคนละอย่างกับที่ publish เดินจริง
+ *
+ * ⚠️ ไม่ throw — คืน `{ ok:false }` เสมอเมื่อพัง (caller เป็น health endpoint
+ *    ที่ต้องรายงานสถานะ ไม่ใช่ล้ม)
+ */
+export async function probeQStashReadOnly(): Promise<QStashProbeResult> {
+  const token = process.env.QSTASH_TOKEN;
+  if (!token) {
+    // ไม่มี token = publish บน production จะ throw ⇒ P2 ตายอยู่แล้ว ⇒ ไม่ใช่ ok
+    return { ok: false, detail: "QSTASH_TOKEN is not set" };
+  }
+
+  try {
+    const client = createQStashClient(token);
+    await client.schedules.list();
+    return { ok: true, detail: "schedules.list ok" };
+  } catch (err) {
+    // ห้าม leak รายละเอียดที่มี credential — เก็บแค่ message
+    return { ok: false, detail: (err as Error).message.slice(0, 200) };
+  }
 }
