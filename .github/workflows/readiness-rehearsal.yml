@@ -1,0 +1,59 @@
+# .github/workflows/readiness-rehearsal.yml
+# Phase 39 ลำดับ 7 (erratum §E) — ซ้อม reproduce incident §2.3 บน Preview
+#
+# ⛔ **`workflow_dispatch` อย่างเดียวโดยตั้งใจ** — ไม่มี `schedule` ไม่มี `deployment_status`
+#    นี่คือชั้นที่ 3 ของกลไกใน erratum §H-6: cron เรียกเส้นทางนี้ไม่ได้เพราะ
+#    **ไม่มี trigger ให้เรียก** ไม่ใช่เพราะมี `if` คอยกัน
+#    (ชั้น 1 = คนละไฟล์ entrypoint · ชั้น 2 = guard สองตัวที่ตัดกันเป็นเซตว่าง)
+#
+# ⚠️ **ห้ามเพิ่ม trigger ใด ๆ เข้าไฟล์นี้** — เพิ่มเมื่อไร กลไกกัน false-PASS พังทั้งชั้น
+#
+# ก่อนกดรัน: ต้องทำ prerequisite ครบตาม `.claude/specs/phase-39-rehearsal-runbook.md`
+# ไม่ครบแล้วกด = ได้ FAIL จากคนละสาเหตุ แล้วอ่านผิดว่าซ้อมสำเร็จ
+
+name: Readiness Rehearsal (Preview)
+
+on:
+  workflow_dispatch:
+    inputs:
+      preview_url:
+        description: "URL ของ Preview deployment (ต้องเป็น *.vercel.app)"
+        required: true
+        type: string
+      confirm:
+        description: 'พิมพ์ REHEARSE เพื่อยืนยันว่าทำ prerequisite ครบแล้ว (ดู runbook)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: ตรวจคำยืนยัน
+        if: inputs.confirm != 'REHEARSE'
+        run: |
+          echo "::error::ต้องพิมพ์ REHEARSE เพื่อยืนยันว่าอ่าน runbook และทำ prerequisite ครบแล้ว"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rehearsal probe
+        env:
+          PREVIEW_BASE_URL: ${{ inputs.preview_url }}
+          READINESS_PROBE_TOKEN: ${{ secrets.READINESS_PROBE_TOKEN }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: npx tsx scripts/readiness-rehearsal.ts
