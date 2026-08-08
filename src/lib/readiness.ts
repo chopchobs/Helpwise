@@ -25,6 +25,12 @@
 import { timingSafeEqual } from "node:crypto";
 import { redis } from "@/lib/redis";
 import { probeQStashReadOnly } from "@/lib/queue";
+import {
+  evaluateInboundCounters,
+  readInboundCounters,
+  type HeartbeatFreshness,
+  type InboundCounters,
+} from "@/lib/inbound-counter";
 
 // =============================================================================
 // CONSTANTS
@@ -118,6 +124,8 @@ export interface ReadinessSnapshot {
   checkedAt: string;
   reasons: string[];
   components: Record<string, ComponentReport>;
+  /** ตัวเลข counter ลำดับ 3 — `null` เมื่ออ่านไม่ได้ (ไม่ใช่ 0 ซึ่งจะอ่านเป็น "ปกติ") */
+  counters: InboundCounters | null;
   deploymentId: string | null;
 }
 
@@ -213,6 +221,21 @@ async function readMechanismHeartbeats(): Promise<ComponentReport> {
     status: "missing",
     detail: "heartbeat store not implemented (erratum §E ลำดับ 4)",
   };
+}
+
+/**
+ * แปลงสถานะ heartbeat เป็นความสดที่ §C ใช้ corroborate คลาส (1)
+ *
+ * 🚧 ลำดับ 4 ยังไม่มี ⇒ `missing` → `"unknown"` = **corroborate ไม่ได้**
+ *    ไม่ใช่ `"fresh"` (จะกลบเคส signing key ไม่ตรงให้เหลือ DEGRADED เงียบ ๆ)
+ *    และไม่ใช่ `"stale"` (จะให้คนนอกที่ยิง forged header ตรึงเป็น FAIL ได้ทันที
+ *    ซึ่งคือบั๊กที่ §C แก้อยู่พอดี)
+ *    ⇒ นี่คือ seam: ลำดับ 4 แค่เปลี่ยนฟังก์ชันนี้ให้คืน fresh/stale จริง กฎที่เหลือไม่ต้องแตะ
+ */
+function heartbeatFreshness(report: ComponentReport): HeartbeatFreshness {
+  if (report.status === "ok") return "fresh";
+  if (report.status === "error") return "stale";
+  return "unknown";
 }
 
 // =============================================================================
@@ -368,9 +391,29 @@ async function runLiveProbe(): Promise<ReadinessSnapshot> {
     heartbeat,
   };
 
-  // 🚧 ลำดับ 3 (inbound counter + threshold 80%/100%) จะป้อน reason เข้าที่นี่
-  //    ตอนนี้ยังไม่มีแหล่งข้อมูล ⇒ ว่างไว้ ไม่ใช่ hardcode ให้ผ่าน
+  // ── ลำดับ 3: inbound counter 2 ตัว (กฎ §C) ────────────────────────────────
+  let counters: InboundCounters | null = null;
   const degradedReasons: string[] = [];
+  try {
+    counters = await readInboundCounters();
+    const evaluation = evaluateInboundCounters(
+      counters,
+      heartbeatFreshness(heartbeat)
+    );
+    if (evaluation.level === "FAIL") {
+      // counter เรียกร้อง FAIL — เดินผ่าน component เพื่อให้ rollUp ยกระดับให้
+      components.inbound = {
+        status: "error",
+        detail: evaluation.reasons.join(","),
+      };
+    } else {
+      degradedReasons.push(...evaluation.reasons);
+    }
+  } catch (err) {
+    // อ่าน counter ไม่ได้ = วัด headroom ไม่ได้ ⇒ ห้ามเงียบ (ไม่ใช่ OK)
+    degradedReasons.push("inbound_counters_unavailable");
+    console.error("[readiness] counter read failed:", (err as Error).message);
+  }
 
   if (!probeTokenConfigured()) {
     // ตามนิยาม: ถ้าไป live probe ได้แปลว่า token ตั้งแล้ว — เก็บไว้กัน regression
@@ -387,6 +430,7 @@ async function runLiveProbe(): Promise<ReadinessSnapshot> {
     checkedAt: new Date().toISOString(),
     reasons,
     components,
+    counters,
     deploymentId: getDeploymentIdentity().deploymentId,
   };
 }
@@ -547,6 +591,8 @@ export async function buildAuthorizedReport(): Promise<ReadinessReport> {
         liveProbeSkippedReason: skippedReason,
         reasons: snapshot.reasons,
         components: snapshot.components,
+        // ⛔ counters อยู่เฉพาะ shape ที่ auth — ตัวเลข inbound เป็นข้อมูล infra
+        counters: snapshot.counters,
         deployment: identity,
         minIntervalSeconds: LIVE_PROBE_MIN_INTERVAL_SECONDS,
       },
