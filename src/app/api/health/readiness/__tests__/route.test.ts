@@ -248,6 +248,61 @@ describe("readiness — §F: min-interval ของ live probe ต้องม�
   });
 });
 
+describe("readiness — attribution ของ error ต้องชี้ตัวการถูก (erratum §H-8)", () => {
+  // เหตุผลที่เป็น gate ไม่ใช่ regression test ทั่วไป:
+  // เส้นทางนี้คือเส้นทางที่ทั้งเฟสสร้างมาเพื่อให้ "อ่านออกว่าอะไรพัง" —
+  // ถ้ามันโยนความผิดให้ component ที่ไม่เกี่ยว คนอ่านจะไปแก้ผิดที่โดยที่ทุกอย่างดู consistent
+
+  it("Postgres โยนตอน runLiveProbe (อ่าน heartbeat) → ห้ามถูกรายงานเป็น redis", async () => {
+    // เคสที่น่าจะเจอที่สุดตอนซ้อม: migration ยังไม่ถูก apply กับ DB ที่ deployment นั้นใช้
+    mocks.heartbeatFindMany.mockRejectedValue(
+      new Error('relation "MechanismHeartbeat" does not exist')
+    );
+    const { json } = await callWith({ [READINESS_AUTH_HEADER]: TOKEN });
+
+    expect(json.data.status).toBe("FAIL");
+    expect(json.data.reasons).toContain("live_probe_error");
+    expect(json.data.reasons).not.toContain("redis_error");
+    expect(json.data.components.redis).toBeUndefined();
+    expect(json.data.components.probe.status).toBe("error");
+    expect(json.data.components.probe.detail).toContain("MechanismHeartbeat");
+    // live probe ยิงไปแล้วจริง — ห้ามบอกว่าถูก suppress
+    expect(json.data.liveProbeSkippedReason).not.toContain("suppressed");
+  });
+
+  it("เขียน snapshot ไม่ลง (store write) → รายงานเป็น store ไม่ใช่ redis", async () => {
+    mocks.stateUpsert.mockRejectedValue(
+      new Error('relation "ReadinessState" does not exist')
+    );
+    const { json } = await callWith({ [READINESS_AUTH_HEADER]: TOKEN });
+
+    expect(json.data.status).toBe("FAIL");
+    expect(json.data.reasons).toEqual(["snapshot_write_error"]);
+    expect(json.data.components.store.status).toBe("error");
+    expect(json.data.components.redis).toBeUndefined();
+  });
+
+  it("min-interval แล้วอ่าน snapshot ไม่ได้ → store ไม่ใช่ redis (แต่ยัง FAIL)", async () => {
+    await callWith({ [READINESS_AUTH_HEADER]: TOKEN }); // จอง lock รอบแรก
+    __resetSnapshotMemoForTest();
+    mocks.stateFindUnique.mockRejectedValue(new Error("db down"));
+    const { json } = await callWith({ [READINESS_AUTH_HEADER]: TOKEN });
+
+    expect(json.data.status).toBe("FAIL");
+    expect(json.data.reasons).toEqual(["snapshot_read_error"]);
+    expect(json.data.components.store.status).toBe("error");
+  });
+
+  it("Redis พังตอนจอง lock → ยังรายงานเป็น redis + suppressed เหมือนเดิม (ไม่ถอยหลัง)", async () => {
+    mocks.set.mockRejectedValue(new Error("redis down"));
+    const { json } = await callWith({ [READINESS_AUTH_HEADER]: TOKEN });
+
+    expect(json.data.reasons).toEqual(["redis_error"]);
+    expect(json.data.components.redis.status).toBe("error");
+    expect(json.data.liveProbeSkippedReason).toContain("suppressed");
+  });
+});
+
 describe("readiness — §F: ไม่พบ heartbeat = FAIL เสมอ", () => {
   it("ทุก dependency ปกติ แต่ heartbeat ยังไม่มี (ลำดับ 4) → FAIL ไม่ใช่ OK", async () => {
     const { res, json } = await callWith({ [READINESS_AUTH_HEADER]: TOKEN });

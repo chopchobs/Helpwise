@@ -104,14 +104,27 @@ interface RehearsalResult {
 function evaluate(verdict: ProbeVerdict, raw: string | null): RehearsalResult {
   const lines: string[] = [`probe: ${verdict.detail}`];
 
-  // 1) อ่าน marker ไม่ได้ = วัดไม่ได้ (Protection กินไปก่อนถึงแอป / bypass token ผิด)
+  // 1) INCONCLUSIVE มี **สองสาเหตุที่ต่างกันคนละเรื่อง** — แยกด้วย 401
+  //    (ก) ไม่มี marker  = Protection กินไปก่อนถึงแอป / bypass ผิด ⇒ ยังไม่ถึงโค้ดเรา
+  //    (ข) มี marker แต่ 401 = **ถึงโค้ดเราแล้ว** แต่ READINESS_PROBE_TOKEN ไม่ตรง
+  //        (route ตอบ marker + error ไม่มี field `status` ⇒ classify เป็น INCONCLUSIVE)
+  //    เดิมชี้ไป bypass/deployment อย่างเดียว ⇒ ส่งคนไปแก้ผิดที่ทุกครั้งที่ token ไม่ตรง
   if (verdict.verdict === "INCONCLUSIVE") {
+    const unauthorized = verdict.detail.includes("http 401");
     return {
       outcome: "INCONCLUSIVE",
       lines: [
         ...lines,
-        "⇒ อ่าน marker ไม่ได้ — ยังไม่ถึงโค้ดของเราเลย",
-        "   เช็ค: VERCEL_AUTOMATION_BYPASS_SECRET ถูกต้องไหม · Preview deployment ขึ้นแล้วจริงไหม",
+        ...(unauthorized
+          ? [
+              "⇒ 401 พร้อม marker = **ถึงโค้ดของเราแล้ว** แต่ token ไม่ตรง (ไม่ใช่ปัญหา bypass)",
+              "   เช็ค: READINESS_PROBE_TOKEN ที่ GitHub secret ตรงกับที่ตั้งบน Vercel ไหม (runbook C2/C3)",
+              "   ⚠️ env ที่เพิ่งตั้งไม่มีผลกับ deployment เดิม — ต้อง redeploy ก่อน (runbook C4)",
+            ]
+          : [
+              "⇒ อ่าน marker ไม่ได้ — ยังไม่ถึงโค้ดของเราเลย",
+              "   เช็ค: VERCEL_AUTOMATION_BYPASS_SECRET ถูกต้องไหม · Preview deployment ขึ้นแล้วจริงไหม (runbook B/A)",
+            ]),
         "   ⛔ ห้ามนับเป็นผ่าน และห้ามนับเป็นไม่ผ่าน (erratum §B(ค))",
       ],
     };

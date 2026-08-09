@@ -14,14 +14,20 @@ Base branch: **main = `7b29db0` = `origin/main`** (sync แล้ว ไม่�
 
 | Phase | Branch | Status | Merged |
 |-------|--------|--------|--------|
-| 39 | `feature/phase-39-server-env-readiness` | 🔄 in progress (**ahead main 18 commits**) | ❌ |
+| 39 | `feature/phase-39-server-env-readiness` | 🔄 in progress (**ahead main 19 commits · push แล้ว**) | ❌ |
 
 Working state:
 - Uncommitted/WIP: **ไม่มี (clean)**
-- Env/process ที่เปิดค้าง: **ไม่มี** — ไม่ได้รัน migration, ไม่ได้แตะ Vercel/GitHub settings, ไม่ได้ push
+- Env/process ที่เปิดค้าง: **ไม่มี** — ไม่ได้รัน migration, ไม่ได้แตะ Vercel/GitHub settings
+
+> 🔴 **แก้ 2026-08-09 — ฉบับแรกของไฟล์นี้เขียนผิดสองที่** (ต้นทางอยู่ใน commit message ของ `277be73` เอง):
+> · *"ahead 18 commits"* → ของจริง **19**
+> · *"ยังไม่ push"* → **push แล้ว** · verify: `git rev-parse feature/…` = `git rev-parse origin/feature/…` = **`277be73`**
+>   · Vercel มี Preview deployment **`dpl_584Ys5Vdy6gF6f4dkCERRJBPsEvv`** state **READY** (sha `277be73`, PR #17)
+> ⇒ ผลพลอยได้: **runbook ขั้น A1 + A2 ผ่านแล้ว** (ติ๊กพร้อม deployment id เป็นหลักฐานใน rehearsal runbook แล้ว)
+> ⇒ บทเรียนของความผิดนี้ → **erratum §H-9** + Don't Retry ด้านล่าง
 
 ⚠️ ต้อง verify ก่อนเริ่ม context ถัดไป:
-- [ ] **branch ยังไม่ push** — Dev push เอง
 - [ ] §F gate: **ห้าม merge เข้า main จนกว่าลำดับ 4–5 จะ verify บน prod** (ยังไม่มีอะไรขึ้น prod เลย)
 
 ---
@@ -50,17 +56,22 @@ Working state:
 | 6 | ⏳ บล็อก — รอ Dev เลือกบริการ + ตั้ง monitor |
 | 7 | ⏳ บล็อก — รอ **C0** (ดูด้านล่าง) |
 
-### 🚧 ข้อที่บล็อกทุกอย่างอยู่ตอนนี้: **C0**
+### 🚧 ข้อที่บล็อกทุกอย่างอยู่ตอนนี้: **C0 — สองคำถาม ไม่ใช่คำถามเดียว** *(แก้ 2026-08-09)*
 
-> **`DATABASE_URL` ถูก scope แยก Production/Preview หรือใช้ค่าเดียวกัน?**
-> **ทุกขั้นหลังจากนั้นแตกเป็นสองกรณีตามคำตอบนี้** — วิธีตรวจ + ตารางสองกรณีอยู่ที่ rehearsal runbook ขั้น C
-> ⛔ ห้ามเดา
+> **C0-a:** `DATABASE_URL` ถูก scope แยก Production/Preview หรือใช้ค่าเดียวกัน?
+> **C0-b:** 🔴 **`QSTASH_URL` มีกี่แถว scope อะไร** — ตัวที่ขั้น D1 จะไปแตะคือตัวนี้ ไม่ใช่ `DATABASE_URL`
+> **ทุกขั้นหลังจากนั้นแตกเป็นสองกรณีตามคำตอบ** — ตารางสองกรณีของทั้งคู่อยู่ที่ rehearsal runbook ขั้น C
+> ⛔ ห้ามเดา · ⛔ **ห้ามเสนอทาง Vercel MCP** — ทดสอบแล้ว 2026-08-09: MCP อ่าน env ไม่ได้เลย (ดู Don't Retry)
 
-### ⚠️ คลิกที่อันตรายที่สุด: ขั้น D1
+### ⚠️ คลิกที่อันตรายที่สุด: ขั้น D1 — **เปลี่ยนเป็น "แก้ scope" ไม่ใช่ "Delete" แล้ว** *(2026-08-09)*
 
-ลบ `QSTASH_URL` เฉพาะ Preview — **พลาดไปโดน Production = สร้าง incident 7 สัปดาห์ขึ้นมาใหม่ด้วยมือ
-ตอนที่ระบบเตือนยังไม่ merge** (ไม่มีอะไรจับให้)
-⇒ runbook มี **D0 / D1 / D1b เป็นขั้นบังคับ** แล้ว (แคป Production ก่อน → ลบ → แคปอีกครั้ง → เทียบว่าเหมือนกัน)
+เดิม runbook สั่ง **ลบ** `QSTASH_URL` ของ Preview โดย**สมมติเอาเองว่ามีแถว Preview แยกอยู่**
+incident §8.1 บันทึกแค่ว่าตั้ง *"Production + Preview"* ซึ่งบน Vercel เป็นได้ทั้ง **2 แถวแยก** และ **1 แถวติ๊กสองช่อง**
+⇒ ถ้าเป็นแบบหลัง **กด Delete = ลบของ Production ไปด้วย = สร้าง incident 7 สัปดาห์ขึ้นมาใหม่จริง**
+ตอนที่ระบบเตือนยังไม่ merge (ไม่มีอะไรจับให้)
+
+⇒ **D1 ตอนนี้คือ uncheck ช่อง Preview** (reversible — F1 กลายเป็นติ๊กกลับ ไม่ใช่พิมพ์ค่าเดิมใหม่)
+⇒ **D0 / D1 / D1b ยังเป็นขั้นบังคับ** และ **D0 ต้องแคปค่าเต็มของ `QSTASH_URL` ด้วย ไม่ใช่แค่รายชื่อตัวแปร**
 
 ---
 
@@ -91,6 +102,14 @@ Working state:
 ---
 
 ## Don't Retry
+- 🔴 **เชื่อประโยคจาก handoff เพราะ verify ประโยคข้าง ๆ ผ่านแล้ว** — **verify ข้อความจาก handoff ทีละประโยค:
+  verify ประโยคหนึ่งผ่าน ไม่ทำให้ประโยคข้าง ๆ ในย่อหน้าเดียวกันเชื่อถือได้**
+  · เกิดจริง 2026-08-09: verify "18 commits" แล้วแก้เป็น 19 ถูกต้อง แต่หยิบ "ยังไม่ push" จากประโยคเดียวกัน
+    มาใช้ต่อโดยไม่ verify (ของจริง push แล้ว · `git rev-parse` สองคำสั่งก็จบ) — **รูปทรงของ §B ซ้ำ ในเซสชันที่มีหน้าที่กันมันเอง**
+  · รายละเอียด → erratum **§H-9**
+- 🔴 **ดึง environment variables ของ Vercel ผ่าน MCP** — ทดสอบแล้ว 2026-08-09 **ทำไม่ได้**
+  `get_project` คืนแค่ `id`/`name`/`framework`/`nodeVersion`/`latestDeployment`/`domains` และชุด tool ทั้งหมด
+  **ไม่มีตัวอ่าน env เลยสักตัว** ⇒ **C0-a/C0-b เป็นงานมือของ Dev อย่างเดียว ห้ามเสนอทาง MCP ซ้ำ**
 - **ผ่อน `assertProductionHost()` ให้ยิง `*.vercel.app` ได้** — guard นี้เป็นชั้นกัน false-PASS ตัวใหญ่ที่สุด · ทางที่ใช้แทนคือเส้นทาง rehearsal แยก (§H-6)
 - **เพิ่ม trigger เข้า `readiness-rehearsal.yml`** — `workflow_dispatch` อย่างเดียวคือชั้นที่ 3 ของ guard
 - **เก็บ state ของ workflow ใน `ReadinessState`** — ผู้เฝ้าต้องไม่ใช้ชิ้นส่วนเดียวกับผู้ถูกเฝ้า (§H-5)
@@ -107,9 +126,11 @@ Working state:
 - **backlog แยกไฟล์** `.claude/specs/backlog-2026-08-08.md` (B-1, B-2)
 
 ### ค้างอยู่ / Open Questions
-- [ ] **C0** — `DATABASE_URL` แยก scope หรือไม่ (บล็อกทุกอย่าง)
-- [ ] ลำดับ 6 — Dev เลือกบริการ pinger
-- [ ] ลำดับ 7 — เช็คลิสต์ 19 ข้อ (**17 ข้อเป็นงานมือของ Dev**) → rehearsal runbook
+- [ ] **C0-a** — `DATABASE_URL` แยก scope หรือไม่ (บล็อกทุกอย่าง)
+- [ ] **C0-b** — `QSTASH_URL` มีกี่แถว scope อะไร (บล็อกขั้น D — ตัวที่จะไปแตะจริง)
+      · **ทำพร้อม D0 ในการเปิดหน้า Environment Variables รอบเดียว**
+- [ ] ลำดับ 6 — Dev เลือกบริการ pinger · **ปิดได้แค่บางส่วนก่อน merge** (วิธี B เท่านั้น — pinger runbook ข้อ 5)
+- [ ] ลำดับ 7 — เช็คลิสต์ของ rehearsal runbook (A1/A2 ✅ แล้ว · ที่เหลือส่วนใหญ่เป็นงานมือของ Dev)
 - [ ] post-merge gate ของเฟส + อัปเดตแถว "server env / provider" ใน `CLAUDE.md`
 
 ---

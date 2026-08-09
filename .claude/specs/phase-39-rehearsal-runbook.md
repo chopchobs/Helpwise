@@ -38,11 +38,13 @@ Phase 38: QStash region เปลี่ยน ⇒ กลไกพื้นหล
 
 ### ขั้น A — ให้มี Preview ที่มีโค้ดของ Phase 39
 
-- [ ] **A1. push branch `feature/phase-39-server-env-readiness` ขึ้น remote**
-      ยืนยัน: `git log --oneline origin/feature/phase-39-server-env-readiness -1` ตรงกับ local
-- [ ] **A2. รอ Vercel สร้าง Preview deployment ของ branch นี้จนสถานะ Ready**
-      ยืนยัน: Vercel → Deployments → เห็น deployment ของ branch นี้ สถานะ **Ready**
-      **จด URL ของ deployment ไว้** (รูปแบบ `https://helpwise-<hash>-<scope>.vercel.app`)
+- [x] **A1. push branch `feature/phase-39-server-env-readiness` ขึ้น remote** — ✅ **2026-08-09**
+      ยืนยัน (รันจริง ไม่ใช่การอ้างจากเอกสาร):
+      `git rev-parse feature/phase-39-server-env-readiness` = `git rev-parse origin/feature/…` = **`277be73`**
+- [x] **A2. Vercel สร้าง Preview deployment ของ branch นี้แล้ว สถานะ Ready** — ✅ **2026-08-09**
+      หลักฐาน: deployment **`dpl_584Ys5Vdy6gF6f4dkCERRJBPsEvv`** · state **READY**
+      · `githubCommitRef` = branch นี้ · sha `277be73` · `githubPrId` 17
+      ⚠️ **URL ของ deployment นี้ใช้ซ้ำไม่ได้หลัง C4/D2** — ทุก redeploy ได้ URL ใหม่ ต้องจดใหม่ทุกครั้ง
 
 ### ขั้น B — ทำให้ยิงเข้า Preview ได้ (Deployment Protection)
 
@@ -60,18 +62,54 @@ Phase 38: QStash region เปลี่ยน ⇒ กลไกพื้นหล
 > · Prisma ควร apply ก่อนโค้ดที่ใช้มันอยู่แล้ว
 > ⇒ **รันขั้น gate จริงตรงนี้เลย เก็บผลเป็นหลักฐานปิดเฟส** แล้วการซ้อมได้ประโยชน์ตามมา — ไม่ต้องทำสองรอบ
 
-#### C0. ❓ ตอบก่อน: `DATABASE_URL` ถูก scope แยกหรือไม่
+#### C0. ❓ ตอบก่อน — **สองคำถาม ไม่ใช่คำถามเดียว** (เปิดหน้าเดียวตอบครบ)
 
-Vercel → Project Settings → Environment Variables → ดูรายการ `DATABASE_URL` / `DIRECT_URL`
+> 🔴 **ต้องเป็นงานมือของ Dev เท่านั้น** — ทดสอบแล้ว 2026-08-09: **Vercel MCP อ่าน environment variables ไม่ได้**
+> `get_project` คืนแค่ `id` / `name` / `framework` / `nodeVersion` / `latestDeployment` / `domains`
+> และชุด tool ทั้งหมดของ Vercel MCP **ไม่มีตัวอ่าน env เลยสักตัว**
+> ⇒ ⛔ **ห้ามเสนอทาง MCP ซ้ำอีก** และห้ามเดาค่าจากที่อื่น
 
-- [ ] **จดผลลงที่นี่:** `DATABASE_URL` มีกี่แถว และ scope อะไรบ้าง (Production / Preview / Development)
+**เปิดครั้งเดียว:** Vercel → Project Settings → Environment Variables
+แล้วตอบ **C0-a + C0-b + ทำ D0 ให้จบในรอบเดียว** (สามอย่างนี้อยู่หน้าเดียวกัน — ไม่มีเหตุให้เปิดสามรอบ)
+
+##### C0-a. `DATABASE_URL` ถูก scope แยกหรือไม่
+
+- [ ] **จดผล:** `DATABASE_URL` (+ `DIRECT_URL`) มีกี่แถว และแต่ละแถวติ๊ก scope อะไรบ้าง
 
 ⚠️ **ห้ามเดา** — ทั้งสองกรณีเป็นไปได้ และเช็คลิสต์ต่างกัน:
 
 | กรณี | ความหมาย | ต้องทำ |
 | --- | --- | --- |
-| **กรณี 1 — ค่าเดียวใช้ทุก scope** | Preview ใช้ DB ตัวเดียวกับ production | apply **ครั้งเดียว** · verify ครั้งเดียว · ทำ C1 ชุดเดียว |
+| **กรณี 1 — ค่าเดียวใช้ทุก scope** | Preview ใช้ DB ตัวเดียวกับ production | apply **ครั้งเดียว** · verify ครั้งเดียว · ทำ C1 ชุดเดียว · ⚠️ **แต่มีผลข้างเคียงด้านล่าง — อ่านก่อน** |
 | **กรณี 2 — แยก Production / Preview** | Preview มี DB ของตัวเอง | **apply สองที่ · verify สองที่** · ทำ C1 ครบทั้งสองชุด ⛔ ข้ามชุดใดชุดหนึ่งไม่ได้ — ข้าม Preview = ซ้อมได้ `INVALID` · ข้าม Production = gate ปิดไม่ได้ |
+
+> 🔴 **ผลข้างเคียงของกรณี 1 ที่ต้องรู้ก่อนกดซ้อม — "ง่ายกว่า" ไม่ได้แปลว่า "ปลอดภัยกว่า"**
+>
+> `writeSnapshot()` upsert แถว `ReadinessState` id `"singleton"` **แถวเดียวทั้งระบบ ไม่มี scope ของ environment**
+> (`src/lib/readiness.ts` — และ `recordHeartbeat("readiness-probe")` ก็เป็นแถว global เช่นกัน)
+> ⇒ **กรณี 1 = การซ้อมบน Preview เขียนสถานะ `FAIL` ทับแถวเดียวกับที่ endpoint สาธารณะของ production เสิร์ฟ**
+>
+> **ตอนนี้ blast radius = 0** — verify แล้ว 2026-08-09:
+> · route ยังไม่อยู่บน main (`git show main:src/app/api/health/readiness/route.ts` → ไม่มีไฟล์)
+> · `schedule:` ของ GitHub Actions รันเฉพาะ default branch ⇒ ชั้นในยังไม่เคยเขียน/อ่านแถวนี้
+> ⇒ **หน้าต่างนี้คือช่วงที่ซ้อมปลอดภัยที่สุดที่จะมี** — ซ้อมตอนนี้ ไม่ใช่ตอนหลัง
+>
+> ⚠️ **หลัง merge ข้อนี้ไม่จริงอีกต่อไป** — ซ้อมซ้ำหลัง merge **ต้องกลับมาอ่านย่อหน้านี้ก่อนเสมอ**
+> (ทางแก้จริง = แยก snapshot ตาม environment → **Phase 40** · ⛔ ห้ามแก้ในเฟสนี้ · ดู backlog B-3)
+
+##### C0-b. 🔴 `QSTASH_URL` มี **กี่แถว** และแต่ละแถว scope อะไร
+
+- [ ] **จดผล:** `QSTASH_URL` มีกี่แถว · แถวไหนติ๊ก Production / Preview / Development บ้าง
+
+⚠️ **runbook ฉบับก่อนสมมติเอาเองว่ามีแถว Preview แยกอยู่ — สมมติฐานนั้นไม่มีหลักฐานรองรับ**
+incident §8.1 บันทึกว่าตั้งไว้ **"Production + Preview"** ซึ่งบน Vercel เป็นได้ทั้งสองแบบ:
+
+| กรณี | สิ่งที่เห็นบนหน้า | ทำอะไรใน D1 |
+| --- | --- | --- |
+| **กรณี ก — 2 แถวแยก scope** | แถวหนึ่งติ๊ก Production · อีกแถวติ๊ก Preview | แก้ **แถวของ Preview เท่านั้น** — uncheck Preview (ไม่ใช่ Delete) |
+| **กรณี ข — 1 แถวติ๊กสองช่อง** | แถวเดียว ติ๊กทั้ง Production และ Preview | ⛔ **กด Delete = ลบของ Production ไปด้วย = สร้าง incident ขึ้นมาใหม่จริง** ⇒ ต้อง **แก้แถวนั้นให้เหลือ Production เท่านั้น** |
+
+⇒ **นี่คือเหตุผลที่ C0-b เป็น gate คู่กับ C0-a** — ตอบไม่ได้ = เดินไป D1 ไม่ได้
 
 #### C1. apply + verify (ทำตามกรณีที่ตอบใน C0)
 
@@ -120,14 +158,33 @@ where table_schema = 'public'
 > และทำตอนที่ **ระบบเตือนที่สร้างมาทั้งเฟสยังไม่ merge** ⇒ ไม่มีอะไรจับให้เลย
 > ⇒ สามข้อล่างเป็น **ขั้นบังคับ** ไม่ใช่ความระมัดระวังส่วนตัว
 
-- [ ] **D0. แคป env ของ Production ก่อนแตะอะไรทั้งสิ้น**
+- [ ] **D0. แคป env ของ Production ก่อนแตะอะไรทั้งสิ้น** *(ทำพร้อม C0-a/C0-b ในการเปิดหน้ารอบเดียว)*
       Vercel → Project Settings → Environment Variables → กรอง scope = **Production**
       ถ่ายภาพหน้าจอ/คัดรายชื่อตัวแปรทั้งหมดเก็บไว้ **นอก Vercel**
       (ไฟล์นี้คือหลักฐานชิ้นเดียวที่บอกได้ว่า "ก่อนหน้านี้มีอะไรบ้าง" — ไม่มี = พิสูจน์ไม่ได้ว่าไม่ได้ทำพัง)
-- [ ] **D1. ลบ `QSTASH_URL` ออกจาก Vercel env — เฉพาะ Preview scope**
-      ⛔ **ห้ามแตะ Production scope เด็ดขาด** · ก่อนกดลบ อ่าน scope ที่ติดอยู่กับแถวนั้นออกเสียงหนึ่งรอบ
+      - [ ] 🔴 **แคป *ค่าเต็ม* ของ `QSTASH_URL` ด้วย ไม่ใช่แค่รายชื่อตัวแปร** (กด Reveal แล้วคัดค่าออกมา)
+            เหตุผล: รายชื่อบอกได้แค่ว่า "แถวยังอยู่" — ถ้าค่าถูกแก้ผิด รายชื่อยังเหมือนเดิมทุกประการ
+            และเป็น**ทางกลับทางเดียว**ถ้าเกิดพลาดจนแถวหาย
+
+- [ ] **D1. ทำให้ Preview ไม่เห็น `QSTASH_URL` — โดย *แก้ scope* ไม่ใช่ *Delete***
+      🔑 **ตัดสิน 2026-08-09: ห้ามใช้ Delete** — Delete เป็น operation ที่กลับคืนด้วยการ**พิมพ์ค่าเดิมใหม่**
+      (พิมพ์เอง = ช่องพลาดเพิ่มอีกชั้นตอนคืนสภาพ) และในกรณี ข ยัง**ลบของ Production ไปพร้อมกัน**
+      ⇒ **uncheck ช่อง Preview** = reversible ด้วยการติ๊กกลับ ไม่ต้องพิมพ์ค่าใด ๆ
+
+      ทำตามกรณีที่ตอบไว้ใน **C0-b**:
+
+      - [ ] **กรณี ก (2 แถวแยก scope):** เปิดแถวที่ติ๊ก **Preview** → uncheck **Preview** → Save
+            ⛔ ห้ามแตะแถวที่ติ๊ก Production เด็ดขาด
+      - [ ] **กรณี ข (1 แถวติ๊กสองช่อง):** ตามลำดับนี้ ห้ามสลับ
+            1. **ยืนยันค่าเดิม** ที่คัดไว้ใน D0 ว่าตรงกับค่าที่เห็นในแถวนั้น (ถ้าไม่ตรง — หยุด ยังไม่ต้องแก้อะไร)
+            2. แก้แถวเดิมให้ **เหลือติ๊กเฉพาะ Production** (uncheck Preview) → Save
+            3. ⛔ **ห้ามกด Delete แล้วสร้างใหม่** — ระหว่างสองจังหวะนั้น Production ไม่มีค่านี้อยู่จริง
+
+      · ก่อน Save: อ่าน scope ที่ติ๊กอยู่กับแถวนั้นออกเสียงหนึ่งรอบ
 - [ ] **D1b. แคป env ของ Production อีกครั้ง แล้ว *เทียบกับ D0* ว่าเหมือนกันทุกตัว**
       ✅ ผ่านเมื่อ: รายการ Production **ไม่เปลี่ยนเลยแม้แต่ตัวเดียว** — โดยเฉพาะ `QSTASH_URL` ยังอยู่
+      **และค่าของมันตรงกับค่าเต็มที่คัดไว้ใน D0 แบบตัวต่อตัว** (กรณี ข ต้องเทียบค่า ไม่ใช่เทียบแค่ว่าแถวยังอยู่ —
+      แถวเดียวกันถูกแก้ ⇒ รายชื่อเหมือนเดิมเป๊ะแต่ค่าเพี้ยน)
       ⚠️ นี่คือ verify-by-effect: "ผมกดที่แถวของ Preview" เป็นเจตนา **ไม่ใช่หลักฐาน**
       ⛔ ถ้าไม่เหมือน → **หยุดทันที ตั้งค่ากลับจาก D0 ก่อนทำอย่างอื่น** ห้ามเดินต่อไป D2
 - [ ] **D2. redeploy Preview อีกครั้ง (ให้ env ใหม่มีผล)**
@@ -137,14 +194,24 @@ where table_schema = 'public'
 
 - [ ] **E1. GitHub → Actions → Readiness Rehearsal (Preview) → Run workflow**
       ใส่ `preview_url` = URL จาก D2 · `confirm` = `REHEARSE`
-- [ ] **E2. อ่านผล**
-      - `PROVEN` ✅ → ไปขั้น F
-      - `INCONCLUSIVE` → bypass secret ผิด หรือ Preview ยังไม่ขึ้น → กลับไป B/A
-      - `INVALID` → prerequisite ไม่ครบ (มักคือ **C1**) → กลับไปแก้ **ห้ามนับผ่าน**
+- [ ] **E2. อ่านผล — `INCONCLUSIVE` มีสองสาเหตุคนละเรื่อง ต้องแยกด้วย `detail` ที่พิมพ์ออกมา**
+
+| ผล | `detail` ที่พิมพ์ | แปลว่า | กลับไปทำอะไร |
+| --- | --- | --- | --- |
+| `PROVEN` | — | ✅ | ไปขั้น **F** |
+| `INCONCLUSIVE` | **มี `http 401`** | **ถึงโค้ดเราแล้ว** (มี marker) แต่ `READINESS_PROBE_TOKEN` ไม่ตรง — **ไม่ใช่ปัญหา bypass** | **C2 / C3** (token สองฝั่งตรงกันไหม) + **C4** (env ใหม่ต้อง redeploy ก่อนถึงมีผล) |
+| `INCONCLUSIVE` | ไม่มี marker (`body is not JSON` / `marker mismatch` / `empty body`) | Deployment Protection กินไปก่อนถึงแอป / Preview ยังไม่ขึ้น | **B / A** |
+| `INVALID` | — | prerequisite ไม่ครบ (มักคือ **C1** — ตารางยังไม่ถูก apply กับ DB ที่ Preview ใช้) | กลับไปแก้ · ⛔ **ห้ามนับผ่าน** |
+
+> ทำไม 401 ถึงออกมาเป็น `INCONCLUSIVE` ไม่ใช่ `FAIL`: route ตอบ **marker + `error`** โดย**ไม่มี field `status`**
+> ⇒ `classifyProbeResponse()` เข้ากฎ *"marker ok but status is not a known value"* ⇒ `INCONCLUSIVE` ถูกต้องตามนิยาม
+> · สคริปต์พิมพ์ hint แยกสองทางนี้ให้แล้ว (`scripts/readiness-rehearsal.ts` — `evaluate()`)
 
 ### ขั้น F — 🔴 คืนสภาพ (ห้ามข้าม)
 
-- [ ] **F1. ตั้ง `QSTASH_URL` กลับคืน Preview scope**
+- [ ] **F1. คืน `QSTASH_URL` ให้ Preview — โดย *ติ๊ก Preview กลับ* ที่แถวเดิม**
+      ⛔ **ห้ามพิมพ์ค่าใหม่ ห้ามสร้างแถวใหม่** — D1 ออกแบบให้คืนด้วยการติ๊กกลับพอดี
+      (ถ้าต้องพิมพ์ค่าเอง แปลว่าที่ D1 ไปกด Delete มา ⇒ ใช้ค่าเต็มจาก **D0** แล้วบันทึกว่าเบี่ยงจาก runbook)
 - [ ] **F2. redeploy Preview**
 - [ ] **F3. ยืนยันว่าคืนแล้วจริง** — กด workflow ซ้ำอีกครั้ง ต้องได้ผล **ไม่ใช่** `PROVEN`
       (ถ้ายังได้ `PROVEN` แปลว่ายังไม่ได้คืนจริง)

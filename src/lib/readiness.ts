@@ -536,6 +536,51 @@ export async function buildAnonymousReport(): Promise<ReadinessReport> {
 }
 
 /**
+ * ขั้นตอนใน `buildAuthorizedReport()` ที่โยน error ได้ — **แยกไว้เพราะแต่ละขั้นคนละ dependency**
+ *
+ * 🔴 เดิม `catch` ก้อนเดียวครอบทั้งสามขั้นแล้วรายงานเป็น `redis` ทุกกรณี
+ *    ⇒ Prisma โยน (เคสที่น่าจะเจอที่สุดตอนซ้อม: ตารางยังไม่ถูก apply) ออกมาเป็น
+ *    "redis unavailable" ⇒ **เอกสารชี้ไปทางหนึ่ง เนื้อ response ชี้ไปอีกทาง**
+ *    บนเส้นทางที่ทั้งเฟสสร้างมาเพื่อให้ "อ่านออกว่าอะไรพัง" (erratum §H-8)
+ */
+type LiveProbeStage = "lock" | "probe" | "write" | "read";
+
+/**
+ * stage → ตัวการที่ต้องรายงาน · **สถานะยังเป็น `FAIL` ทุกขั้น ไม่ผ่อนขั้นไหนทั้งสิ้น**
+ * ที่เปลี่ยนคือ component key + reason + `liveProbeSkippedReason` ต้องตรงกับสิ่งที่เกิดจริง
+ */
+const STAGE_FAILURE: Record<
+  LiveProbeStage,
+  { component: string; reason: string; skippedReason: string }
+> = {
+  // จอง lock ไม่ได้ = Redis พัง ⇒ ไม่มี min-interval ⇒ **ห้ามยิง live probe**
+  // (เพดานโควตาจะหาย — กฎข้อ 5 ในหัวไฟล์) · นี่คือกรณีเดียวที่ "suppressed" เป็นความจริง
+  lock: {
+    component: "redis",
+    reason: "redis_error",
+    skippedReason: "redis unavailable — live probe suppressed",
+  },
+  // live probe ยิงไปแล้วและโยนกลางทาง — **ไม่ได้ถูก suppress** ต้องไม่พูดว่า suppressed
+  probe: {
+    component: "probe",
+    reason: "live_probe_error",
+    skippedReason: "live probe threw mid-flight — ไม่ได้ถูกกัน (ดู components.probe)",
+  },
+  // วัดสำเร็จแล้วแต่เขียน snapshot ไม่ลง = Postgres ฝั่ง write (เช่น ตารางยังไม่ถูก apply)
+  write: {
+    component: "store",
+    reason: "snapshot_write_error",
+    skippedReason: "live probe ok แต่เขียน snapshot ไม่ได้ (store write)",
+  },
+  // ทาง min-interval: อ่าน snapshot ไม่ได้ = Postgres ฝั่ง read
+  read: {
+    component: "store",
+    reason: "snapshot_read_error",
+    skippedReason: "min-interval — และอ่าน snapshot ที่เก็บไว้ไม่ได้ (store read)",
+  },
+};
+
+/**
  * shape ที่ **auth แล้ว** — รายละเอียดเต็ม + เป็นทางเดียวที่ทำให้เกิด live probe
  *
  * min-interval: จองไม่ได้ ⇒ เสิร์ฟ snapshot แทน (ไม่ยิง outbound)
@@ -547,23 +592,32 @@ export async function buildAuthorizedReport(): Promise<ReadinessReport> {
   let source: "live" | "stored" = "stored";
   let skippedReason: string | null = null;
 
+  // 🔑 stage ปัจจุบัน — ตัวชี้ว่า "ใครโยน" ตอนตกลง catch (ดู STAGE_FAILURE)
+  let stage: LiveProbeStage = "lock";
+
   try {
     const gotSlot = await acquireLiveProbeSlot();
     if (gotSlot) {
+      stage = "probe";
       snapshot = await runLiveProbe();
+      stage = "write";
       await writeSnapshot(snapshot);
       source = "live";
     } else {
       skippedReason = "min-interval";
+      stage = "read";
       const read = await readSnapshot();
       if (read.kind === "error") throw new Error(read.message);
       snapshot = read.kind === "value" ? read.snapshot : null;
     }
   } catch (err) {
-    // Redis พัง ⇒ ไม่มี min-interval ⇒ **ห้ามยิง live probe** (เพดานโควตาจะหาย)
-    // และ Redis พังคือความพังจริง → FAIL
+    // สถานะเป็น FAIL ทุก stage เหมือนเดิม — ที่ต่างคือ **ชี้ตัวการให้ถูก**
+    const failure = STAGE_FAILURE[stage];
     const components: Record<string, ComponentReport> = {
-      redis: { status: "error", detail: (err as Error).message.slice(0, 200) },
+      [failure.component]: {
+        status: "error",
+        detail: `[${stage}] ${(err as Error).message.slice(0, 200)}`,
+      },
     };
     return {
       status: "FAIL",
@@ -575,8 +629,8 @@ export async function buildAuthorizedReport(): Promise<ReadinessReport> {
           source: "unavailable",
           lastCheckAt: null,
           ageSeconds: null,
-          liveProbeSkippedReason: "redis unavailable — live probe suppressed",
-          reasons: ["redis_error"],
+          liveProbeSkippedReason: failure.skippedReason,
+          reasons: [failure.reason],
           components,
           deployment: identity,
           minIntervalSeconds: LIVE_PROBE_MIN_INTERVAL_SECONDS,
