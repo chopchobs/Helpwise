@@ -23,6 +23,27 @@
 export const READINESS_MARKER = "helpwise.readiness.v1";
 
 // =============================================================================
+// CADENCE — single source of truth ของ "ผู้เฝ้าเต้นบ่อยแค่ไหน"
+// =============================================================================
+
+/**
+ * คาบของ cron ที่รัน `scripts/readiness-check.ts` (นาที)
+ *
+ * 🔑 **ค่านี้อยู่ที่นี่เพราะมันเป็น "ข้อเท็จจริงร่วม" ของสองฝั่งที่ import กันตรง ๆ ไม่ได้:**
+ *   · `scripts/readiness-check.ts` ใช้คำนวณ in-band gap check
+ *   · `src/lib/heartbeat.ts` ใช้เป็น **คาบที่คาดของ `readiness-probe`**
+ *     (P2 เต้น heartbeat ของตัวเองทุกครั้งที่ cron มาเรียก ⇒ คาบการเต้น = คาบของ cron)
+ *
+ * ⚠️ **ไฟล์นี้ต้องไม่มี dependency** — `readiness-check.ts` รันบน GitHub Actions ที่ไม่มี
+ *    `DATABASE_URL` ⇒ ค่านี้จึงวางที่นี่ ไม่ใช่ใน `heartbeat.ts` (ซึ่ง import prisma)
+ *
+ * 🔴 **สนามที่สาม:** `cron:` ใน `.github/workflows/readiness.yml` **ผูกด้วย import ไม่ได้ (YAML)**
+ *    ⇒ มี test อ่านไฟล์ workflow มาเทียบกับค่านี้ (`readiness-cadence.test.ts`)
+ *    เหตุผล: ค่าที่ถูกคัดลอกไว้หลายที่โดยไม่มีอะไรผูก คือรูปทรงที่ทำให้เกิด §G ข้อ 13 พอดี
+ */
+export const CRON_INTERVAL_MINUTES = 15;
+
+// =============================================================================
 // VERDICT
 // =============================================================================
 

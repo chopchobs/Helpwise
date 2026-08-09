@@ -8,7 +8,7 @@
 > และ *"ตั้งใจจะทำ"* ที่ถูกเขียนลงช่องหลักฐาน จะอ่านเหมือน *"ทำแล้ว"* ในอีกสามสัปดาห์
 
 **สถานะ:** 🔴 **ยังปิดไม่ได้ — และตอนนี้ยัง *merge ไม่ได้* ด้วย**
-· 🔴 **บล็อกการ merge: §G ข้อ 13** (`readiness-probe` margin = 0 ⇒ flap ทุก ~15 นาที) — ทางแก้ที่เสนอ → §H-11
+· ✅ **§G ข้อ 13 แก้แล้ว 2026-08-09** (ทาง 1 — §H-11) ⇒ **ไม่บล็อกการ merge อีกต่อไป**
 · ✅ §3.5 ตัดสินแล้ว 2026-08-09: การตีความ **(ข)** ถูก ⇒ gate เดิมของ §F ปิดไปแล้ว **แต่ประตูใหม่เปิดขึ้นแทน**
 **อัปเดตล่าสุด:** 2026-08-09 (หลังปิดขั้น F ของลำดับ 7)
 
@@ -25,6 +25,9 @@
 | 5 | **rehearsal — ตัวสคริปต์ + probe** | `npx tsx scripts/readiness-rehearsal.ts` ยิง Preview ของ `c5c17f0` | **`PROVEN`** — `FAIL` + signature `not found in this region (eu-central-1)` | 2026-08-09 |
 | 6 | **ตัวกรอง `deployment_status` ของลำดับ 5** | อ่าน run history ของ *Readiness (P2)* บน GitHub Actions | trigger 4 ครั้งจาก Preview → **`Skipped` ทั้ง 4** ตาม `if` ที่ `readiness.yml:54-57` (`success && Production`) | 2026-08-09 |
 | 7 | **rehearsal — ขั้น F (คืนสภาพ)** | F1 ลบแถว branch-scoped (dialog ยืนยัน *"Environments Using This Variable: **Preview**"*) → F2 redeploy `dpl_4fzNqAeL…` READY → F3 รันสคริปต์ซ้ำ | **`INVALID`** — `FAIL` แต่ **ไม่มี** signature `eu-central-1` ⇒ ✅ ผ่านเกณฑ์ *"ต้องไม่ใช่ `PROVEN`"* | 2026-08-09 |
+
+| 8 | **เก็บกวาดแถวที่การซ้อมเขียนลง prod DB** (§G ข้อ 9) | บันทึก → verify → ลบ · `select mechanism, "lastBeatAt" from "MechanismHeartbeat"` → `delete … where mechanism='readiness-probe'` → select ซ้ำ | ก่อนลบ: **1 แถว** `readiness-probe` `2026-08-09 13:28:54.711` (`sla-sweep` ไม่มีแถว ✅ ถูกต้อง) · หลังลบ: **0 rows** ✅ | 2026-08-09 |
+| 9 | **`readiness-probe` cadence invariant** (§G ข้อ 13 · §H-11) | `DIRECT_URL= npm test` — `readiness-cadence.test.ts` 5 เคส (รวม test ที่อ่าน `cron:` จาก workflow yml) | **ผ่านทั้ง 5** · เกณฑ์ stale 900s → **2700s** ⇒ margin 1.0× → **3×** | 2026-08-09 |
 
 ### หมายเหตุที่ต้องอ่านคู่กับตาราง
 
@@ -81,7 +84,7 @@
 | §G ข้อ 12 | workflow ของลำดับ 7 ยังไม่เคยถูกรัน — พิสูจน์แล้วเฉพาะสคริปต์ (= แถว A ด้านบน) |
 | §G ข้อ 7 | ไม่มีอะไรเฝ้าว่าโหมด Deployment Protection เปลี่ยน (backlog B-4) |
 | §G ข้อ 8 | ไม่มีการเตือนแบบไล่ระดับระหว่างสองชั้น (ผลของ §H-7) |
-| 🔴 §G ข้อ 13 | **`readiness-probe` margin = 0 ⇒ flap ทุก ~15 นาที — บล็อกการ merge** · ทางแก้ที่เสนอ → §H-11 (ยังไม่แก้) |
+| ✅ §G ข้อ 13 | `readiness-probe` margin = 0 ⇒ flap — **แก้แล้ว** (§H-11 ทาง 1) · ⚠️ **ไม่ได้แก้เรื่องรอบแรกหลัง merge ที่ยังเป็น `FAIL`** — นั่นเป็น transition ปกติ |
 
 ---
 
@@ -139,9 +142,18 @@
 | merge → prod deploy สำเร็จ | post-deploy poll ทำงาน · `sla-sweep` ยังไม่เต้น (**missing**) · `readiness-probe` มีแถวจาก F3 ที่เก่าหลายวัน (**stale**) ⇒ **`FAIL`** | ✅ **1 ข้อความ** |
 | ≤ 5 นาทีถัดมา | QStash ยิง `sla-sweep` บนโค้ดใหม่ ⇒ เต้น ⇒ **หายไปเอง** ✅ | — |
 | รอบ cron ถัดไป (≤ 15 นาที) | live probe ⇒ `sla-sweep` ครบ ⇒ **`OK`** ⇒ transition `FAIL → OK` | ✅ **1 ข้อความ** (recovery — ตั้งใจให้แจ้ง) |
-| **ทุก ~15 นาทีหลังจากนั้น** | 🔴 **`readiness-probe` margin = 0** ⇒ cron มาสาย = `stale` = `FAIL` · มาตรงเวลา = `OK` ⇒ **flap** | 🔴 **ยิงทุกครั้งที่พลิก — ไม่จบ** |
+| **ทุก ~15 นาทีหลังจากนั้น** | ✅ **แก้แล้ว (§H-11)** — เกณฑ์ stale ขยับเป็น 2700s ⇒ ทน cron สายได้ 3 รอบ ⇒ **ไม่ flap** | — |
 
-⇒ **`sla-sweep` = 2 ข้อความแล้วเงียบ (ยอมรับได้)** · 🔴 **`readiness-probe` = เสียงไม่รู้จบ (ยอมรับไม่ได้)**
+⇒ **รวม 2 ข้อความ ภายใน ~20 นาที แล้วเงียบ**
+
+> 🔴 **แต่ต้องพูดให้ตรง: `readiness-probe` ก็ทำให้รอบแรก `FAIL` ด้วย ไม่ใช่แค่ `sla-sweep`**
+> เก็บกวาดแถวไปแล้ว (แถว 8) ⇒ หลัง merge จะเป็น **`missing`** จนกว่า live probe รอบแรกจะเต้น
+> ⇒ **การแก้ §G ข้อ 13 ไม่ได้ทำให้รอบแรกเขียว** — มันแก้เรื่อง **flap ที่ไม่รู้จบ** เท่านั้น
+> ⛔ **อย่าอ่านเอกสารนี้ว่า "แก้ค่าคงที่แล้วรอบแรกจะ OK"**
+>
+> ✅ **และนั่นถูกต้องตามดีไซน์** — `missing` = *"ยังไม่เคยทำงานเลย"* คือ **ความจริง** ณ วินาทีนั้น
+> §F สั่งไว้เองว่า *"ไม่พบ heartbeat = FAIL เสมอ ห้าม fallback เป็น PASS"*
+> ⇒ ถ้ารอบแรกขึ้น `OK` ต่างหากที่แปลว่าระบบโกหก
 
 > 🔑 **ส่วนของ `sla-sweep` ไม่ใช่ alert fatigue ตามนิยามของ §F** — เป็น transition สองครั้งที่จบในตัวเอง
 > ตามที่ `shouldAlert()` ออกแบบไว้ (transition-only + recovery ต้องแจ้ง)

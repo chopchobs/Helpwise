@@ -467,6 +467,17 @@ probe: http 503: FAIL
 [rehearsal] ผล: INVALID
 ```
 
+**F4 — เก็บกวาดแถวที่การซ้อมเขียนลง prod DB** *(บันทึก → verify → ลบ ตาม `CLAUDE.md`)*
+
+| ขั้น | คำสั่ง | ผล |
+| --- | --- | --- |
+| **F4a** บันทึกก่อนลบ | `select mechanism, "lastBeatAt" from "MechanismHeartbeat";` | **1 แถว** · `readiness-probe` · `2026-08-09 13:28:54.711` (= รอบ F3) · **`sla-sweep` ไม่มีแถว** ✅ ถูกต้อง (`recordHeartbeat("sla-sweep")` ยังไม่อยู่บน `main`) |
+| **F4b** ลบ | `delete from "MechanismHeartbeat" where mechanism = 'readiness-probe';` | — |
+| **F4c** verify | query เดิมซ้ำ | **0 rows** ✅ |
+
+> 🔑 **แถวเดียวนั้นคือหลักฐานว่าปัญหามีจริง** — prod **ไม่เคยรัน probe เลยสักครั้ง** แต่มีแถวบอกว่าเคยเต้น
+> เมื่อ `2026-08-09 13:28` ⇒ ถ้าปล่อยไว้ หลัง merge จะถูกอ่านว่า *"เคยทำงานแล้วหยุดไป"* ซึ่งเป็นเท็จ
+
 ✅ **ผ่านตามเกณฑ์ของ F3** — เกณฑ์คือ **"ต้องไม่ใช่ `PROVEN`"** ไม่ใช่ "ต้องเป็น `OK`"
 ⇒ signature `eu-central-1` **หายไปแล้ว** = `QSTASH_URL` ของ Preview กลับไปชี้ us-east-1 ตามแถวเดิม
 
@@ -506,6 +517,35 @@ probe: http 503: FAIL
       - [ ] 🔴 **เปิด body เช็คว่า `"source":"live"`** — ถ้าเป็น `"stored"` ⇒ **ผลนี้ใช้ไม่ได้ ให้รอแล้วกดใหม่**
             (`stored` = กำลังอ่าน snapshot ของ E1 ซึ่งยังมี signature ติดอยู่ ⇒ จะอ่านว่า "ยังไม่คืน" ทั้งที่คืนแล้ว)
       - [ ] ⚠️ **redeploy ที่ F2 ไม่ล้าง lock** — lock อยู่บน Redis ที่ทุก deployment ใช้ร่วมกัน
+
+- [ ] **F4. 🔴 เก็บกวาดแถวที่การซ้อมเขียนลง prod DB — ขั้นบังคับ ทำ *หลัง* F3**
+
+      > 🔑 **ทำไมต้องมีขั้นนี้ และทำไมต้องอยู่หลัง F3:**
+      > `DATABASE_URL` เป็นแถวเดียว "Production and Preview" (C0-a กรณี 1) ⇒ **live probe จาก Preview
+      > เขียนลง prod DB จริง** · F3 เองก็เป็น live probe ⇒ ถ้าเก็บกวาดก่อน F3 ก็จะมีแถวใหม่โผล่มาอีก
+      >
+      > 🔴 **`MechanismHeartbeat` อันตรายกว่า `ReadinessState`:** แถวที่ Preview เขียนทำให้ prod
+      > (ที่**ไม่เคยรัน probe เลย**) มีหลักฐานว่า *"เคยเต้น"* ⇒ หลัง merge อ่านเป็น **`stale`**
+      > (*"เคยทำงานแล้วหยุด"* — **เท็จ**) แทน **`missing`** (*"ยังไม่เคยทำงาน"* — **จริง**)
+      > ⇒ ต่างกันที่ **`reason` ที่คนใช้ debug** — ส่งคนไปหาสาเหตุที่ไม่มีอยู่
+
+      **ลำดับบังคับตาม `CLAUDE.md`: บันทึกหลักฐาน → verify ว่าบันทึกครบ → แล้วจึงลบ**
+
+      - [ ] **F4a. บันทึกก่อนลบ**
+            ```sql
+            select mechanism, "lastBeatAt" from "MechanismHeartbeat";
+            ```
+            คัดผลเก็บไว้ **นอก DB** (ลบแล้วกู้ไม่ได้)
+      - [ ] **F4b. ลบเฉพาะแถวของ probe** — ⛔ อย่าลบทั้งตาราง (แถวของ mechanism อื่นคือของจริงของ prod)
+            ```sql
+            delete from "MechanismHeartbeat" where mechanism = 'readiness-probe';
+            ```
+      - [ ] **F4c. verify** — รัน query ของ F4a ซ้ำ ⇒ ✅ ผ่านเมื่อ **ไม่มีแถว `readiness-probe`**
+      - [ ] **F4d. `ReadinessState`** — ⚠️ **ไม่ต้องลบ** · F3 เขียนทับด้วยผลหลังคืนสภาพไปแล้ว
+            และหลัง merge cron รอบแรกจะเขียนทับอีกครั้ง (§F) ⇒ ลบทิ้งไม่ได้ประโยชน์เพิ่ม
+      - [ ] **Redis lock (`readiness:live-lock:v1`)** — ⚠️ **ไม่ต้องทำอะไร** หมดอายุเองใน 300s
+      - [ ] **inbound counter** — ⚠️ **ไม่เกี่ยว** live probe อ่านอย่างเดียว ไม่เขียน
+
 
 ---
 

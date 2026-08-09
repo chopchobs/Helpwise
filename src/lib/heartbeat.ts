@@ -17,6 +17,9 @@
  */
 
 import { prisma } from "@/lib/prisma";
+// คาบของ cron — อยู่ใน readiness-verdict เพราะ `readiness-check.ts` (GitHub Actions,
+// ไม่มี DATABASE_URL) ต้อง import ค่าเดียวกันโดยไม่ลาก prisma เข้าไป
+import { CRON_INTERVAL_MINUTES } from "@/lib/readiness-verdict";
 
 // =============================================================================
 // MECHANISMS
@@ -34,8 +37,19 @@ export const MECHANISMS = {
   "sla-sweep": 300,
   "send-email": null,
   "webhook-deliver": null,
-  /** P2 เต้นเองทุก live probe — คาบ = min-interval ของ live probe */
-  "readiness-probe": 300,
+  /**
+   * P2 เต้นเองทุก live probe — **คาบ = คาบของ cron ที่มาเรียก** ไม่ใช่ min-interval
+   *
+   * 🔴 **เคยเขียนไว้ผิดว่า "คาบ = min-interval ของ live probe" (= 300)** — §G ข้อ 13
+   *    `LIVE_PROBE_MIN_INTERVAL_SECONDS` คือ **เพดานความถี่** ("ห้ามเต้นถี่กว่า 5 นาที")
+   *    **ไม่ใช่คาบการเต้น** — ตัวที่กำหนดว่าเต้นบ่อยแค่ไหนคือ cron (15 นาที) ต่างหาก
+   *    ⇒ ผลของค่าเดิม: เกณฑ์ stale (300×3 = 900s) **เท่ากับคาบจริง (900s) พอดี ⇒ margin = 0**
+   *    ⇒ cron มาสายนิดเดียว = `stale` ⇒ `FAIL` · มาตรงเวลา = `OK` ⇒ **flap ไม่รู้จบ**
+   *
+   * ✅ ตอนนี้ดึงจาก **แหล่งเดียวกับที่ `readiness-check.ts` ใช้** ⇒ สองค่าเพี้ยนจากกันไม่ได้อีก
+   *    (`cron:` ใน workflow เป็นสนามที่สาม — ผูกด้วย import ไม่ได้ จึงมี test อ่าน yml มาเทียบ)
+   */
+  "readiness-probe": CRON_INTERVAL_MINUTES * 60,
 } as const;
 
 export type MechanismName = keyof typeof MECHANISMS;

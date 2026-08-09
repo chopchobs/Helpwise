@@ -29,6 +29,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   classifyProbeResponse,
+  CRON_INTERVAL_MINUTES,
   detectGap,
   identityMatches,
   isProductionProbeHost,
@@ -46,8 +47,8 @@ import {
 const PROBE_PATH = "/api/health/readiness";
 const AUTH_HEADER = "x-readiness-token";
 
-/** คาบของ cron — ต้องตรงกับ schedule ใน workflow (ใช้คำนวณ gap) */
-const CRON_INTERVAL_MINUTES = 15;
+// ⚠️ `CRON_INTERVAL_MINUTES` ย้ายไป `@/lib/readiness-verdict` แล้ว (single source)
+//    — `src/lib/heartbeat.ts` ใช้ค่าเดียวกันเป็นคาบที่คาดของ `readiness-probe` (§G ข้อ 13)
 
 /** post-deploy: รอ alias สลับมาที่ deployment ใหม่ได้นานสุดเท่านี้ */
 const IDENTITY_POLL_TIMEOUT_MS = 5 * 60_000;
