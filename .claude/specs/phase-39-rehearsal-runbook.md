@@ -29,9 +29,37 @@ Phase 38: QStash region เปลี่ยน ⇒ กลไกพื้นหล
 
 | ผล | ความหมาย | นับเป็นซ้อมผ่านไหม |
 | --- | --- | --- |
-| `PROVEN` | `status = FAIL` **และ** เนื้อ response มี `not found in this region (eu-central-1)` | ✅ ใช่ |
+| `PROVEN` | **`source = live`** · `status = FAIL` **และ** เนื้อ response มี `not found in this region (eu-central-1)` | ✅ ใช่ |
 | `INCONCLUSIVE` | อ่าน marker ไม่ได้เลย — ยังไปไม่ถึงโค้ดเรา (bypass token ผิด / Preview ยังไม่ขึ้น) | ❌ **ห้ามนับผ่าน และห้ามนับไม่ผ่าน** |
 | `INVALID` | ได้ `FAIL` **แต่ไม่มี error signature ที่คาด** | ❌ **ซ้อมนี้ไม่ได้พิสูจน์อะไร** |
+
+### 🔴 กฎที่ 0 — **ผลนับได้เมื่อ `"source":"live"` เท่านั้น** *(เพิ่ม 2026-08-09 · ใช้กับทั้ง E1 และ F3)*
+
+> **`"source":"stored"` ⇒ `INCONCLUSIVE` เสมอ — ไม่ว่าจะได้ verdict อะไรมาก็ตาม**
+
+**ทำไม:** `buildAuthorizedReport()` มี **min-interval 300 วินาที** — จอง lock ไม่ได้ ⇒ **ไม่ยิง live probe**
+⇒ เสิร์ฟ **snapshot เก่าพร้อม `components` ชุดเดิม** (รวม `qstash.detail` ที่มี error signature ติดอยู่)
+
+⇒ **snapshot ที่เก็บไว้พิสูจน์อะไรเกี่ยวกับ deployment ปัจจุบันไม่ได้เลย**
+= **ตระกูลเดียวกับกฎ marker ของ §B(ค)** — *มี response ครบถ้วน แต่ไม่ได้คุยกับสิ่งที่คิดว่ากำลังคุยด้วย*
+(marker กัน "ไม่ได้คุยกับโค้ดเรา" · กฎนี้กัน "ไม่ได้คุยกับ**สภาพปัจจุบัน**ของโค้ดเรา")
+
+**ผลที่เกิดจริงถ้าไม่มีกฎนี้ — ที่ F3:**
+กด F3 ภายใน 5 นาทีหลัง E1 ⇒ ได้ snapshot ของ E1 ที่ยังมี `eu-central-1` ⇒ ตัดสินเป็น `PROVEN`
+⇒ **runbook อ่านว่า "ยังไม่ได้คืนจริง" ทั้งที่คืนไปแล้ว**
+· ทิศทางของความผิดพลาดคือ **false alarm ไม่ใช่ false pass** (ไล่ครบแล้ว: snapshot ที่ *ไม่มี* signature
+  มาจาก live probe หลังคืนสภาพเท่านั้น เพราะ prod ยังไม่มี route และ cron ยังไม่รัน)
+· แต่ยังต้องปิด เพราะ **§G ข้อ 10 ยก F3 ขึ้นเป็นหลักฐาน *หลัก* ของการคืนสภาพไปแล้ว**
+  (Sensitive ปิดทางเทียบค่า) ⇒ หลักฐานหลักที่อ่านผิดได้ = รับไม่ได้
+
+**ปฏิบัติ:**
+- [ ] หลัง E1 **เว้น > 5 นาทีก่อนกด F3** — หรือเปิด body ดูให้แน่ว่า `"source":"live"`
+- [ ] ⚠️ **redeploy (F2) ไม่ช่วย** — lock อยู่บน **Redis** (`readiness:live-lock:v1`) ซึ่ง deployment ทุกตัวใช้ร่วมกัน
+      ⇒ "เพิ่ง redeploy แล้วน่าจะวัดสด" **เป็นความเข้าใจผิด** · ตัวที่กำหนดคือนาฬิกาของ lock ไม่ใช่อายุของ deployment
+
+⚠️ สคริปต์ **ยังไม่บังคับกฎนี้เอง** — ตอนนี้เป็นกฎที่คนอ่านต้องบังคับ (เหตุผล → erratum §H-10 · backlog **B-7**)
+
+---
 
 > 🔴 **เหตุผลที่ `status === "FAIL"` เฉย ๆ ใช้เป็นเกณฑ์ไม่ได้:**
 > ตอนนี้มีอีกหลายทางที่ทำให้ `FAIL` ได้ — **ตารางยังไม่ถูก apply บน DB ที่ Preview ใช้**,
@@ -361,6 +389,21 @@ union all select 'TicketMessage',count(*) from "TicketMessage" where id like 'xt
 >   จับ error เองแล้วรายงานเป็น `components.qstash.status = "error"` บนเส้นทางปกติ
 > · ตัวเดียวที่โยนขึ้นมาถึง `[probe]` ได้จริงคือ **การอ่านตาราง heartbeat** (ตั้งใจไม่จับ — ต้องขึ้นถึงสถานะ)
 
+> 🟡 **`heartbeat_missing (sla-sweep)` จะติดอยู่ใน `reasons` ทุกครั้งบน Preview — และนั่นถูกต้อง ไม่ใช่อาการพัง**
+>
+> `SCHEDULED_MECHANISMS` = `["sla-sweep", "readiness-probe"]` แต่ **`recordHeartbeat("sla-sweep")`
+> ยังไม่อยู่บน `main`** (verify: `git show main:src/app/api/jobs/sla-sweep/route.ts | grep -c recordHeartbeat` → **0**)
+> ⇒ QStash schedule ยิงไปที่ production ซึ่งรันโค้ดของ `main` ⇒ **ไม่มีใครเต้นให้ `sla-sweep` เลย**
+> ⇒ `absent = ["sla-sweep"]` ⇒ `status = "missing"` ⇒ `FAIL` **ถาวรจนกว่าจะ merge**
+> — **เป็นพฤติกรรมที่ §F บังคับไว้เอง** ("ไม่พบ heartbeat = FAIL เสมอ ห้าม fallback เป็น PASS")
+>
+> ⇒ 🔑 **อย่าใช้ `reasons` เป็นตัวตัดสินผลซ้อม** — `heartbeat_missing` จะอยู่ตรงนั้นเสมอ
+> ⇒ **ตัวชี้ขาดคือ `components.qstash.detail` อย่างเดียว** (error signature อยู่ที่นั่น คนละที่กับ heartbeat)
+> ⇒ ไม่กระทบ `PROVEN` เลย · และ **เห็น `heartbeat_missing` ไม่ได้แปลว่า C1 ล้ม** (C1 ล้มจะโผล่เป็น
+>   `[probe]` พร้อมข้อความของ Prisma ตามตาราง stage ด้านบน)
+>
+> ✅ **อาการนี้จะหายเองหลัง merge + sweep รอบแรก** — ไม่ต้องแก้อะไรตอนนี้
+
 > ทำไม 401 ถึงออกมาเป็น `INCONCLUSIVE` ไม่ใช่ `FAIL`: route ตอบ **marker + `error`** โดย**ไม่มี field `status`**
 > ⇒ `classifyProbeResponse()` เข้ากฎ *"marker ok but status is not a known value"* ⇒ `INCONCLUSIVE` ถูกต้องตามนิยาม
 > · สคริปต์พิมพ์ hint แยกสองทางนี้ให้แล้ว (`scripts/readiness-rehearsal.ts` — `evaluate()`)
@@ -378,6 +421,12 @@ union all select 'TicketMessage',count(*) from "TicketMessage" where id like 'xt
 - [ ] **F3. ยืนยันว่าคืนแล้วจริง** — กด workflow ซ้ำอีกครั้ง ต้องได้ผล **ไม่ใช่** `PROVEN`
       (ถ้ายังได้ `PROVEN` แปลว่ายังไม่ได้คืนจริง)
       ⚠️ ข้อนี้คือ verify-by-effect — "ตั้งกลับแล้ว" เป็นเจตนา ไม่ใช่หลักฐาน
+      ⚠️ **และตอนนี้มันคือหลักฐาน *หลัก* ของการคืนสภาพ** — เพราะ Sensitive ทำให้ D1b เทียบค่าไม่ได้ (§G ข้อ 10)
+
+      - [ ] 🔴 **ก่อนกด: เว้นจาก E1 ให้เกิน 5 นาที** (min-interval) — **ดูกฎที่ 0 ในข้อ 1**
+      - [ ] 🔴 **เปิด body เช็คว่า `"source":"live"`** — ถ้าเป็น `"stored"` ⇒ **ผลนี้ใช้ไม่ได้ ให้รอแล้วกดใหม่**
+            (`stored` = กำลังอ่าน snapshot ของ E1 ซึ่งยังมี signature ติดอยู่ ⇒ จะอ่านว่า "ยังไม่คืน" ทั้งที่คืนแล้ว)
+      - [ ] ⚠️ **redeploy ที่ F2 ไม่ล้าง lock** — lock อยู่บน Redis ที่ทุก deployment ใช้ร่วมกัน
 
 ---
 
