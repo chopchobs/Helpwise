@@ -50,10 +50,20 @@ Phase 38: QStash region เปลี่ยน ⇒ กลไกพื้นหล
 - [x] **A1. push branch `feature/phase-39-server-env-readiness` ขึ้น remote** — ✅ **2026-08-09**
       ยืนยัน (รันจริง ไม่ใช่การอ้างจากเอกสาร):
       `git rev-parse feature/phase-39-server-env-readiness` = `git rev-parse origin/feature/…` = **`277be73`**
-- [x] **A2. Vercel สร้าง Preview deployment ของ branch นี้แล้ว สถานะ Ready** — ✅ **2026-08-09**
-      หลักฐาน: deployment **`dpl_584Ys5Vdy6gF6f4dkCERRJBPsEvv`** · state **READY**
-      · `githubCommitRef` = branch นี้ · sha `277be73` · `githubPrId` 17
-      ⚠️ **URL ของ deployment นี้ใช้ซ้ำไม่ได้หลัง C4/D2** — ทุก redeploy ได้ URL ใหม่ ต้องจดใหม่ทุกครั้ง
+- [x] **A2. Vercel สร้าง Preview deployment ของ branch นี้แล้ว สถานะ Ready** — ✅ **พิสูจน์แล้วว่ากลไกทำงาน 2026-08-09**
+
+      > 🔑 **A2 คือ "deployment *ล่าสุด* ของ branch นี้" — ไม่ใช่ deployment id ตายตัว**
+      > สิ่งที่ A2 พิสูจน์คือ **Vercel สร้าง Preview ให้ branch นี้อัตโนมัติจริง** (ไม่ใช่ว่า id นี้จะใช้ตลอดไป)
+
+      หลักฐาน ณ วันที่พิสูจน์: `dpl_584Ys5Vdy6gF6f4dkCERRJBPsEvv` · READY · sha **`277be73`** · PR #17
+
+      ⚠️ **id นี้จะล้าสมัยทันทีที่ push (A3) และทุกครั้งที่ redeploy (C4 / D2)**
+      ⇒ **ทุกครั้งที่จะซ้อม ให้เปิด Vercel → Deployments → หยิบตัวล่าสุดของ branch นี้ใหม่เสมอ**
+      แล้วเช็คสองอย่างก่อนใช้:
+      - [ ] state = **Ready**
+      - [ ] **sha ตรงกับ `git rev-parse HEAD`** — ⛔ ถ้ายังเป็น `277be73` แปลว่า A3 ยังไม่เสร็จ **ห้ามซ้อม**
+
+      ⚠️ **URL เปลี่ยนทุก deployment** — จดใหม่ทุกครั้ง ห้ามใช้ URL ที่จดไว้รอบก่อน
 - [ ] **A3. 🔴 push commit ล่าสุด (`6e70c55` ขึ้นไป) — ขั้นบังคับ ต้องเสร็จ *ก่อน* C4**
       `dpl_584Ys5…` ของ A2 เป็นโค้ดของ `277be73` ซึ่ง **ยังไม่มีการแก้ §H-8**
       ⇒ ซ้อมด้วยมันแล้วได้ `INVALID` จะรายงาน `"redis unavailable"` เหมือนเดิม = **ผลผิดตรงจุดที่เพิ่งแก้**
