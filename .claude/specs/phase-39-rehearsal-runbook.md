@@ -4,6 +4,15 @@
 > รัน: GitHub → Actions → **Readiness Rehearsal (Preview)** → Run workflow
 > (พิมพ์ `REHEARSE` + URL ของ Preview deployment)
 
+> 🔴 **อ่านก่อนเริ่ม — `6e70c55` ยังไม่ push (สถานะ ณ 2026-08-09)**
+>
+> Preview `dpl_584Ys5…` ที่มีอยู่ตอนนี้ build จาก **`277be73`** = **โค้ดก่อนแก้ §H-8**
+> ⇒ ถ้าซ้อมด้วย Preview ตัวนี้แล้วได้ `INVALID` มันจะยังรายงานว่า **"redis unavailable"**
+> **ตรงจุดที่เพิ่งแก้ให้ชี้ถูกพอดี** ⇒ ตาราง `[stage]` ในขั้น E2 จะใช้ไม่ได้ และจะส่งคนไปแก้ Redis ที่ไม่ได้พัง
+>
+> ⇒ **push ให้เสร็จก่อนถึง C4** (C4 redeploy อยู่แล้ว — ไม่มีขั้นตอนเพิ่ม แค่ต้องมาก่อน)
+> ⛔ อย่าเพิ่งซ้อมด้วย deployment ที่ยังเป็น `277be73`
+
 ---
 
 ## 0. ทำไมต้องซ้อม
@@ -45,6 +54,11 @@ Phase 38: QStash region เปลี่ยน ⇒ กลไกพื้นหล
       หลักฐาน: deployment **`dpl_584Ys5Vdy6gF6f4dkCERRJBPsEvv`** · state **READY**
       · `githubCommitRef` = branch นี้ · sha `277be73` · `githubPrId` 17
       ⚠️ **URL ของ deployment นี้ใช้ซ้ำไม่ได้หลัง C4/D2** — ทุก redeploy ได้ URL ใหม่ ต้องจดใหม่ทุกครั้ง
+- [ ] **A3. 🔴 push commit ล่าสุด (`6e70c55` ขึ้นไป) — ขั้นบังคับ ต้องเสร็จ *ก่อน* C4**
+      `dpl_584Ys5…` ของ A2 เป็นโค้ดของ `277be73` ซึ่ง **ยังไม่มีการแก้ §H-8**
+      ⇒ ซ้อมด้วยมันแล้วได้ `INVALID` จะรายงาน `"redis unavailable"` เหมือนเดิม = **ผลผิดตรงจุดที่เพิ่งแก้**
+      ยืนยัน: `git rev-parse HEAD` = `git rev-parse origin/feature/phase-39-server-env-readiness`
+      · **แล้ว Preview ที่ใช้ซ้อมต้องเป็น deployment ที่ build จาก sha นั้น** (ไม่ใช่ `277be73`)
 
 ### ขั้น B — ทำให้ยิงเข้า Preview ได้ (Deployment Protection)
 
@@ -141,6 +155,48 @@ where table_schema = 'public'
 - [ ] คัดผลลัพธ์ของ C1b + C1c (ต่อ DB) ใส่เป็น**ตารางหลักฐาน**ในเอกสารปิดเฟส
       ตาม `CLAUDE.md` § Post-merge gate ("ตารางหลักฐาน external resource — ไม่ใช่ checkbox ของเจตนา")
 
+**C1e — 🔴 เศษของ integration test บน prod: ต้อง *วัด* ไม่ใช่เชื่อว่า `afterAll` รันแล้ว**
+
+`src/lib/__tests__/isolation/composite-fk.integration.test.ts` **อยู่ใน `include` ของ `vitest.config.ts` ตามปกติ**
+⇒ **ทุกครั้งที่รัน gate `npm test` มันเขียนแถวจริงลง production database** (backlog **B-1**)
+
+> ⚠️ **เหตุผลที่ต้องวัดจริง ไม่ใช่ติ๊กว่า "cleanup มีอยู่แล้ว":**
+> cleanup ใน `afterAll` **ทุกบรรทัดลงท้ายด้วย `.catch(() => {})`** ⇒ **ล้มได้เงียบสนิท**
+> ทั้งไฟล์จะยังรายงานว่า test ผ่าน โดยที่แถวยังอยู่ครบ — นี่คือ fail-silent รูปทรงเดียวกับที่ทั้งเฟสนี้แก้อยู่
+> ⇒ **"ผ่าน 7/7" ไม่ใช่หลักฐานว่าเก็บกวาดสำเร็จ** · หลักฐานเดียวคือ query นับของจริง
+
+**ผลที่วัดแล้ว — Supabase SQL editor (Primary Database) · 2026-08-09 · โดย Dev**
+
+| ตาราง | เงื่อนไข | จำนวนแถวที่พบ | ผ่าน? |
+| --- | --- | --- | --- |
+| `Tenant` | `id like 'xtfk\_%'` | **0** | ✅ |
+| `User` | `id like 'xtfk\_%'` | **0** | ✅ |
+| `Contact` | `id like 'xtfk\_%'` | **0** | ✅ |
+| `TenantMember` | `id like 'xtfk\_%'` | **0** | ✅ |
+| `Ticket` | `id like 'xtfk\_%'` | **0** | ✅ |
+| `TicketMessage` | `id like 'xtfk\_%'` | **0** | ✅ |
+
+⇒ ✅ **ไม่มีเศษตกค้างบน prod ณ 2026-08-09** — ครบทั้ง 6 ตารางที่ `afterAll` แตะ
+
+> 🔑 **ทำไมต้องครบ 6 ตาราง ไม่ใช่เช็คแค่ `Tenant`:**
+> **`User` เป็น global model — ไม่มี `tenantId`** (ตาม `CLAUDE.md`: global models = `User`, `Plan`, `FeatureFlag`)
+> ⇒ ลบ `Tenant` **ไม่ cascade ไปถึง `User`** และการเช็คจากฝั่ง tenant **มองไม่เห็นมันเลย**
+> ⇒ เช็คแค่ `Tenant` = ได้ 0 แถวแล้วสบายใจ ทั้งที่ `User` อาจค้างอยู่ · `afterAll` จึงลบ `User` ด้วย `id` แยกต่างหาก
+> (บรรทัด 150 ของไฟล์เทสต์) — **ตัวเช็คต้องเดินตามตรรกะเดียวกับตัวลบ ไม่ใช่ตามสัญชาตญาณเรื่อง tenant**
+
+**query สำหรับรันซ้ำ — ทำทุกครั้งก่อนเก็บหลักฐานปิด gate** (เศษเกิดใหม่ได้ทุกครั้งที่มีคนรัน `npm test`)
+
+```sql
+select 'Tenant'        as t, count(*) from "Tenant"        where id like 'xtfk\_%'
+union all select 'User',         count(*) from "User"          where id like 'xtfk\_%'
+union all select 'Contact',      count(*) from "Contact"       where id like 'xtfk\_%'
+union all select 'TenantMember', count(*) from "TenantMember"  where id like 'xtfk\_%'
+union all select 'Ticket',       count(*) from "Ticket"        where id like 'xtfk\_%'
+union all select 'TicketMessage',count(*) from "TicketMessage" where id like 'xtfk\_%';
+```
+
+- [ ] ✅ ผ่านเมื่อ: **ทุกแถวเป็น 0** · ถ้าไม่ใช่ → มีเศษค้าง ต้องเก็บกวาดก่อน แล้วบันทึกว่าเจอเท่าไร
+
 #### C2–C4 — env ของ probe
 
 - [ ] **C2. ตั้ง `READINESS_PROBE_TOKEN` บน Vercel — scope ที่ Preview เห็น**
@@ -149,7 +205,8 @@ where table_schema = 'public'
       ยืนยัน: เห็นชื่อในรายการ secret
 - [ ] **C4. redeploy Preview หลังตั้ง env**
       ⚠️ env ที่เพิ่งตั้งไม่มีผลกับ deployment เดิม — ต้อง redeploy เสมอ
-      ยืนยัน: deployment ใหม่สถานะ Ready · **จด URL ใหม่** (URL เปลี่ยนทุก deployment)
+      🔴 **ก่อนกด: เช็คว่า A3 (push) เสร็จแล้ว** — ไม่งั้น redeploy ออกมาเป็นโค้ดเก่าที่ยังไม่มีการแก้ §H-8
+      ยืนยัน: deployment ใหม่สถานะ Ready · **sha ตรงกับ `git rev-parse HEAD`** · **จด URL ใหม่** (URL เปลี่ยนทุก deployment)
 
 ### ขั้น D — จัดฉาก incident
 
@@ -201,7 +258,30 @@ where table_schema = 'public'
 | `PROVEN` | — | ✅ | ไปขั้น **F** |
 | `INCONCLUSIVE` | **มี `http 401`** | **ถึงโค้ดเราแล้ว** (มี marker) แต่ `READINESS_PROBE_TOKEN` ไม่ตรง — **ไม่ใช่ปัญหา bypass** | **C2 / C3** (token สองฝั่งตรงกันไหม) + **C4** (env ใหม่ต้อง redeploy ก่อนถึงมีผล) |
 | `INCONCLUSIVE` | ไม่มี marker (`body is not JSON` / `marker mismatch` / `empty body`) | Deployment Protection กินไปก่อนถึงแอป / Preview ยังไม่ขึ้น | **B / A** |
-| `INVALID` | — | prerequisite ไม่ครบ (มักคือ **C1** — ตารางยังไม่ถูก apply กับ DB ที่ Preview ใช้) | กลับไปแก้ · ⛔ **ห้ามนับผ่าน** |
+| `INVALID` | — | prerequisite ไม่ครบ | **อ่าน `components` ในเนื้อ response — ตอนนี้มันชี้ตัวการได้เองแล้ว** ดูตารางถัดไป · ⛔ **ห้ามนับผ่าน** |
+
+**`INVALID` → เปิด body ดู `components` แล้วอ่าน prefix `[stage]` ใน `detail`** *(ผลของการแก้ §H-8)*
+
+ก่อนหน้านี้ทุกความพังออกมาเป็น `redis` เหมือนกันหมด ⇒ ทำได้แค่เดาว่า "มักคือ C1"
+ตอนนี้ body บอกเองว่าพังที่ขั้นไหน:
+
+| component key | prefix ใน `detail` | พังตรงไหน | ไปแก้ที่ |
+| --- | --- | --- | --- |
+| `redis` | `[lock]` | จอง slot ของ min-interval ไม่ได้ = **Redis** เอง | `REDIS_URL` ของ scope ที่ Preview เห็น |
+| `probe` | `[probe]` | live probe **โยนกลางทาง** | 🔴 **ส่วนใหญ่คือ C1** — ดู "กับดัก" ด้านล่าง |
+| `store` | `[write]` | วัดสำเร็จแล้ว แต่ **เขียน snapshot ไม่ลง** | ตาราง `ReadinessState` (C1) |
+| `store` | `[read]` | ชน min-interval แล้ว **อ่าน snapshot ที่เก็บไว้ไม่ได้** | ตาราง `ReadinessState` (C1) · หรือรอ 5 นาทีให้ lock หมดอายุแล้วซ้อมใหม่ |
+
+> 🔴 **กับดักชื่อ — อ่านก่อนสรุป:**
+> **"ตารางยังไม่ถูก apply" (เคส C1 ที่พบบ่อยที่สุด) จะออกมาที่ stage `probe` ไม่ใช่ `write`**
+> เพราะ `readMechanismHeartbeats()` อยู่ใน `Promise.all` ของ `runLiveProbe()` ⇒ **Prisma โยนตั้งแต่ตรงนั้น
+> ก่อนที่การทำงานจะเดินไปถึง `writeSnapshot()` เลย**
+>
+> ⇒ **เห็น component key ชื่อ `probe` อย่าเพิ่งนึกว่าเป็น QStash** — ให้อ่าน `detail` เสมอ
+> (เจอ `relation "MechanismHeartbeat" does not exist` = C1 ชัด ๆ ไม่ใช่ปัญหา QStash แม้แต่นิดเดียว)
+> · ที่จริงในทางกลับกัน: QStash พังจะ**ไม่**มาโผล่ที่ `[probe]` เลย เพราะ `probeQStashReadOnly()`
+>   จับ error เองแล้วรายงานเป็น `components.qstash.status = "error"` บนเส้นทางปกติ
+> · ตัวเดียวที่โยนขึ้นมาถึง `[probe]` ได้จริงคือ **การอ่านตาราง heartbeat** (ตั้งใจไม่จับ — ต้องขึ้นถึงสถานะ)
 
 > ทำไม 401 ถึงออกมาเป็น `INCONCLUSIVE` ไม่ใช่ `FAIL`: route ตอบ **marker + `error`** โดย**ไม่มี field `status`**
 > ⇒ `classifyProbeResponse()` เข้ากฎ *"marker ok but status is not a known value"* ⇒ `INCONCLUSIVE` ถูกต้องตามนิยาม

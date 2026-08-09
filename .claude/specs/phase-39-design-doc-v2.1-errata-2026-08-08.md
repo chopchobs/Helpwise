@@ -547,6 +547,14 @@ component key + reason + `liveProbeSkippedReason` ที่ตรงกับส
 | `write` | `store` | `snapshot_write_error` | วัดสำเร็จแต่เขียนไม่ลง (Postgres ฝั่ง write) |
 | `read` | `store` | `snapshot_read_error` | ทาง min-interval แล้วอ่าน snapshot ไม่ได้ |
 
+> 🔴 **กับดักชื่อที่ต้องเขียนไว้ ไม่ใช่ให้คนถัดไปเดา:**
+> **"ตารางยังไม่ถูก apply" โผล่ที่ stage `probe` ไม่ใช่ `write`** — `readMechanismHeartbeats()` อยู่ใน
+> `Promise.all` ของ `runLiveProbe()` ⇒ Prisma โยนตั้งแต่ตรงนั้น ก่อนเดินไปถึง `writeSnapshot()`
+> · และ `probe` **ไม่ได้แปลว่า QStash** — `probeQStashReadOnly()` จับ error เองแล้วรายงานเป็น
+>   `components.qstash` บนเส้นทางปกติ · `recordHeartbeat()` ก็จับเองแล้ว set flag
+> ⇒ **ตัวเดียวที่โยนขึ้นมาถึง `[probe]` ได้จริงคือการอ่านตาราง heartbeat** (ตั้งใจไม่จับ — ต้องขึ้นถึงสถานะ)
+> ⇒ ต้องอ่าน `detail` เสมอ · ตารางแปลผลสำหรับคนทำมืออยู่ที่ rehearsal runbook ขั้น **E2**
+
 ⛔ **ไม่ผ่อนสถานะ** — ทุก stage ยังเป็น `FAIL` เหมือนเดิมทุกประการ · ที่เปลี่ยนคือ **ชี้ตัวการให้ถูก** เท่านั้น
 ✅ ค้ำด้วย test 4 เคสใน `src/app/api/health/readiness/__tests__/route.test.ts`
 (รวมเคส *"Postgres โยนตอน `runLiveProbe` ต้องไม่ถูกรายงานเป็น redis"* และเคสที่ยืนยันว่า `lock` ยังรายงานเป็น `redis` เหมือนเดิม)

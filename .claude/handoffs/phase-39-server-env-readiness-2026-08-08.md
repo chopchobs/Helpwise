@@ -29,6 +29,10 @@ Working state:
 
 ⚠️ ต้อง verify ก่อนเริ่ม context ถัดไป:
 - [ ] §F gate: **ห้าม merge เข้า main จนกว่าลำดับ 4–5 จะ verify บน prod** (ยังไม่มีอะไรขึ้น prod เลย)
+- [ ] 🔴 **commit หลัง `277be73` (เช่น `6e70c55`) ยังไม่ push** — Dev push เอง
+      ⇒ **Preview `dpl_584Ys5…` ยังเป็นโค้ดของ `277be73` = ก่อนแก้ §H-8** ⇒ ซ้อมด้วยมันจะได้ผลผิด
+      ⇒ **push ต้องเสร็จก่อนถึงขั้น C4 ของ rehearsal runbook** (เขียนเป็นขั้น A3 แล้ว)
+      ⚠️ ตรวจด้วย `git rev-parse HEAD` vs `git rev-parse origin/…` — **ห้ามเชื่อประโยคนี้ ให้รันจริง** (§H-9)
 
 ---
 
