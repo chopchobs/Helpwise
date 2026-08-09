@@ -6,7 +6,7 @@
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * ⛔ กฎที่เป็น gate — ตรรกะทั้งหมดอยู่ที่ `src/lib/readiness-verdict.ts` (มี unit test ค้ำ)
- *    ไฟล์นี้ทำแต่ I/O: ยิง HTTP · อ่าน/เขียน state · ส่ง Slack · ตั้ง exit code
+ *    ไฟล์นี้ทำแต่ I/O: ยิง HTTP · อ่าน/เขียน state · ส่งแจ้งเตือน · ตั้ง exit code
  *    เหตุผลที่แยก: กฎที่เขียนใน shell/YAML คือกฎที่ไม่มี test ค้ำ และเป็นกฎที่ถ้าพลาดจะ "เงียบ" พอดี
  *
  *   1. **ห้ามใช้ HTTP status code เป็นหลักฐาน** — ตัดสินจาก marker + field `status` เท่านั้น
@@ -22,6 +22,10 @@
  *   PROD_BASE_URL         · origin ของโดเมน production เช่น https://gethelpwise.xyz
  *   READINESS_PROBE_TOKEN · shared secret ของ shape ที่ auth (ต้องตรงกับ env บน Vercel)
  *   SLACK_WEBHOOK_URL     · ปลายทางแจ้งเตือน
+ *     ⚠️ **ของจริงคือ Discord ไม่ใช่ Slack** — ใช้ Slack-compatible endpoint ของ Discord
+ *     (เติม `/slack` ท้าย webhook URL) ⇒ payload `{ text }` ใช้ได้เลย ไม่ต้องแก้โค้ด
+ *     ชื่อ env ยังเป็น `SLACK_WEBHOOK_URL` เพราะ freeze ⇒ **ห้ามไปตามหา Slack workspace
+ *     มันไม่มีอยู่จริง** · rename → `ALERT_WEBHOOK_URL` อยู่ที่ backlog B-8
  *   EXPECTED_SHA          · (post-deploy เท่านั้น) commit sha ที่เพิ่ง deploy
  */
 
@@ -125,6 +129,14 @@ async function fetchProbe(baseUrl: string, token: string | null): Promise<ProbeV
   }
 }
 
+/**
+ * ส่งแจ้งเตือนไปช่องทางที่ตั้งไว้
+ *
+ * ⚠️ ชื่อ `notifySlack` เป็นชื่อทางประวัติศาสตร์ — **ปลายทางจริงคือ Discord**
+ *    ผ่าน Slack-compatible endpoint (`<discord-webhook>/slack`) ซึ่งรับ payload `{ text }`
+ *    รูปแบบเดียวกับ Slack และตอบ `204` ⇒ `res.ok` เป็น true
+ * ⇒ โค้ดนี้ใช้ได้กับทั้งสองเจ้าโดยไม่ต้องแยกทาง (backlog B-8 จะ rename + รองรับสอง payload)
+ */
 async function notifySlack(webhook: string, text: string): Promise<void> {
   const res = await fetch(webhook, {
     method: "POST",
@@ -133,7 +145,7 @@ async function notifySlack(webhook: string, text: string): Promise<void> {
   });
   if (!res.ok) {
     // แจ้งเตือนส่งไม่ออก = ช่องเตือนพัง ⇒ ต้องทำให้ job แดง ไม่ใช่ log เฉย ๆ
-    throw new Error(`ส่ง Slack ไม่สำเร็จ: http ${res.status}`);
+    throw new Error(`ส่งแจ้งเตือนไม่สำเร็จ: http ${res.status}`);
   }
 }
 
@@ -248,7 +260,7 @@ async function main(): Promise<void> {
         webhook,
         [`${header}`, `(${mode} · ${transition})`, ...lines, baseUrl + PROBE_PATH].join("\n")
       );
-      console.log("[readiness-check] ส่ง Slack แล้ว");
+      console.log("[readiness-check] ส่งแจ้งเตือนแล้ว");
     } catch (err) {
       alertDelivered = false;
       alertError = (err as Error).message;
@@ -262,7 +274,7 @@ async function main(): Promise<void> {
   // `lastRunAt` ต้องถูกบันทึกทุกรอบ ไม่งั้น in-band gap check จะเห็นเป็น "ไม่มีบันทึก"
   // ตลอดกาลและตรวจ gap ไม่ได้เลย
   //
-  // 🔒 แต่ `verdict` **commit ก็ต่อเมื่อแจ้งออกไปจริงแล้ว** — ถ้า Slack ล่มแล้วเราจำ
+  // 🔒 แต่ `verdict` **commit ก็ต่อเมื่อแจ้งออกไปจริงแล้ว** — ถ้าช่องแจ้งเตือนล่มแล้วเราจำ
   //    verdict ใหม่ไว้ รอบถัดไปจะเห็นว่า "ไม่มี transition" แล้วเงียบ
   //    ⇒ การแจ้งเตือนที่ส่งไม่ออกจะหายไปถาวร (ตกรูปเดิม: ความล้มเหลวกลบตัวเอง)
   //    ⇒ คงค่าเดิมไว้เพื่อให้รอบถัดไปยังมองเห็นเป็น transition แล้วแจ้งซ้ำ

@@ -13,7 +13,9 @@
 #    │ READINESS_PROBE_TOKEN    │ ต้องตรงกับ env ชื่อเดียวกันบน Vercel        │
 #    │                          │ (Production scope) — ไม่ตรง = 401 ทุกรอบ   │
 #    ├──────────────────────────┼────────────────────────────────────────────┤
-#    │ SLACK_WEBHOOK_URL        │ Incoming Webhook ของช่องที่จะรับแจ้งเตือน   │
+#    │ SLACK_WEBHOOK_URL        │ Webhook ของช่องที่จะรับแจ้งเตือน            │
+#    │                          │ ⚠️ ของจริง = **Discord** (เติม /slack ท้าย  │
+#    │                          │ URL ⇒ Slack-compatible) ไม่ใช่ Slack        │
 #    └──────────────────────────┴────────────────────────────────────────────┘
 #
 # 2) Vercel → Project Settings → Environment Variables (Production)
