@@ -23,6 +23,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tenantPrisma } from "@/lib/tenant";
 import { verifyQStashSignature, type SendEmailJob } from "@/lib/queue";
+import { recordInboundAttempt } from "@/lib/inbound-counter";
+import { recordHeartbeat } from "@/lib/heartbeat";
 import { sendEmail } from "@/lib/email";
 import { MessageVisibility } from "@prisma/client";
 
@@ -42,7 +44,10 @@ function escapeHtml(input: string): string {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // 1. Verify QStash signature ก่อนทุก operation (fail-closed prod)
   //    verify อ่าน body ครั้งเดียว → คืน rawBody มา parse ต่อ (stream consume ได้ครั้งเดียว)
-  const { valid, rawBody } = await verifyQStashSignature(request);
+  const { valid, rawBody, attemptClass } = await verifyQStashSignature(request);
+  // Phase 39 ลำดับ 3: นับทุก attempt ตามคลาสที่ verify จำแนกจาก header เอง
+  // (ไม่ throw — counter ห้ามทำให้ worker ล้ม)
+  await recordInboundAttempt(attemptClass);
   if (!valid) {
     return NextResponse.json(
       { data: null, error: { code: "UNAUTHORIZED", message: "Invalid or missing QStash signature" } },
@@ -179,6 +184,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { status: 500 }
       );
     }
+
+    // Phase 39 ลำดับ 4: กลไกนี้ทำงานสำเร็จจริง → เต้น heartbeat
+    //  (เต้นหลังงานสำเร็จเท่านั้น — ถ้าเต้นตอนรับ request จะสดทั้งที่งานล้ม
+    //   ⇒ corroboration ใน §C พัง: เคส signing key ไม่ตรงต้องทำให้ heartbeat ค้างจริง)
+    await recordHeartbeat("send-email");
 
     return NextResponse.json(
       { data: { sent: true, messageId: message.id }, error: null },

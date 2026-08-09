@@ -69,6 +69,22 @@ export function getWorkerTargetUrl(): string {
 }
 
 // =============================================================================
+// CLIENT FACTORY
+// =============================================================================
+
+/**
+ * สร้าง QStash client — **จุดเดียวในระบบที่ construct `Client`**
+ *
+ * ⚠️ Phase 39 §F บังคับว่า readiness probe ต้องใช้ "client ตัวเดียวกับที่ publish ใช้จริง"
+ *    การ construct ที่จุดเดียวทำให้ข้อนั้นเป็นจริง **เชิงโครงสร้าง** ไม่ใช่เชิง convention —
+ *    ถ้ามีคนเปลี่ยน config ของ client (baseUrl/retry/region) ตอน publish
+ *    probe จะเปลี่ยนตามอัตโนมัติ ⇒ probe วัดของจริงเสมอ ไม่ใช่วัด client คนละตัว
+ */
+function createQStashClient(token: string): Client {
+  return new Client({ token });
+}
+
+// =============================================================================
 // PRODUCER — publish job
 // =============================================================================
 
@@ -95,7 +111,7 @@ export async function publishSendEmailJob(job: SendEmailJob): Promise<void> {
     return;
   }
 
-  const client = new Client({ token });
+  const client = createQStashClient(token);
   await client.publishJSON({
     url: getWorkerTargetUrl(),
     body: job,
@@ -113,6 +129,31 @@ interface SignedRequest {
 }
 
 /**
+ * ชื่อ header ลายเซ็นของ QStash — **source of truth เดียวของทั้งระบบ**
+ *
+ * ⚠️ erratum §C ข้อบังคับที่ 1: การจำแนกคลาสของ inbound attempt ต้องอ่านชื่อ header
+ *    **จากที่เดียวกับที่ verify อ่าน** ไม่ใช่จากเอกสารของผู้ให้บริการและไม่ใช่จากเอกสารดีไซน์
+ *    เหตุผล: ถ้า SDK เปลี่ยนชื่อ header ในอนาคต แล้วสองที่ไม่ได้อ่านค่าเดียวกัน
+ *    การจำแนกจะเพี้ยนเงียบ ๆ (ทุกอย่างกลายเป็นคลาส unsigned) โดยไม่มี type error ให้จับ
+ */
+export const QSTASH_SIGNATURE_HEADER = "upstash-signature";
+
+/**
+ * คลาสของ inbound delivery attempt (erratum §C) — ใช้เป็น input ของ counter ลำดับ 3
+ *
+ *   verified       — มี header + verify ผ่าน → นับเข้าตัวเลขโควตา
+ *   signed_invalid — **มี header** แต่ verify ไม่ผ่าน → สัญญาณจริง (ครอบเคส signing key ไม่ตรง)
+ *                    แต่ยัง forge ได้ ⇒ ต้อง corroborate กับ heartbeat ก่อน FAIL
+ *   unsigned       — **ไม่มี header เลย** → ขยะจากภายนอก · QStash ไม่เคยส่งแบบนี้
+ *                    ⇒ ❌ ห้ามทำให้เป็น FAIL (ไม่งั้นคนนอกตรึงสถานะได้)
+ *
+ * ⛔ **ห้ามอนุมานคลาสจาก `valid === false`** — ค่านั้นเหมือนกันหมดทั้งสามกรณีที่ verify
+ *    ปฏิเสธ (ไม่มี header / signature ผิด / signing key ฝั่งเราไม่ได้ตั้ง)
+ *    ⇒ อนุมานเมื่อไร กฎ §C ตายเงียบทั้งข้อ · คลาสจึงถูกคำนวณจากการอ่าน header ตรง ๆ
+ */
+export type InboundAttemptClass = "verified" | "signed_invalid" | "unsigned";
+
+/**
  * ผล verify: ถ้า valid คืน rawBody (ใช้ parse payload ต่อ) ไม่งั้น valid=false
  * คืน rawBody มาด้วยเพราะ verify ต้องอ่าน body (stream consume ครั้งเดียว) —
  * caller จะ re-read ไม่ได้ จึงส่งกลับให้ใช้ต่อ
@@ -120,6 +161,8 @@ interface SignedRequest {
 export interface QStashVerifyResult {
   valid: boolean;
   rawBody: string;
+  /** คลาสของ attempt นี้ — คำนวณจากการอ่าน header เอง ไม่ใช่จาก `valid` */
+  attemptClass: InboundAttemptClass;
 }
 
 /**
@@ -143,6 +186,13 @@ export async function verifyQStashSignature(
   // อ่าน body ครั้งเดียว — ต้องใช้ทั้ง verify และ parse payload
   const rawBody = await request.text();
 
+  // §C: อ่าน header **ก่อน** ทุกทางแยก — คลาสต้องถูกกำหนดจากการมีอยู่ของ header เท่านั้น
+  // ไม่ขึ้นกับว่า verify จะจบทางไหน (โดยเฉพาะเคส "signing key ฝั่งเราไม่ได้ตั้ง"
+  // ซึ่งต้องตกเป็นคลาส signed_invalid เพราะ QStash แนบ header มาเสมอ ⇒ corroboration
+  // กับ heartbeat ยังทำงานถูกต้อง — §C ข้อบังคับที่ 3)
+  const signature = request.headers.get(QSTASH_SIGNATURE_HEADER);
+  const hasSignatureHeader = Boolean(signature);
+
   const currentSigningKey = process.env.QSTASH_CURRENT_SIGNING_KEY;
   const nextSigningKey = process.env.QSTASH_NEXT_SIGNING_KEY;
 
@@ -151,18 +201,25 @@ export async function verifyQStashSignature(
       console.error(
         "[send-email] QSTASH signing keys are not set — rejecting in production"
       );
-      return { valid: false, rawBody };
+      return {
+        valid: false,
+        rawBody,
+        attemptClass: hasSignatureHeader ? "signed_invalid" : "unsigned",
+      };
     }
     // dev: allow แต่ warn
     console.warn(
       "[send-email] QSTASH signing keys are not set — allowing in dev mode (NOT SAFE for production)"
     );
-    return { valid: true, rawBody };
+    return {
+      valid: true,
+      rawBody,
+      attemptClass: hasSignatureHeader ? "verified" : "unsigned",
+    };
   }
 
-  const signature = request.headers.get("upstash-signature");
   if (!signature) {
-    return { valid: false, rawBody };
+    return { valid: false, rawBody, attemptClass: "unsigned" };
   }
 
   const receiver = new Receiver({ currentSigningKey, nextSigningKey });
@@ -181,10 +238,14 @@ export async function verifyQStashSignature(
       body: rawBody,
       url: targetUrl ?? getWorkerTargetUrl(),
     });
-    return { valid, rawBody };
+    return {
+      valid,
+      rawBody,
+      attemptClass: valid ? "verified" : "signed_invalid",
+    };
   } catch {
-    // SignatureError → invalid (fail-closed)
-    return { valid: false, rawBody };
+    // SignatureError → invalid (fail-closed) · มี header อยู่ ⇒ คลาส signed_invalid
+    return { valid: false, rawBody, attemptClass: "signed_invalid" };
   }
 }
 
@@ -238,10 +299,52 @@ export async function publishWebhookDeliveryJob(
     return;
   }
 
-  const client = new Client({ token });
+  const client = createQStashClient(token);
   await client.publishJSON({
     url: getJobTargetUrl(WEBHOOK_DELIVER_WORKER_PATH),
     body: job,
     retries: WEBHOOK_QSTASH_RETRIES,
   });
+}
+
+// =============================================================================
+// READINESS PROBE — read-only reachability check (Phase 39 ลำดับ 2)
+// =============================================================================
+
+/** ผลของ read-only probe ที่ยิงไป QStash */
+export interface QStashProbeResult {
+  ok: boolean;
+  /** เหตุผลแบบสั้น ปลอดภัยต่อการ log — **ห้ามใส่ token หรือ URL ที่มี credential** */
+  detail: string;
+}
+
+/**
+ * ยิง read-only call ไป QStash เพื่อดูว่า token + connectivity ยังใช้ได้จริง
+ *
+ * ทำไมต้องเป็น `schedules.list()`:
+ *   - **read-only เด็ดขาด** — ไม่สร้าง message, ไม่กินโควตา publish (สมมติฐานที่ §D
+ *     ติดป้ายไว้ว่ายังไม่ verify — blind spot 9.6pp ผูกกับข้อนี้)
+ *   - แตะ **path เดียวกับที่ publish ใช้จริง** (auth ด้วย QSTASH_TOKEN ตัวเดียวกัน,
+ *     ผ่าน `createQStashClient()` ตัวเดียวกัน) ⇒ token เพี้ยน/หมดอายุจับได้
+ *   - ⛔ **ห้ามประกอบ URL ของ QStash เอง** — ผิดกฎ §F ข้อ 1 และทำให้ probe
+ *     วัดคนละอย่างกับที่ publish เดินจริง
+ *
+ * ⚠️ ไม่ throw — คืน `{ ok:false }` เสมอเมื่อพัง (caller เป็น health endpoint
+ *    ที่ต้องรายงานสถานะ ไม่ใช่ล้ม)
+ */
+export async function probeQStashReadOnly(): Promise<QStashProbeResult> {
+  const token = process.env.QSTASH_TOKEN;
+  if (!token) {
+    // ไม่มี token = publish บน production จะ throw ⇒ P2 ตายอยู่แล้ว ⇒ ไม่ใช่ ok
+    return { ok: false, detail: "QSTASH_TOKEN is not set" };
+  }
+
+  try {
+    const client = createQStashClient(token);
+    await client.schedules.list();
+    return { ok: true, detail: "schedules.list ok" };
+  } catch (err) {
+    // ห้าม leak รายละเอียดที่มี credential — เก็บแค่ message
+    return { ok: false, detail: (err as Error).message.slice(0, 200) };
+  }
 }

@@ -37,6 +37,8 @@ import {
   getJobTargetUrl,
   SLA_SWEEP_WORKER_PATH,
 } from "@/lib/queue";
+import { recordInboundAttempt } from "@/lib/inbound-counter";
+import { recordHeartbeat } from "@/lib/heartbeat";
 import { createNotification } from "@/lib/notifications";
 import { audit } from "@/lib/audit";
 import { hasFeature, FEATURE_KEYS } from "@/lib/features";
@@ -67,10 +69,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // 1. Verify QStash signature ก่อนทุก operation (fail-closed prod)
   //    sla-sweep ไม่ใช้ body payload แต่ต้อง verify เพื่อ consume + ตรวจ signature
   //    pin target URL ของ sla-sweep (sign-side/verify-side ต้องตรงกัน)
-  const { valid } = await verifyQStashSignature(
+  const { valid, attemptClass } = await verifyQStashSignature(
     request,
     getJobTargetUrl(SLA_SWEEP_WORKER_PATH)
   );
+  // Phase 39 ลำดับ 3: นับทุก attempt ตามคลาสที่ verify จำแนกจาก header เอง
+  await recordInboundAttempt(attemptClass);
   if (!valid) {
     return NextResponse.json(
       { data: null, error: { code: "UNAUTHORIZED", message: "Invalid or missing QStash signature" } },
@@ -276,6 +280,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
       }
     }
+
+    // Phase 39 ลำดับ 4: กลไกนี้ทำงานสำเร็จจริง → เต้น heartbeat
+    //  (เต้นหลังงานสำเร็จเท่านั้น — ถ้าเต้นตอนรับ request จะสดทั้งที่งานล้ม
+    //   ⇒ corroboration ใน §C พัง: เคส signing key ไม่ตรงต้องทำให้ heartbeat ค้างจริง)
+    await recordHeartbeat("sla-sweep");
 
     return NextResponse.json(
       { data: { ...counters, scannedAt: now.toISOString() }, error: null },

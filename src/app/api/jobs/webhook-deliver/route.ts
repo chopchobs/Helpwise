@@ -32,6 +32,8 @@ import {
   WEBHOOK_DELIVER_WORKER_PATH,
   type WebhookDeliveryJob,
 } from "@/lib/queue";
+import { recordInboundAttempt } from "@/lib/inbound-counter";
+import { recordHeartbeat } from "@/lib/heartbeat";
 import {
   assertSafeDestination,
   buildSignatureHeader,
@@ -64,10 +66,12 @@ function skip(reason: string): NextResponse {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // 1. Verify QStash signature ก่อนทุก operation (fail-closed prod)
   //    pin target URL ของ worker นี้ (sign-side/verify-side ต้องอ่านค่าเดียวกัน)
-  const { valid, rawBody } = await verifyQStashSignature(
+  const { valid, rawBody, attemptClass } = await verifyQStashSignature(
     request,
     getJobTargetUrl(WEBHOOK_DELIVER_WORKER_PATH)
   );
+  // Phase 39 ลำดับ 3: นับทุก attempt ตามคลาสที่ verify จำแนกจาก header เอง
+  await recordInboundAttempt(attemptClass);
   if (!valid) {
     return NextResponse.json(
       { data: null, error: { code: "UNAUTHORIZED", message: "Invalid or missing QStash signature" } },
@@ -221,6 +225,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         errorMessage,
       },
     });
+
+    // Phase 39 ลำดับ 4: กลไก webhook-deliver เดินครบรอบแล้ว → เต้น heartbeat
+    // ⚠️ เต้นตรงนี้ (หลังบันทึกผล attempt) ไม่ใช่เฉพาะตอน succeeded — ปลายทางล่ม
+    //    คือความล้มเหลว "ของ receiver" ไม่ใช่ของกลไกเรา · heartbeat วัดว่ากลไกเรายังเดิน
+    await recordHeartbeat("webhook-deliver");
 
     if (succeeded) {
       return NextResponse.json(

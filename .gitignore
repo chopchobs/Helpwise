@@ -41,3 +41,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 NATTAPON_Resume_TH.docx
+
+# Phase 39: state ของ readiness workflow (เก็บผ่าน actions/cache ไม่ใช่ใน git)
+.readiness-state/
