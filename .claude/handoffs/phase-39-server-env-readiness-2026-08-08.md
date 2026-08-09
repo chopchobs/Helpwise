@@ -28,11 +28,13 @@ Working state:
 > ⇒ บทเรียนของความผิดนี้ → **erratum §H-9** + Don't Retry ด้านล่าง
 
 ⚠️ ต้อง verify ก่อนเริ่ม context ถัดไป:
-- [ ] §F gate: **ห้าม merge เข้า main จนกว่าลำดับ 4–5 จะ verify บน prod** (ยังไม่มีอะไรขึ้น prod เลย)
-- [ ] 🔴 **commit หลัง `277be73` (เช่น `6e70c55`) ยังไม่ push** — Dev push เอง
-      ⇒ **Preview `dpl_584Ys5…` ยังเป็นโค้ดของ `277be73` = ก่อนแก้ §H-8** ⇒ ซ้อมด้วยมันจะได้ผลผิด
-      ⇒ **push ต้องเสร็จก่อนถึงขั้น C4 ของ rehearsal runbook** (เขียนเป็นขั้น A3 แล้ว)
-      ⚠️ ตรวจด้วย `git rev-parse HEAD` vs `git rev-parse origin/…` — **ห้ามเชื่อประโยคนี้ ให้รันจริง** (§H-9)
+- [ ] 🔴 **§F gate: อ่านถ้อยคำต้นทางเอง อย่าใช้ประโยคในไฟล์นี้**
+      ⚠️ ฉบับก่อนของไฟล์นี้เขียนว่า *"จนกว่าลำดับ 4–5 จะ **verify บน prod**"* — **ไม่ใช่ถ้อยคำของ §F**
+      §F (`errata:298`) เขียนว่า *"จนกว่าลำดับ 4–5 **เสร็จ**"* ⇒ **ข้อความแปรรูปที่ไฟล์นี้** (รูปทรง §H-9 ซ้ำ)
+      ⇒ การตีความ + หลักฐาน + ผลกระทบ อยู่ที่ **`phase-39-closing-evidence-2026-08-09.md` §3.5**
+      ⇒ **Dev ต้องตัดสินก่อนปิดเฟส** · ⛔ ห้ามตัดสินจากบรรทัดนี้
+- [x] ~~commit ยังไม่ push~~ → ✅ push แล้วถึง `c5c17f0` และซ้อมด้วย Preview ของ commit นั้นจริง
+      ⚠️ **ยังเป็นขั้นบังคับทุกรอบที่จะซ้อมใหม่** — ตรวจ sha ของ deployment ก่อนใช้เสมอ (runbook A3)
 
 ---
 
@@ -58,10 +60,11 @@ Working state:
 |---|---|
 | 1–5 | ✅ โค้ด + test เสร็จ · ✅ **C1 verify บน prod แล้ว 2026-08-09** (migration row + effect) |
 | 6 | ⏳ บล็อก — รอ Dev เลือกบริการ + ตั้ง monitor (ก่อน merge ทำได้แค่วิธี B) |
-| 7 | 🟡 **ซ้อมแล้ว `PROVEN` 2026-08-09** — แต่ **พิสูจน์เฉพาะสคริปต์ ไม่ใช่ workflow** (§G ข้อ 12) · **ขั้น F ยังไม่ทำ** |
+| 7 | 🟢 **ซ้อมครบ A→F 2026-08-09** — E1 `PROVEN` · F3 `INVALID` (ผ่านทั้งคู่) · เหลือ **workflow ยังไม่เคยถูกรัน** (§G ข้อ 12) |
 
 📊 **ตารางหลักฐานปิดเฟส: `.claude/specs/phase-39-closing-evidence-2026-08-09.md`**
-— 6 แถวมีผลแล้ว · 5 แถวยังว่าง (workflow dispatch · ขั้น F · pinger · smoke · cron รอบแรก)
+— **7 แถวมีผลแล้ว** · 5 แถวยังว่าง (workflow dispatch · pinger · smoke · cron รอบแรก · FeatureFlag)
+🔴 **§3.5 = คำถามที่ Dev ต้องตัดสินก่อนปิดเฟส** — เจตนาของ gate "ห้าม merge" ใน §F
 
 ### ✅ **C0 ตอบแล้ว 2026-08-09 — ไม่บล็อกอีกต่อไป**
 
@@ -74,7 +77,10 @@ Working state:
 ⇒ D0 คัดค่าเต็มไม่ได้ · D1b เทียบค่าไม่ได้ (→ erratum **§G ข้อ 10**)
 ⇒ **แหล่งกู้ค่าเดียวที่มีคือ incident §8.1** เพราะ `.env` เครื่อง dev ก็ไม่มี `QSTASH_URL` (→ backlog **B-6**)
 
-### ⚠️ คลิกที่อันตรายที่สุด: ขั้น D1 — **เปลี่ยนเป็น "แก้ scope" ไม่ใช่ "Delete" แล้ว** *(2026-08-09)*
+### ✅ ขั้น D1 — ทำไปแล้วด้วย **ทาง A** (ไม่เคยเปิดแถวที่ Production ใช้) *(2026-08-09)*
+
+> ข้อความด้านล่างเก็บไว้เป็นบันทึกว่า**ทำไมถึงเลิกใช้ Delete** — ไม่ใช่สิ่งที่ต้องทำแล้ว
+> ของจริงที่ใช้: เพิ่มแถว branch-scoped → ซ้อม → **ลบแถวที่สร้างเอง** (F1) · รายละเอียด → runbook ขั้น D/F
 
 เดิม runbook สั่ง **ลบ** `QSTASH_URL` ของ Preview โดย**สมมติเอาเองว่ามีแถว Preview แยกอยู่**
 incident §8.1 บันทึกแค่ว่าตั้ง *"Production + Preview"* ซึ่งบน Vercel เป็นได้ทั้ง **2 แถวแยก** และ **1 แถวติ๊กสองช่อง**
@@ -106,9 +112,9 @@ incident §8.1 บันทึกแค่ว่าตั้ง *"Production + P
 |---|---|
 | `src/lib/readiness.ts` · `src/app/api/health/readiness/route.ts` | probe endpoint (ลำดับ 2) |
 | `src/lib/inbound-counter.ts` | counter 2 ตัว (ลำดับ 3) |
-| `src/lib/heartbeat.ts` · `prisma/migrations/20260808000000_add_readiness_heartbeat/` | heartbeat + state table (ลำดับ 4) — **migration ยังไม่ apply ที่ไหนเลย** |
+| `src/lib/heartbeat.ts` · `prisma/migrations/20260808000000_add_readiness_heartbeat/` | heartbeat + state table (ลำดับ 4) — ✅ **apply บน prod แล้ว 2026-08-09** (row + effect verify ครบ) |
 | `src/lib/readiness-verdict.ts` · `scripts/readiness-check.ts` · `.github/workflows/readiness.yml` | ผู้เฝ้า (ลำดับ 5) |
-| `scripts/readiness-rehearsal.ts` · `.github/workflows/readiness-rehearsal.yml` | ซ้อม (ลำดับ 7) — **ยังไม่รัน** |
+| `scripts/readiness-rehearsal.ts` · `.github/workflows/readiness-rehearsal.yml` | ซ้อม (ลำดับ 7) — ✅ **สคริปต์รันแล้ว A→F** · 🔴 **workflow ยังไม่เคยถูกรัน** (§G ข้อ 12) |
 
 ---
 
