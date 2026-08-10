@@ -25,6 +25,44 @@
 # 3) trigger `deployment_status` มาจาก Vercel GitHub integration ที่ต่อไว้อยู่แล้ว
 #    ไม่ต้องตั้งอะไรเพิ่ม
 #
+# ═══════════════════════════════════════════════════════════════════════════
+# §H-12 ทาง A (ตัดสิน 2026-08-09 · ลงมือ 2026-08-10) — **ทำไมมีสอง job**
+#
+# `actions/cache` ปฏิเสธ event ที่ไม่ผูกกับ branch/tag ref ⇒ บน `deployment_status`
+# ทั้ง restore และ save **no-op เงียบ (สเต็ปยังเขียว 0s)** ⇒ ผู้เฝ้าไม่มีความจำข้ามทริกเกอร์
+# ⇒ deploy พังแล้วหายเองก่อน cron รอบถัดไป = **ไม่มีข้อความ recovery** (§G ข้อ 15 · วัดจาก prod แล้ว)
+#
+#   ต้นเหตุฝั่งเรา = เอาตัวตรวจที่ **มี state** ไปรันบน event ที่ **ไม่มี ref**
+#   ⇒ job `dispatch` (deployment_status) ไม่ตรวจอะไรเลย แค่สั่ง `workflow_dispatch`
+#     ให้ job `check` ไปรันบน event ที่ผูก ref ⇒ cache ใช้ได้ตามปกติ
+#
+# ⚠️ **ผลข้างเคียงที่ต้องรู้ล่วงหน้า (§H-12 ความเสี่ยงข้อ 3):** run ที่ถูก dispatch
+#    checkout ที่ **HEAD ของ default branch** ไม่ใช่ sha ของ deployment
+#    ⇒ ถ้า `main` ขยับระหว่างนั้น **โค้ดของผู้ตรวจจะใหม่กว่าโค้ดที่ถูกตรวจ**
+#    ⇒ ✅ **ไม่ใช่บั๊ก** — ความถูกต้องอยู่ที่ `expected_sha` ที่ส่งผ่าน input (ยังเทียบกับ sha ที่ deploy จริง)
+#      และตรงกับหลักการของเฟสนี้: *ผู้เฝ้าไม่ใช่ผู้ถูกเฝ้า* (§H-5)
+#
+# 🔴 **ข้อจำกัดที่รู้ตัวของสเต็ป `Verify a run was actually created` — ตั้งชื่อไว้ ไม่ได้แก้**
+#    (§H-12 ความเสี่ยงข้อ 4 · ตัดสิน 2026-08-10 ว่า "ยอมรับ + บันทึก" ไม่ใช่ "แก้")
+#
+#    `gh run list` **กรองตาม inputs ของ run ไม่ได้** ⇒ เกณฑ์ที่ใช้จริงคือ
+#    *"มี run แบบ `workflow_dispatch` เกิดขึ้นหลัง `DISPATCH_SINCE`"* เฉย ๆ
+#    **ไม่ได้ยืนยันว่าเป็น run ที่สเต็ปก่อนหน้าสั่งไป**
+#
+#    ⇒ **หน้าต่างที่สเต็ปนี้หลอกได้ ≈ 80 วินาที** (60s ที่ถอยหลังกันนาฬิกาเหลื่อม + ~20s ที่ poll):
+#      · deploy production สองครั้งซ้อนภายในหน้าต่างนั้น ⇒ dispatch ตัวที่สองเห็น run ของตัวแรกแล้วเขียว
+#      · มีคนกด Run workflow ด้วยมือในหน้าต่างเดียวกัน ⇒ เขียวจาก run ของคนนั้น
+#      ⇒ ทั้งสองกรณี **สเต็ปเขียวทั้งที่ dispatch ของรอบนี้อาจไม่เคยเกิด run**
+#
+#    ⚠️ นี่คือรูปทรงเดียวกับที่ §G ข้อ 16 กำลังปิด **แค่เหลือเศษเล็กลงมาก** — เขียนไว้เพราะ
+#      *ข้อจำกัดที่ถูกตั้งชื่อแล้ว ปลอดภัยกว่าการแกล้งว่าไม่มี*
+#
+#    **ตาข่ายที่รับเศษนี้ไว้ (ไม่ใช่การแก้ แต่จำกัดความเสียหายให้มีเพดานเวลา):**
+#      1. **cron รอบถัดไป (≤ 15 นาที)** เห็นสถานะจริงอยู่ดี ⇒ ความเงียบสูงสุด = 1 คาบ ไม่ใช่ถาวร
+#      2. เคสที่หลอกได้ต้องมี deploy/กดมือ **ซ้อนกันใน ~80 วินาที** ซึ่งหายากและไม่คงอยู่
+#      3. ทั้งสองเคสที่หลอกได้ **มี run จริงเกิดขึ้นเสมอ** (แค่คนละใบ) ⇒ ผลลัพธ์ทางพฤติกรรมมักไม่ต่าง
+#         ⛔ **ข้อ 3 ไม่ใช่การพิสูจน์ว่าปลอดภัย** — เป็นการอธิบายว่าทำไมความน่าจะเป็นถึงต่ำเท่านั้น
+#
 # ⚠️ **60-day auto-disable**: GitHub ปิด scheduled workflow อัตโนมัติเมื่อ repo เงียบ 60 วัน
 #    ⇒ ตัวเฝ้าหายไปเงียบ ๆ ได้เอง · in-band gap check ในสคริปต์จับได้เฉพาะตอน "กลับมารัน"
 #    ⇒ ชั้นที่ครอบเคส "ไม่รันเลย" คือ external pinger (ลำดับ 6) ซึ่งอยู่นอก GitHub ทั้งหมด
@@ -35,32 +73,146 @@ name: Readiness (P2)
 
 on:
   # Vercel ยิง deployment_status เข้ามาเมื่อ deploy เปลี่ยนสถานะ
+  # ⇒ job `dispatch` เท่านั้นที่รับ event นี้ (ดูหัวไฟล์ §H-12)
   deployment_status:
   # ทุก 15 นาที — ต้องตรงกับ CRON_INTERVAL_MINUTES ใน scripts/readiness-check.ts
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "โหมดของ readiness-check (กดมือเปล่า ๆ = scheduled = พฤติกรรมเดิมทุกประการ)"
+        required: false
+        type: choice
+        default: scheduled
+        options: [scheduled, post-deploy]
+      expected_sha:
+        description: "commit sha (hex 40 ตัว) ที่เพิ่ง deploy — **บังคับเมื่อ mode=post-deploy**"
+        required: false
+        type: string
 
-# กันสองรอบทับกัน (cron ชนกับ post-deploy) — state ข้ามรอบจะเพี้ยนถ้ารันพร้อมกัน
-concurrency:
-  group: readiness
-  cancel-in-progress: false
+# ⚠️ concurrency ย้ายจากระดับ workflow มาอยู่ **ระดับ job** โดยตั้งใจ (§H-12 ความเสี่ยงข้อ 1 ชั้น ข)
+#    ถ้ายังอยู่ระดับ workflow ⇒ run ของ `dispatch` กับ run ที่มันสั่ง **แย่ง slot เดียวกัน**
+#    ⛔ ห้ามย้ายกลับขึ้นมาระดับ workflow
 
 permissions:
   contents: read
 
 jobs:
-  check:
-    # post-deploy: เฉพาะ production ที่ deploy สำเร็จ
+  # ────────────────────────────────────────────────────────────────────────
+  # job 1/2 — post-deploy: **ไม่ตรวจอะไรเลย** แค่ส่งต่อไปยัง event ที่มี ref
+  # ────────────────────────────────────────────────────────────────────────
+  dispatch:
+    # เฉพาะ production ที่ deploy สำเร็จ
     # (deployment_status ยิงทุกสถานะ รวม pending/error — และยิงจาก preview ด้วย)
     if: >-
-      github.event_name != 'deployment_status' ||
-      (github.event.deployment_status.state == 'success' &&
-       github.event.deployment_status.environment == 'Production')
+      github.event_name == 'deployment_status' &&
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment_status.environment == 'Production'
+    runs-on: ubuntu-latest
+    # 🔴 **ค่านี้ไม่ใช่ default ที่ปรับเล่นได้ — เป็น *กฎ* ของแบบ (§H-12 ความเสี่ยงข้อ 1)**
+    #    กฎ "dispatcher ห้ามรอผล" ถูกค้ำด้วยของ 3 ชิ้น: คอมเมนต์ · test ที่อ่านไฟล์นี้ · และบรรทัดนี้
+    #    🔑 **สองชิ้นแรกถูกลบพร้อมกฎได้ใน commit เดียวโดย CI ยังเขียว** (คนแก้กฎย่อมแก้ test ที่ค้ำกฎไปด้วย)
+    #      ส่วนบรรทัดนี้ **อยู่ในไฟล์เดียวกับสิ่งที่มันคุม และ GitHub บังคับตอนรัน ไม่ใช่ตอน CI**
+    #      ⇒ ต่อให้มีคนหาวิธี "รอผล" ที่ test มองไม่เห็น (loop `gh api` เอง · `sleep` ยาว · recursion)
+    #        เพดานนี้ยังคาอยู่ ⇒ job ตายเองแทนที่จะค้างถือคิว
+    #    ⇒ **เป็นชั้นเดียวในสามชั้นที่ไม่ใช่ "ข้อตกลง"** — §H-5 อีกรูปหนึ่ง (ผู้บังคับ ≠ ผู้ถูกบังคับ)
+    # ⛔ ห้ามเพิ่มค่านี้เพื่อให้ "มีเวลารอมากขึ้น" — การอยากรอนานขึ้นคือสัญญาณว่ากำลังละเมิดกฎชั้น ก
+    timeout-minutes: 5
+
+    # ชั้น ข ของกฎกัน deadlock — **กลุ่มแยกจาก `readiness`**
+    # ต่อให้ชั้น ก (ห้ามรอผล) พลาด สอง run ก็ไม่แย่ง slot เดียวกัน ⇒ ไม่มีคิวให้ติด
+    # ⛔ ห้ามเปลี่ยนให้ตรงกับกลุ่มของ job `check`
+    concurrency:
+      group: readiness-dispatch
+      cancel-in-progress: false
+
+    permissions:
+      contents: read
+      # ต้องมีเพื่อสั่ง workflow_dispatch — `GITHUB_TOKEN` พอ **ไม่มีความลับใหม่**
+      actions: write
+
+    steps:
+      - name: Dispatch post-deploy check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.event.deployment_status.deployment.sha || github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          # validate ก่อนส่ง — sha มั่วจะทำให้ปลายทาง poll จนหมดเวลา 5 นาทีโดยเปล่าประโยชน์
+          if ! printf '%s' "$EXPECTED_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::EXPECTED_SHA ไม่ใช่ hex 40 ตัว: '$EXPECTED_SHA'"
+            exit 1
+          fi
+          # เวลาอ้างอิงสำหรับสเต็ปถัดไป (ลบ 60s กันนาฬิกาเหลื่อม)
+          echo "DISPATCH_SINCE=$(date -u -d '60 seconds ago' +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          # ⛔ ชั้น ก: **ห้ามรอผล** — ห้าม --watch · `gh workflow run` ไม่รอผลโดยค่าเริ่มต้น
+          gh workflow run readiness.yml \
+            --ref "$DEFAULT_BRANCH" \
+            -f mode=post-deploy \
+            -f expected_sha="$EXPECTED_SHA"
+
+      # §H-12 ความเสี่ยงข้อ 4 — `gh workflow run` exit 0 ได้ทั้งที่ run ปลายทางไม่เคยเริ่ม
+      # ⇒ ยืนยันว่า **มี run ถูกสร้าง** (ไม่ใช่ว่า run ทำงานเสร็จ)
+      # 🔑 เส้นแบ่ง: ยืนยันว่า run *ถูกสร้าง* ≠ รอว่า run *ทำงานเสร็จ*
+      #    อย่างหลังคือการรอที่ชั้น ก ห้าม ⇒ จะสร้าง deadlock ด้วยมือ
+      - name: Verify a run was actually created   # ⇐ effect ไม่ใช่เจตนา
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # ⛔ poll **มีเพดาน** 3 ครั้ง (~20 วินาที) — ห้ามวนจนกว่า run จะจบ
+          for i in 1 2 3; do
+            n=$(gh run list \
+                  --workflow readiness.yml \
+                  --event workflow_dispatch \
+                  --created ">=$DISPATCH_SINCE" \
+                  --limit 20 --json databaseId --jq 'length')
+            [ "$n" -ge 1 ] && exit 0
+            sleep 10
+          done
+          echo "::error::สั่ง dispatch แล้วแต่ไม่พบ run ที่ถูกสร้างหลัง $DISPATCH_SINCE — post-deploy check ไม่ได้รัน"
+          exit 1
+
+  # ────────────────────────────────────────────────────────────────────────
+  # job 2/2 — งานตรวจทั้งหมด + restore/save state (รันบน event ที่ผูก ref เท่านั้น)
+  # ────────────────────────────────────────────────────────────────────────
+  check:
+    # ⛔ ไม่รับ deployment_status อีกต่อไป — cache no-op เงียบบน event นั้น (§G ข้อ 15)
+    if: github.event_name != 'deployment_status'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    # กันสองรอบทับกัน (cron ชนกับ post-deploy) — state ข้ามรอบจะเพี้ยนถ้ารันพร้อมกัน
+    # เจตนาเดิมยังได้ครบ เพราะ **ตัวที่เขียน state คือ job นี้ job เดียว**
+    concurrency:
+      group: readiness
+      cancel-in-progress: false
+
+    permissions:
+      contents: read
+      # อ่าน /actions/caches เพื่อพิสูจน์ว่าสเต็ป save เขียนจริง
+      actions: read
+
+    env:
+      # schedule ไม่มี inputs ⇒ ตกมาที่ scheduled = พฤติกรรมเดิม
+      MODE: ${{ inputs.mode || 'scheduled' }}
+
     steps:
+      # ⚠️ input เข้าทาง env เท่านั้น — ห้าม interpolate `${{ inputs.* }}` ลงใน `run:` ตรง ๆ (script injection)
+      - name: ตรวจ input ก่อนใช้
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = "post-deploy" ]; then
+            if ! printf '%s' "$EXPECTED_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "::error::mode=post-deploy ต้องมี expected_sha เป็น hex 40 ตัว (ได้: '$EXPECTED_SHA')"
+              exit 1
+            fi
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -84,18 +236,21 @@ jobs:
           restore-keys: |
             readiness-state-
 
+      # 🔑 เป้าหมายที่ยิงยังมาจาก `secrets.PROD_BASE_URL` เท่านั้น **ไม่ใช่จาก input**
+      #    input ใหม่มีแค่ mode/expected_sha ⇒ เปลี่ยนไม่ได้ว่าจะยิงไปที่ไหน (§H-6 ชั้น 2 ไม่ถูกกระทบ)
       - name: Post-deploy identity poll + probe
-        if: github.event_name == 'deployment_status'
+        if: env.MODE == 'post-deploy'
         env:
           PROD_BASE_URL: ${{ secrets.PROD_BASE_URL }}
           READINESS_PROBE_TOKEN: ${{ secrets.READINESS_PROBE_TOKEN }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          # sha ของ deployment ที่เพิ่งขึ้น — ใช้ยืนยันว่า alias สลับมาแล้วจริง
-          EXPECTED_SHA: ${{ github.event.deployment_status.deployment.sha || github.sha }}
+          # sha ของ deployment ที่เพิ่งขึ้น (validate เป็น hex 40 แล้วในสเต็ปแรก)
+          # — ใช้ยืนยันว่า alias สลับมาแล้วจริง
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: npx tsx scripts/readiness-check.ts post-deploy
 
       - name: Scheduled probe + in-band gap check
-        if: github.event_name != 'deployment_status'
+        if: env.MODE != 'post-deploy'
         env:
           PROD_BASE_URL: ${{ secrets.PROD_BASE_URL }}
           READINESS_PROBE_TOKEN: ${{ secrets.READINESS_PROBE_TOKEN }}
@@ -111,3 +266,27 @@ jobs:
         with:
           path: .readiness-state
           key: readiness-state-${{ github.run_id }}
+
+      # §H-12 ส่วนที่ 2 (§G ข้อ 16) — **"สเต็ปเขียว ≠ สเต็ปทำงาน"**
+      # `Save readiness state` เคยขึ้นเขียว 0s ทั้งที่ไม่ได้เขียนอะไรเลย ⇒ สถานะเขียวไม่นับเป็นหลักฐาน
+      #
+      # 🔑 ตรวจผ่าน **REST API** ไม่ใช่ `actions/cache/restore` + `fail-on-cache-miss`:
+      #    **ผู้ตรวจต้องไม่เป็นชิ้นส่วนเดียวกับผู้ถูกตรวจ** — ถ้า verify ด้วย action ตัวเดียวกับที่เพิ่ง
+      #    no-op เงียบ ความผิดพลาดชนิดเดียวจะทำให้ทั้งสองฝ่าย "เห็นตรงกันว่าไม่มีปัญหา" (หลักการเดียวกับ §H-5)
+      # ⛔ ห้ามเปลี่ยนไปใช้ `actions/cache/restore` · ⛔ ห้าม grep log หา `Event Validation Error`
+      #    (ผูกกับถ้อยคำของ third-party ที่เปลี่ยนได้ทุกเมื่อ = คลาสเดียวกับที่กำลังปิด)
+      - name: Verify state was actually saved   # ⇐ effect ไม่ใช่เจตนา
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          key="readiness-state-${{ github.run_id }}"
+          # cache entry อาจโผล่ใน API ช้ากว่าสเต็ป save เล็กน้อย ⇒ ลองซ้ำ **แบบมีเพดาน**
+          for i in 1 2 3; do
+            n=$(gh api "/repos/${{ github.repository }}/actions/caches?key=$key" --jq '.total_count')
+            [ "$n" -ge 1 ] && exit 0
+            sleep 5
+          done
+          echo "::error::cache entry '$key' ไม่มีอยู่จริงหลังสเต็ป save — ความจำของผู้เฝ้าไม่ถูกบันทึก"
+          exit 1

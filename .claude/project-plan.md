@@ -48,18 +48,39 @@
 | 35 | Real-time presence/collision (Supabase Realtime) — token/RLS/presence/typing/collision; qa PASS-with-conditions | `feature/phase-35-realtime-presence` | ✅ done | ✅ |
 | 37 | Demo personas — visitor login เป็น agent คนที่ 2 (ไม่ใช้ password) + banner ชวนเปิด incognito ให้เห็น real-time presence จริง; security PASS · qa PASS-with-conditions · L-1/L-2 ปิดแล้ว · +166 tests (846→1012) | `feature/phase-37-demo-personas` | ✅ **ปิดครบ** — Gate 1 + Gate 2 ผ่าน (2026-08-04) | ✅ `68ad2e1` |
 | 36 | Outbound webhooks — HMAC signing + SSRF guard + QStash retry/DLQ + replay (Portfolio #2); qa PASS-with-conditions (ปิดครบ) · security PASS (MEDIUM-1 rate-limit/cap + MEDIUM-2 RLS ปิดก่อน merge) · docs แปลอังกฤษแล้ว | `feature/phase-36-outbound-webhooks` | 🔴 **ปิด gate ไม่ได้** — smoke 2026-08-05: authz ผ่าน (200) แต่ **dispatch ตายบน prod (QStash region mismatch)** → ดู handoff § Finding | ✅ PR #16 (`af79bff`) |
-| 38 | Post-merge gate hardening — P1a (REQUIRED mode ใน `scan:bundle` ผูก build ของ Vercel) · P6a (`buildCsp()` + 12 tests) · P4/P5 (deploy-checklist/operations env + gate เป็นตารางหลักฐาน) · escape hatch `SCAN_BUNDLE_SKIP_REQUIRED` | `feature/phase-38-gate-hardening` | ⏳ **ปิดไม่ได้** — ค้าง 2 อย่างที่ต้องใช้คนรันบน prod (ดู § ⚠️ ค้าง ข้อ 11) | ✅ `1eafba3` — **ยังไม่ push** |
-| 39 | **Server-env readiness (P2)** — readiness probe + heartbeat + inbound counter + GitHub Actions ผู้เฝ้า (transition-only) + ซ้อม reproduce incident Phase 38 ได้จริง · **P2 ทำงานบน prod แล้ว** (`verdict=OK`) | `feature/phase-39-server-env-readiness` | 🟡 **merge แล้ว แต่ยังปิด gate ไม่ครบ** — หลักฐานปิดเฟส 11/18 แถว · เหลือ 7 (workflow dispatch · pinger · smoke · cron · Discord · ความจำข้ามทริกเกอร์ · assertion) → `.claude/specs/phase-39-closing-evidence-2026-08-09.md` | ✅ PR #17 (`585ae53`) — ⚠️ **3 commit เอกสารยังไม่ถูก merge** |
+| 38 | Post-merge gate hardening — P1a (REQUIRED mode ใน `scan:bundle` ผูก build ของ Vercel) · P6a (`buildCsp()` + 12 tests) · P4/P5 (deploy-checklist/operations env + gate เป็นตารางหลักฐาน) · escape hatch `SCAN_BUNDLE_SKIP_REQUIRED` | `feature/phase-38-gate-hardening` | ⏳ **ปิดไม่ได้** — ค้าง 2 อย่างที่ต้องใช้คนรันบน prod (ดู § ⚠️ ค้าง ข้อ 11) | ✅ `1eafba3` — **push แล้ว** (verify 2026-08-10: เป็น ancestor ของ `b1b572b`) |
+| 39 | **Server-env readiness (P2)** — readiness probe + heartbeat + inbound counter + GitHub Actions ผู้เฝ้า (transition-only) + ซ้อม reproduce incident Phase 38 ได้จริง · **P2 ทำงานบน prod แล้ว** (`verdict=OK`) | `feature/phase-39-server-env-readiness` | 🟡 **merge แล้ว แต่ยังปิด gate ไม่ครบ** — หลักฐานปิดเฟส 11/18 แถว · เหลือ 7 (workflow dispatch · pinger · smoke · cron · Discord · ความจำข้ามทริกเกอร์ · assertion) → `.claude/specs/phase-39-closing-evidence-2026-08-09.md` · **แถว H+I: โค้ดเสร็จแล้วบน `feature/phase-39-h12` (ยังไม่ merge) — แต่แถวยัง ⬜ จนกว่าจะมีหลักฐานจาก prod** | ✅ PR #17 (`585ae53`) — ✅ **3 commit เอกสารตามเข้า `main` แล้วที่ `b1b572b`** (verify 2026-08-10: `git diff main feature/phase-39-server-env-readiness` = ว่าง) |
 
 > *Phase 20 = decision เชิงลบ (บันทึกว่า nonce CSP ใช้กับ `proxy.ts` ไม่ได้ — คง `unsafe-inline`) ไม่ใช่ feature ใหม่
 > **Chore branches** (merged, ไม่ใช่ phase): `chore/db-init-seed`, `fix/proxy-host-header`, `chore/theme-warm-palette`
 
-## Git State (สำหรับ verify รอบหน้า)
-**Status: LAUNCHED — live ที่ gethelpwise.xyz · ⚠️ 2026-08-05: `main` = `1eafba3` (Phase 38 merged) แต่ **ยังไม่ push** — `main` นำ `origin/main` อยู่ (hook บล็อก `git push`, Dev ต้อง push เอง)**
-- main HEAD: `30ef022` (`docs: verify README accuracy`). Phase 31-33 (production-deploy → deploy-verify → post-launch docs) ทำตรงบน main (docs/handoff + `chore: swap root domain to gethelpwise.xyz` `f417541`) — ไม่ใช่ feature-branch
-- ทุก phase-branch (01-30) + chore-branch merge เข้า main + push ขึ้น `origin/main` แล้ว — ไม่มี branch ค้าง, ไม่มี commit ค้าง push
-- Phase 30 (landing + demo seed acme/globex + demo-login + AI fail-closed): security gate PASS (no High/Critical); acme = demo ล้วน 7 ticket (#1001-1007) หลัง cleanup junk. ดู memory `seed-demo-idempotency-acme-cruft`
-- วิธี verify รอบหน้า: `git log --merges --oneline main` · `git status -sb` (ควรเป็น `main...origin/main` ไม่มี ahead/behind)
+## Git State
+
+> 🔴 **กฎของหัวข้อนี้ (ตั้ง 2026-08-10 หลังพบว่าบล็อกนี้ขัดกับแถว Phase 39 ในไฟล์เดียวกัน):**
+> **"สถานะตอนนี้" กับ "บันทึกประวัติ" ห้ามปนกัน** — ประโยคสถานะที่ไม่มีวันที่กำกับจะถูกอ่านว่าเป็นปัจจุบัน
+> ตลอดไป · บล็อกนี้เป็น**บล็อกแรกที่ session ใหม่อ่าน** ⇒ ผิดที่นี่ = เดินงานผิดทั้ง session
+> ⛔ **อัปเดตบล็อก "ตอนนี้" ทุกครั้งที่ `main` ขยับ** · ของเก่าให้ย้ายลงบล็อกประวัติพร้อมวันที่ ห้ามลบทิ้งเฉย ๆ
+
+### สถานะตอนนี้ — **verify 2026-08-10** (ทุกบรรทัดมาจากคำสั่งจริง ไม่ใช่ความจำ)
+
+| ข้อเท็จจริง | คำสั่งที่ใช้ verify |
+| --- | --- |
+| **`main` = `b1b572b`** | `git log --oneline -1 main` |
+| **push แล้ว** — `origin/main` = `b1b572b` เท่ากันเป๊ะ | `git rev-list --left-right --count origin/main...main` → `0  0` |
+| **Status: LAUNCHED** — live ที่ `gethelpwise.xyz` | — |
+| งาน §H-12 อยู่บน **`feature/phase-39-h12`** (`5bb16f3`) — **ยังไม่ merge · ยังไม่ push** | `git log --oneline -1 feature/phase-39-h12` |
+| local branch ที่ merge แล้วแต่ยังไม่ลบ: `phase-28/29/30`, `feature/phase-35/36/37/38`, `feature/phase-39-server-env-readiness`, `fix/demo-cta-tenant-aware` | `git branch --list` — **ไม่ใช่งานค้าง** เป็นแค่ขยะ local |
+
+**วิธี verify รอบหน้า:** `git log --oneline -1 main` · `git rev-list --left-right --count origin/main...main` (ต้องได้ `0 0`) · `git status --short` (ต้องว่าง)
+
+### บันทึกประวัติ — **ไม่ใช่สถานะปัจจุบัน อย่าอ่านเป็นปัจจุบัน**
+
+- **~2026-08-01 · Phase 31-33** (production-deploy → deploy-verify → post-launch docs) ทำตรงบน `main` ไม่ใช่ feature-branch — จบที่ `30ef022` (`docs: verify README accuracy`) + `f417541` (`chore: swap root domain to gethelpwise.xyz`)
+  · ⚠️ **`30ef022` เคยถูกเขียนไว้ว่าเป็น "main HEAD" — ตกยุคตั้งแต่ Phase 36 · ตอนนี้เป็นแค่ ancestor**
+- **2026-08-05 · Phase 38** merge เป็น `1eafba3` และ *ตอนนั้น* ยังไม่ push (hook บล็อก `git push`)
+  · ✅ **ตอนนี้ push แล้ว** — `1eafba3` เป็น ancestor ของ `b1b572b` (`git merge-base --is-ancestor 1eafba3 main` → true)
+- **Phase 01-30 + chore branch** merge เข้า `main` + push ครบตั้งแต่ launch — ไม่มี commit ค้าง push
+- **Phase 30** (landing + demo seed acme/globex + demo-login + AI fail-closed): security gate PASS (no High/Critical) · acme = demo ล้วน 7 ticket (#1001-1007) หลัง cleanup junk → memory `seed-demo-idempotency-acme-cruft`
 
 ## Decisions & Constraints (ยังมีผล)
 - กฎหลักทั้งหมด → อ้าง `CLAUDE.md`: Multi-tenancy Rules · Identity & Audiences · Ticketing / Internal-note isolation · SLA · Inbound/Outbound Email · Subscription & Billing (money เก็บเป็น `Int`) · Feature Flag · Audit Log · **Agent Ownership Map**
@@ -85,11 +106,15 @@
    - ✅ **smoke presence ปิดแล้ว (2026-08-04)** — Gate 2 ของ Phase 37 กอง C-5 ผ่าน: WS `101` +
      `phx_reply {"status":"ok"}` + `presence_diff` joins · W1 เห็น "AR กำลังดูอยู่" · W2 เห็น "DA กำลังดูอยู่"
      = **ครั้งแรกที่ presence ทำงานจริงบน prod** (ต้องแก้ 3 ชั้นก่อน — ดู ข้อ 7)
-   - เหลือ: เปิด FeatureFlag `webhooks`
+   - เหลือ: เปิด FeatureFlag `webhooks` *(สถานะ ณ **2026-08-04** — ยังไม่ได้ verify ซ้ำ)*
    - ✅ **Open Q ปิดแล้ว (2026-08-03, Dev อนุมัติ):** เพิ่ม **Post-merge gate** เข้า DoD (`CLAUDE.md` § Post-merge gate) — phase ที่มี migration/external resource ต้อง verify บน prod จริงก่อนปิด phase
    - 🔶 **ผลย้อนหลัง (อัปเดต 2026-08-04):** Phase 35 **ผ่าน post-merge gate ครบแล้ว** (migration ✅ · smoke presence prod ✅)
      · Phase 36 ยัง **done-with-open-gate** (FeatureFlag `webhooks` ยังไม่เปิดให้ tenant ใด ✗)
-1. **ไม่มี Phase ค้าง · LAUNCHED แล้ว** — merge + push ครบทุก branch, deploy live ที่ gethelpwise.xyz (Phase 31-33)
+1. 🔴 **แก้ 2026-08-10 — ข้อความเดิม *"ไม่มี Phase ค้าง"* เป็นเท็จมาตั้งแต่ Phase 36**
+   ของจริงคือ **"ไม่มี commit ค้าง ≠ ไม่มี Phase ค้าง"** — สองอย่างนี้คนละเรื่องและถูกเขียนรวมกันจนอ่านผิด:
+   · ✅ **git ครบ** — merge + push ครบทุก branch · deploy live ที่ `gethelpwise.xyz` (Phase 31-33)
+   · 🔴 **แต่ยังมี 3 เฟสที่ปิด gate ไม่ได้** — **36** (dispatch ตายบน prod) · **38** (ค้าง 2 อย่างที่ต้องใช้คนรันบน prod — ข้อ 11) · **39** (หลักฐานปิดเฟส 7 แถวยังว่าง)
+   ⇒ **สถานะ "merged" อ่านแทน "done" ไม่ได้** · ดูคอลัมน์ Status ของตาราง Phase เป็นเกณฑ์เสมอ
 2. **RLS ยังไม่ active** (`RLS_ENABLED=false`, app ใช้ BYPASSRLS role) — application-enforced isolation เป็นด่านจริง; จะ activate RLS ต้องสลับ DB role + เปิด flag
 3. **Stray duplicate files (iCloud)** — เป็นปัญหาเป็นระยะ ทำ build พัง; ลบทีละไฟล์ (`rm <file>` ไม่ใช่ `rm -rf`) เมื่อพบ
 4. **Phase 28 deploy = เสร็จแล้วตอน launch** (Phase 31-33): migration `20260619000000_add_notification` + `20260619010000_add_sla_notification` apply แล้ว · QStash env provision + cron ยิง `/api/jobs/sla-sweep` แล้ว · `SLA_SWEEP_SECRET` ถอดออกครบ. deferred hardening ที่ยังเหลือ → memory `phase28-deferred-hardening`
@@ -134,5 +159,5 @@
      → verify แสดง "กำลังตรวจสอบ…" → **เด้งไป `/portal/tickets` เอง** → เห็น **#1001 (2 ข้อความ)** และ
      **#1004 (1 ข้อความ)** ของ Jane Cooper → ผ่านเกณฑ์เต็ม (ลงถูกหน้า + ข้อมูลถูกต้อง ไม่ใช่แค่ "ไม่ 404")
 10. นี่คือ plan/handoff ครั้งแรกของ project — ก่อนหน้านี้ไม่มี `project-plan.md`
-11. ⏳ **Phase 38 merged (`1eafba3`) แต่ยัง "ปิดไม่ได้"** — ค้าง 2 อย่างที่ต้องใช้คนรันบน prod: **(ก)** อ่าน build log ของ deploy ที่มาจาก `1eafba3` **(ข)** smoke webhooks ทาง A
+11. ⏳ **Phase 38 merged (`1eafba3`) แต่ยัง "ปิดไม่ได้"** *(สถานะ ณ **2026-08-05** — ยังไม่ได้ verify ซ้ำ ณ 2026-08-10)* — ค้าง 2 อย่างที่ต้องใช้คนรันบน prod: **(ก)** อ่าน build log ของ deploy ที่มาจาก `1eafba3` **(ข)** smoke webhooks ทาง A
     → รายละเอียดทั้งหมด (residual gap 4 ชั้น · case study P5 · backlog · don't retry): **`.claude/handoffs/phase-38-gate-hardening-merged-2026-08-05.md`**

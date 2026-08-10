@@ -10,7 +10,9 @@ Next focus: **§H-12 ทาง A** (`deployment_status` → re-dispatch) **+ ass
 
 ## Git State
 
-Base branch: **`main` = `585ae53`** (PR #17) — local sync แล้ว 2026-08-09
+Base branch: **`main` = `b1b572b`** — ⚠️ **แก้ 2026-08-10:** ตอนเขียนไฟล์นี้ base คือ `585ae53` (PR #17)
+แต่คอมมิตเอกสาร 3 ตัวด้านล่างตามเข้า `main` แล้วที่ `b1b572b` ⇒ **base ปัจจุบัน = `b1b572b`**
+(`585ae53` ยังถูกต้องในฐานะ *"PR #17 merge ที่คอมมิตไหน"* — อย่าแก้จุดนั้น)
 remote branch `feature/phase-39-server-env-readiness` **ถูกลบแล้ว** · **local branch ยังอยู่**
 
 | Phase | Branch | Status | Merged |
@@ -21,7 +23,15 @@ Working state:
 - Uncommitted/WIP: **ไม่มี (clean)**
 - Env/process ที่เปิดค้าง: **ไม่มี**
 
-### 🔴 ต้อง resolve ก่อนอย่างอื่น — **3 commit เอกสารไม่ได้ถูก merge เข้า PR #17**
+### ✅ **ปิดแล้ว 2026-08-10** (เดิม: 🔴 ต้อง resolve ก่อนอย่างอื่น) — **3 commit เอกสารไม่ได้ถูก merge เข้า PR #17**
+
+> ✅ **แก้ไปแล้ว:** `b1b572b` (parent เดียว = `585ae53`) นำเนื้อของทั้งสามคอมมิตเข้า `main`
+> · verify: `git diff --stat main feature/phase-39-server-env-readiness` → **ว่าง** ⇒ tree เหมือนกันทุกไฟล์
+> · `git log main..feature/…` ยังขึ้น 4 commit เพราะเป็น squash **ไม่ใช่ merge จริง** ⇒ ประวัติต่างกัน แต่ **เนื้อหาไม่ต่าง**
+> ⇒ **ไม่ต้อง cherry-pick / ไม่ต้องเปิด PR ใหม่** · local branch เหลือค่าแค่ประวัติ
+>
+> ข้อความเดิมเก็บไว้ด้านล่างเพื่อให้อ่านออกว่าเคยกลัวอะไร:
+
 
 ```
 ce331fd [AP] ปิดแบบ §H-12       ← แบบของงานถัดไปทั้งหมด
@@ -35,8 +45,8 @@ verify: `git log --oneline origin/main..feature/phase-39-server-env-readiness` �
 > ⇒ **Dev ตัดสินก่อน:** เปิด PR ใหม่ / cherry-pick เข้า main / ทำงานต่อบน local branch เดิม
 
 ⚠️ verify ก่อนเริ่ม:
-- [ ] `git log --oneline -1 main` → ต้องได้ `585ae53`
-- [ ] 3 commit ข้างบนถูกจัดการแล้วหรือยัง
+- [x] `git log --oneline -1 main` → ต้องได้ **`b1b572b`** *(แก้ 2026-08-10 จาก `585ae53`)*
+- [x] 3 commit ข้างบนถูกจัดการแล้วหรือยัง → **จัดการแล้ว** (ดูกล่อง ✅ ด้านบน)
 
 ---
 
@@ -115,7 +125,7 @@ verify: `git log --oneline origin/main..feature/phase-39-server-env-readiness` �
 | **A** workflow dispatch ของลำดับ 7 | 🟢 พร้อมทำ (อยู่บน main แล้ว) — ⛔ **แต่ต้องอ่านคำเตือน §G ข้อ 9 ก่อน** |
 | **D** smoke บน prod | 🟢 พร้อมทำ |
 | **E** cron รอบแรกเขียนทับ `ReadinessState` | 🟢 พร้อมตรวจ |
-| **G** เห็นข้อความจริงในห้อง Discord | 🟡 **น่าจะปิดได้แล้ว** — post-deploy alert เข้าจริง ⇒ ไปยืนยัน/บันทึกหลักฐาน |
+| **G** เห็นข้อความจริงในห้อง Discord | 🔴 **ยังว่าง** — closing-evidence แถว G = ⬜ (ตรวจ 2026-08-10) · *"น่าจะปิดได้แล้ว"* ในฉบับก่อนเป็น **การอนุมานจาก session summary ไม่ใช่หลักฐาน** ⇒ ต้อง **เปิดห้องดูข้อความของ `verdictHeadline()` จริง** ก่อนติ๊ก |
 | **C** ลำดับ 6 pinger | 🔴 **ติดที่ Dev** — เลือกบริการ + ตั้ง monitor · ⛔ ห้ามใช้ Discord |
 
 ---
@@ -124,7 +134,7 @@ verify: `git log --oneline origin/main..feature/phase-39-server-env-readiness` �
 
 ### เริ่มต้นด้วย
 1. อ่าน `.claude/project-plan.md` (Phase 39 อัปเดตแล้ว)
-2. `git log --oneline -1 main` → ต้องได้ `585ae53` · แล้วเช็ค 3 commit ที่ยังไม่ merge (Git State)
+2. `git log --oneline -1 main` → ต้องได้ **`b1b572b`** *(แก้ 2026-08-10)* · 3 commit เอกสาร **ตามเข้า main แล้ว**
 3. อ่าน `phase-39-closing-evidence-2026-08-09.md` → รู้ว่าเหลืออะไร
 4. อ่าน **erratum §H-12** → แบบที่อนุมัติแล้ว **ทำตาม ไม่ต้องออกแบบใหม่**
 5. ⛔ อ่าน **§G ข้อ 9** ก่อนคิดจะ dispatch rehearsal
