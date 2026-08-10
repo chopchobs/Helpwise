@@ -77,9 +77,67 @@ export interface ProbeVerdict {
   commitSha: string | null;
   /** `lastCheckAt` ที่ endpoint รายงาน (ISO) */
   lastCheckAt: string | null;
+  /**
+   * เหตุผลของสถานะ + component ที่ไม่ปกติ — **มีเฉพาะ shape ที่ auth**
+   *
+   * 🔴 **ทำไมต้องเก็บ (§H-13 · incident 2026-08-10):** ข้อความแจ้งเตือนเคยบอกแค่ *คำตัดสิน*
+   * (`http 503: FAIL`) **ไม่บอกว่า component ไหนพัง** ⇒ ตอน incident ต้องไล่จากศูนย์
+   * และ Vercel runtime log มี retention ~1 ชม. ⇒ **หน้าต่างที่จะรู้สาเหตุปิดไปพร้อมกัน**
+   *
+   * ⚠️ ค่าพวกนี้ **มีอยู่ในเนื้อ response อยู่แล้ว** — ของเดิมแค่โยนทิ้ง ไม่ใช่ข้อมูลใหม่
+   */
+  reasons: string[];
+  /** component ที่ `status !== "ok"` เท่านั้น — ปกติเป็น array ว่าง */
+  failingComponents: FailingComponent[];
+}
+
+export interface FailingComponent {
+  name: string;
+  status: string;
+  detail: string;
 }
 
 const VALID_STATUSES = new Set(["OK", "DEGRADED", "FAIL", "STALE"]);
+
+/** ตัดข้อความยาวให้พอดีหนึ่งบรรทัด — เพดาน ไม่ใช่ "พยายามสั้น" */
+const DETAIL_MAX_CHARS = 90;
+
+function truncate(text: string): string {
+  return text.length <= DETAIL_MAX_CHARS ? text : `${text.slice(0, DETAIL_MAX_CHARS - 1)}…`;
+}
+
+/** `reasons` จากเนื้อ response — ทนกับ shape ที่ไม่ auth (ไม่มี field นี้) */
+function readReasons(data: Record<string, unknown>): string[] {
+  const raw = data.reasons;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((r): r is string => typeof r === "string");
+}
+
+/**
+ * component ที่ไม่ปกติ — **เฉพาะ `status !== "ok"`**
+ *
+ * ⛔ ไม่กรอง/ไม่ redact เนื้อ `detail` (§H-13 ตัดสินแล้ว): regex ที่ฆ่า `eu-central-1` ได้
+ *    จะฆ่า `readiness-probe stale 8460s` ไปด้วย = ลบเหตุผลทั้งหมดของงานนี้
+ *    · สิ่งที่ต้องกันจริง (tenant id / secret) **กันด้วยโครงสร้าง** — ไม่มี component ไหนแตะมันได้
+ *    · รายการที่ยอมให้โผล่ = ตารางใน erratum §H-13 · มี test ค้ำว่า component ไม่งอกเพิ่มเงียบ ๆ
+ */
+function readFailingComponents(data: Record<string, unknown>): FailingComponent[] {
+  const raw = data.components;
+  if (!raw || typeof raw !== "object") return [];
+  return Object.entries(raw as Record<string, unknown>)
+    .filter(([, v]) => {
+      const status = (v as { status?: unknown } | null)?.status;
+      return typeof status === "string" && status !== "ok";
+    })
+    .map(([name, v]) => {
+      const c = v as { status: string; detail?: unknown };
+      return {
+        name,
+        status: c.status,
+        detail: typeof c.detail === "string" ? truncate(c.detail) : "",
+      };
+    });
+}
 
 /**
  * อ่านผล probe เป็น verdict
@@ -96,6 +154,8 @@ export function classifyProbeResponse(res: ProbeResponse): ProbeVerdict {
     deploymentId: null,
     commitSha: null,
     lastCheckAt: null,
+    reasons: [] as string[],
+    failingComponents: [] as FailingComponent[],
   };
   const codeNote = res.httpStatus === null ? "no response" : `http ${res.httpStatus}`;
 
@@ -122,6 +182,8 @@ export function classifyProbeResponse(res: ProbeResponse): ProbeVerdict {
   }
 
   const identity = {
+    reasons: readReasons(data),
+    failingComponents: readFailingComponents(data),
     deploymentId:
       (data.deployment as { deploymentId?: string } | undefined)?.deploymentId ?? null,
     commitSha:

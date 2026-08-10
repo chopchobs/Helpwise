@@ -168,6 +168,39 @@ function requireEnv(name: string): string {
 // =============================================================================
 
 /**
+ * บรรทัด "เพราะ:" — บอก **สาเหตุ** ไม่ใช่แค่ **คำตัดสิน** (erratum §H-13)
+ *
+ * 🔴 **ที่มา: incident 2026-08-10** — ข้อความตอน `FAIL` บอกแค่ `ผล: http 503: FAIL`
+ *    ⇒ ไม่มีใครรู้ว่า component ไหนพัง ⇒ ไล่หาทั้งวัน และ **Vercel runtime log
+ *    มี retention ~1 ชม.** ⇒ กว่าจะเริ่มไล่ หลักฐานตอนเริ่มเหตุก็หายไปแล้ว
+ *
+ * เพดานความยาว (เพดาน ไม่ใช่ "พยายามสั้น"):
+ *   · เอาเฉพาะ component ที่ `status !== "ok"` ⇒ **`OK`/recovery ไม่มีบรรทัดนี้เลย**
+ *   · สูงสุด 2 ตัว · เกินนั้นต่อท้าย `(+n อื่น)` · `detail` ถูก truncate มาแล้วที่ ~90 ตัวอักษร
+ *   ⇒ ~1 บรรทัด ≤ 200 ตัวอักษร · ยาวขึ้นเฉพาะตอนมีเรื่องต้องบอก
+ *
+ * ⛔ ข้อความล้วน ห้าม Block Kit — Discord shim รับแค่ subset (ดูคอมเมนต์เหนือ `notifySlack()`)
+ * ⛔ ไม่ redact `detail` — §H-13 ตัดสินแล้วพร้อมรายการว่าอะไรยอมให้โผล่ในห้อง
+ */
+const MAX_COMPONENTS_IN_LINE = 2;
+
+function causeLine(v: ProbeVerdict): string | null {
+  if (v.reasons.length === 0 && v.failingComponents.length === 0) return null;
+
+  const parts: string[] = [];
+  if (v.reasons.length > 0) parts.push(v.reasons.join(", "));
+
+  const shown = v.failingComponents.slice(0, MAX_COMPONENTS_IN_LINE);
+  for (const c of shown) {
+    parts.push(c.detail ? `${c.name}: ${c.detail}` : `${c.name}: ${c.status}`);
+  }
+  const hidden = v.failingComponents.length - shown.length;
+  if (hidden > 0) parts.push(`(+${hidden} อื่น)`);
+
+  return `เพราะ: ${parts.join(" · ")}`;
+}
+
+/**
  * post-deploy: รอจน alias ของ production ชี้ deployment ที่มี commit ตามที่คาด
  * แล้วค่อยอ่านผล — ถ้าอ่านก่อน alias สลับ จะได้ผลของ deployment เก่าและอ่านผิด
  */
@@ -190,6 +223,7 @@ async function runPostDeploy(baseUrl: string, token: string): Promise<{
           `alias ชี้ ${expectedSha.slice(0, 8)} แล้ว (poll ${attempts} ครั้ง)`,
           `deploymentId: ${last.deploymentId ?? "—"}`,
           `ผล: ${last.detail}`,
+          ...(causeLine(last) ? [causeLine(last) as string] : []),
         ],
       };
     }
@@ -218,7 +252,10 @@ async function runScheduled(
   const result = await fetchProbe(baseUrl, token);
   const gap = detectGap(state.lastRunAt, now, CRON_INTERVAL_MINUTES);
 
-  const lines = [`ผล: ${result.detail}`, `lastCheckAt: ${result.lastCheckAt ?? "—"}`];
+  const lines = [`ผล: ${result.detail}`];
+  const cause = causeLine(result);
+  if (cause) lines.push(cause);
+  lines.push(`lastCheckAt: ${result.lastCheckAt ?? "—"}`);
   if (gap.gapped) {
     // cron ตัวเองหายไป — ดังเท่ากับผลตรวจ ไม่ใช่หมายเหตุท้ายข้อความ
     lines.push(
