@@ -21,6 +21,7 @@ import {
   shouldAlert,
   type Verdict,
 } from "@/lib/readiness-verdict";
+import { KNOWN_COMPONENT_KEYS } from "@/lib/readiness";
 
 function body(data: Record<string, unknown>): string {
   return JSON.stringify({ data, error: null });
@@ -210,5 +211,114 @@ describe("§H-6 — เซต host ของสองเส้นทางต้
   it("เส้นทาง rehearsal ปฏิเสธโดเมน production", () => {
     expect(isPreviewProbeHost("gethelpwise.xyz")).toBe(false);
     expect(isPreviewProbeHost("helpwise-abc123-scope.vercel.app")).toBe(true);
+  });
+});
+
+// =============================================================================
+// §H-13 — ข้อความแจ้งเตือนต้องบอก "สาเหตุ" ไม่ใช่แค่ "คำตัดสิน"
+// =============================================================================
+
+/**
+ * 🔴 ที่มา: incident 2026-08-10 — ข้อความตอน `FAIL` บอกแค่ `ผล: http 503: FAIL`
+ * ⇒ ไม่มีใครรู้ว่า component ไหนพัง ⇒ ไล่หาทั้งวัน และ Vercel runtime log
+ * มี retention ~1 ชม. ⇒ หลักฐานตอนเริ่มเหตุหายไปก่อนจะเริ่มไล่
+ *
+ * ข้อมูลนี้ **อยู่ในเนื้อ response อยู่แล้ว** — ของเดิมแค่โยนทิ้ง
+ */
+describe("§H-13 — เก็บ reasons + component ที่ไม่ปกติ จากเนื้อ response", () => {
+  const FAIL_BODY = body({
+    marker: READINESS_MARKER,
+    status: "FAIL",
+    lastCheckAt: "2026-08-10T02:12:25.468Z",
+    reasons: ["heartbeat_error"],
+    components: {
+      qstash: { status: "ok", detail: "reachable" },
+      redis: { status: "ok", detail: "pong" },
+      heartbeat: { status: "error", detail: "readiness-probe stale 8460s" },
+    },
+  });
+
+  it("เก็บเฉพาะ component ที่ `status !== 'ok'`", () => {
+    const v = classifyProbeResponse({ httpStatus: 503, bodyText: FAIL_BODY });
+
+    expect(v.verdict).toBe("FAIL");
+    expect(v.reasons).toEqual(["heartbeat_error"]);
+    // 🔑 ของที่ปกติต้องไม่โผล่ — ไม่งั้นบรรทัดเดียวจะยาวเท่าทั้ง report
+    expect(v.failingComponents.map((c) => c.name)).toEqual(["heartbeat"]);
+    expect(v.failingComponents[0].detail).toBe("readiness-probe stale 8460s");
+  });
+
+  it("`OK` ที่ไม่มี component เสีย ⇒ ไม่มีอะไรให้พูด (บรรทัดนี้จะไม่ถูกสร้าง)", () => {
+    const v = classifyProbeResponse({ httpStatus: 200, bodyText: OK_BODY });
+    expect(v.reasons).toEqual([]);
+    expect(v.failingComponents).toEqual([]);
+  });
+
+  it("truncate `detail` ที่ยาวเกินเพดาน — และยังอ่านออกว่าเป็นเรื่องอะไร", () => {
+    const long = "x".repeat(500);
+    const v = classifyProbeResponse({
+      httpStatus: 503,
+      bodyText: body({
+        marker: READINESS_MARKER,
+        status: "FAIL",
+        components: { redis: { status: "error", detail: long } },
+      }),
+    });
+    // เพดาน 90 ตัวอักษร — ค้ำว่า "มีเพดาน" ไม่ใช่ค้ำตัวเลขเป๊ะ
+    expect(v.failingComponents[0].detail.length).toBeLessThanOrEqual(90);
+    expect(v.failingComponents[0].detail.endsWith("…")).toBe(true);
+  });
+
+  it("ทนกับ shape ที่ไม่มี `reasons`/`components` (ทางเดินที่ไม่ auth) — ไม่โยน", () => {
+    // ⚠️ checker ถือ token เสมอ แต่ห้ามพังถ้าวันหนึ่งได้ shape ที่ไม่ auth มา
+    const v = classifyProbeResponse({ httpStatus: 200, bodyText: OK_BODY });
+    expect(v.reasons).toEqual([]);
+    expect(v.failingComponents).toEqual([]);
+  });
+
+  it("`components` ที่รูปร่างเพี้ยน (ไม่ใช่ object / ไม่มี status) ⇒ ข้าม ไม่โยน", () => {
+    const v = classifyProbeResponse({
+      httpStatus: 503,
+      bodyText: body({
+        marker: READINESS_MARKER,
+        status: "FAIL",
+        components: { weird: "not-an-object", half: { detail: "no status" } },
+      }),
+    });
+    expect(v.failingComponents).toEqual([]);
+  });
+});
+
+// =============================================================================
+// §H-13 ประตู — รายชื่อ component ห้ามงอกเงียบ ๆ
+// =============================================================================
+
+/**
+ * 🚪 **ทำไมข้อนี้ถึงเป็น gate ไม่ใช่ nice-to-have**
+ *
+ * §H-13 ตัดสินว่า **ไม่ redact `components[].detail`** ก่อนส่งเข้าห้องแจ้งเตือน
+ * โดยอ้างเหตุผลเดียว: *"สิ่งที่ต้องกันจริง (tenant id / secret) กันด้วยโครงสร้าง —
+ * ไม่มี component ไหนแตะมันได้"*
+ * ⇒ **ข้ออ้างนั้นเป็นจริงเฉพาะกับรายชื่อชุดปัจจุบัน** ⇒ component ใหม่ที่งอกเงียบ ๆ
+ *   ทำให้ข้ออ้างพังโดยไม่มีใครรู้ ⇒ **ข้อมูลหลุดเข้าห้องแบบที่ไม่มีใครตัดสินใจให้หลุด**
+ *
+ * สองชั้นที่บังคับ:
+ *   1. **TypeScript** — `ComponentMap` ถูก type ด้วย key ชุดนี้ ⇒ เพิ่ม key = คอมไพล์ไม่ผ่าน
+ *   2. **test นี้** — เทียบลิสต์กับตารางใน §H-13 ⇒ แก้ลิสต์ = แดง = ถูกบังคับให้กลับไปอ่าน
+ *
+ * 📌 **ชั้น 1 พิสูจน์ตัวเองแล้วตอนเขียน (2026-08-10):** ลิสต์ฉบับแรกมี 4 ตัว
+ *    (`qstash` `redis` `heartbeat` `config`) — **คอมไพเลอร์จับได้ทันทีว่าขาด `inbound`**
+ *    และการไล่ `STAGE_FAILURE` พบอีกสอง (`probe` `store`) ⇒ **ของจริงคือ 7 ไม่ใช่ 4**
+ *    ⇒ ถ้าเขียนเป็น test อย่างเดียวโดยไม่ผูก type ลิสต์ที่ผิดจะผ่านไปเงียบ ๆ
+ */
+describe("§H-13 ประตู — `KNOWN_COMPONENT_KEYS` ต้องตรงกับตารางที่ตัดสินไว้", () => {
+  it("รายชื่อตรงเป๊ะ — เพิ่ม/ลบเมื่อไรต้องกลับไปทบทวนตารางใน §H-13 ก่อน", () => {
+    expect([...KNOWN_COMPONENT_KEYS].sort()).toEqual(
+      ["config", "heartbeat", "inbound", "probe", "qstash", "redis", "store"].sort()
+    );
+  });
+
+  it("ไม่มีชื่อซ้ำ — key ซ้ำจะทำให้ component หนึ่งทับอีกอันเงียบ ๆ", () => {
+    expect(new Set(KNOWN_COMPONENT_KEYS).size).toBe(KNOWN_COMPONENT_KEYS.length);
   });
 });

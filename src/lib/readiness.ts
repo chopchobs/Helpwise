@@ -124,6 +124,43 @@ export interface ComponentReport {
   detail: string;
 }
 
+/**
+ * 🚪 **รายชื่อ component ทั้งหมดที่มีสิทธิ์โผล่ใน `components` — แหล่งเดียว**
+ *
+ * ทำไมต้องมี (erratum **§H-13**): `components[].detail` **ถูกส่งเข้าห้องแจ้งเตือน**
+ * และเราตัดสินแล้วว่า **ไม่ redact** — โดยอ้างเหตุผลว่า *"สิ่งที่ต้องกันจริง (tenant id / secret)
+ * กันด้วยโครงสร้าง เพราะไม่มี component ไหนแตะมันได้"*
+ * ⇒ ข้ออ้างนั้นจริง **เฉพาะกับรายชื่อชุดนี้** ⇒ ถ้ามี component ใหม่งอกเงียบ ๆ **ข้ออ้างพังทันที**
+ *
+ * 🔑 **นี่คือประตู ไม่ใช่สัญญา** — สองชั้นที่บังคับจริง:
+ *   1. **TypeScript** — `components` ถูก type ด้วย key ชุดนี้ ⇒ เพิ่ม key ใหม่โดยไม่แก้ลิสต์ = **คอมไพล์ไม่ผ่าน**
+ *   2. **test** — เทียบลิสต์นี้กับตารางใน §H-13 ⇒ แก้ลิสต์โดยไม่ทบทวนตาราง = **test แดง**
+ * ⇒ ชั้น 1 กันการงอกเงียบ · ชั้น 2 บังคับให้กลับไปอ่านว่า "detail ของมันมีอะไรได้บ้าง"
+ *
+ * ⛔ **ห้ามเพิ่มชื่อในลิสต์นี้โดยไม่ทบทวนตารางของ §H-13 ก่อน** — โดยเฉพาะคำถามเดียว:
+ *    *detail ของ component ใหม่นี้ มีทางแตะข้อมูล tenant หรือค่า secret ได้ไหม*
+ */
+export const KNOWN_COMPONENT_KEYS = [
+  // ── ทางปกติ (live probe สำเร็จ) ───────────────────────────────────────────
+  "qstash",
+  "redis",
+  "heartbeat",
+  "config",
+  // ── ทางที่ live probe ล้มกลางคัน (STAGE_FAILURE) ─────────────────────────
+  //    ⚠️ สองตัวนี้ถูกลืมง่ายเพราะโผล่เฉพาะตอนพัง — ซึ่งคือตอนที่ข้อความแจ้งเตือนถูกอ่านพอดี
+  "probe",
+  "store",
+  // ── ทางของ counter ลำดับ 3 ที่เรียกร้อง `FAIL` ────────────────────────────
+  //    ⚠️ `detail` = `evaluation.reasons.join(",")` ⇒ เป็น **reason code ที่เราเขียนเอง**
+  //       ไม่ใช่ข้อความจาก provider และไม่มีตัวเลข counter ⇒ ไม่มีข้อมูล tenant (§H-13)
+  "inbound",
+] as const;
+
+export type KnownComponentKey = (typeof KNOWN_COMPONENT_KEYS)[number];
+
+/** `components` ของ report — key จำกัดที่ `KNOWN_COMPONENT_KEYS` เท่านั้น (ดูเหตุผลด้านบน) */
+export type ComponentMap = Partial<Record<KnownComponentKey, ComponentReport>>;
+
 /** identity ของ deployment — ชื่อ env ทุกตัว confirm จากเอกสาร Vercel แล้ว (ดู getDeploymentIdentity) */
 export interface DeploymentIdentity {
   deploymentId: string | null;
@@ -137,7 +174,7 @@ export interface ReadinessSnapshot {
   status: ReadinessStatus;
   checkedAt: string;
   reasons: string[];
-  components: Record<string, ComponentReport>;
+  components: ComponentMap;
   /** ตัวเลข counter ลำดับ 3 — `null` เมื่ออ่านไม่ได้ (ไม่ใช่ 0 ซึ่งจะอ่านเป็น "ปกติ") */
   counters: InboundCounters | null;
   deploymentId: string | null;
@@ -383,7 +420,7 @@ async function pingRedis(): Promise<ComponentReport> {
  * FAIL > STALE > DEGRADED > OK
  */
 export function rollUpStatus(
-  components: Record<string, ComponentReport>,
+  components: ComponentMap,
   degradedReasons: string[]
 ): { status: ReadinessStatus; reasons: string[] } {
   const reasons: string[] = [];
@@ -414,7 +451,7 @@ async function runLiveProbe(): Promise<ReadinessSnapshot> {
     readMechanismHeartbeats(),
   ]);
 
-  const components: Record<string, ComponentReport> = {
+  const components: ComponentMap = {
     qstash,
     redis: redisReport,
     heartbeat,
@@ -556,7 +593,7 @@ type LiveProbeStage = "lock" | "probe" | "write" | "read";
  */
 const STAGE_FAILURE: Record<
   LiveProbeStage,
-  { component: string; reason: string; skippedReason: string }
+  { component: KnownComponentKey; reason: string; skippedReason: string }
 > = {
   // จอง lock ไม่ได้ = Redis พัง ⇒ ไม่มี min-interval ⇒ **ห้ามยิง live probe**
   // (เพดานโควตาจะหาย — กฎข้อ 5 ในหัวไฟล์) · นี่คือกรณีเดียวที่ "suppressed" เป็นความจริง
@@ -618,7 +655,7 @@ export async function buildAuthorizedReport(): Promise<ReadinessReport> {
   } catch (err) {
     // สถานะเป็น FAIL ทุก stage เหมือนเดิม — ที่ต่างคือ **ชี้ตัวการให้ถูก**
     const failure = STAGE_FAILURE[stage];
-    const components: Record<string, ComponentReport> = {
+    const components: ComponentMap = {
       [failure.component]: {
         status: "error",
         detail: `[${stage}] ${(err as Error).message.slice(0, 200)}`,
