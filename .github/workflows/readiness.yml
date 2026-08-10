@@ -105,6 +105,14 @@ jobs:
   dispatch:
     # เฉพาะ production ที่ deploy สำเร็จ
     # (deployment_status ยิงทุกสถานะ รวม pending/error — และยิงจาก preview ด้วย)
+    #
+    # ✅ **`'Production'` = ค่าที่ verify แล้ว ณ 2026-08-10 ไม่ใช่การรับประกัน**
+    #    พิสูจน์จาก deploy จริง: job นี้ **รัน** (ไม่ใช่ `skipped`) ⇒ ทั้ง `state=='success'`
+    #    และ `environment=='Production'` ตรงกับที่ Vercel ส่งมาจริง — เดิมเป็นแค่สมมติฐาน
+    # 🔴 **แต่ไม่มีอะไรเฝ้าว่ามันจะเปลี่ยน** — Vercel เปลี่ยนชื่อ environment เมื่อไรก็ได้
+    #    ⇒ วันนั้น job นี้จะ **ถูกข้ามเงียบ ๆ ไม่มี error ให้เห็น** (fail-soft เต็มรูปแบบ)
+    #    ⇒ รูปแบบเดียวกับ §G ข้อ 5/7 (ค่า Deployment Protection ที่ verify แล้วแต่ไม่มีใครเฝ้า)
+    #    ⇒ งานเฝ้า → backlog **B-11**
     if: >-
       github.event_name == 'deployment_status' &&
       github.event.deployment_status.state == 'success' &&
@@ -133,9 +141,23 @@ jobs:
       actions: write
 
     steps:
+      # 🔴 **`--repo` บังคับทุกคำสั่ง `gh` ในสองสเต็ปนี้ — ไม่ใช่ความเรียบร้อย แต่เป็นเงื่อนไขให้มันรันได้**
+      #    job นี้ **ไม่มี `actions/checkout` โดยตั้งใจ** (มันต้อง "ไม่ตรวจอะไรเลย")
+      #    ⇒ cwd ไม่ใช่ git repo ⇒ `gh workflow run` / `gh run list` ที่ต้อง "เดา" ว่าคือ repo ไหน
+      #      จะไปหา `git remote` แล้วตายด้วย `fatal: not a git repository`
+      #    ⇒ **เกิดจริงแล้วที่ run #26 (2026-08-10)** — ไม่ใช่ความเสี่ยงเชิงทฤษฎี
+      #
+      # 🔑 **ทำไม `gh api` ใน job `check` (สเต็ป "Verify state was actually saved") ไม่เจอปัญหานี้:**
+      #    มันส่ง **path เต็ม** `"/repos/${{ github.repository }}/actions/caches?…"`
+      #    ⇒ ชื่อ repo **อยู่ใน path แล้ว** ⇒ `gh` ไม่ต้องเดาอะไรเลย ⇒ ไม่แตะ `git remote`
+      #    (บังเอิญรอด ไม่ใช่เพราะออกแบบมากันเรื่องนี้ — และ `check` มี checkout อยู่แล้วด้วย)
+      #    ⇒ **เส้นแบ่งคือ "คำสั่งนั้นต้องเดา repo เองไหม" ไม่ใช่ "ใช้ `gh` หรือเปล่า"**
+      # ⛔ ห้าม "แก้" ด้วยการเพิ่ม `actions/checkout` — ขัดเจตนาของ job นี้ และแลกเวลา ~10 วิ
+      #    กับสิ่งที่ env var เดียวแก้ได้
       - name: Dispatch post-deploy check
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           EXPECTED_SHA: ${{ github.event.deployment_status.deployment.sha || github.sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
@@ -149,6 +171,7 @@ jobs:
           echo "DISPATCH_SINCE=$(date -u -d '60 seconds ago' +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
           # ⛔ ชั้น ก: **ห้ามรอผล** — ห้าม --watch · `gh workflow run` ไม่รอผลโดยค่าเริ่มต้น
           gh workflow run readiness.yml \
+            --repo "$GH_REPO" \
             --ref "$DEFAULT_BRANCH" \
             -f mode=post-deploy \
             -f expected_sha="$EXPECTED_SHA"
@@ -160,11 +183,14 @@ jobs:
       - name: Verify a run was actually created   # ⇐ effect ไม่ใช่เจตนา
         env:
           GH_TOKEN: ${{ github.token }}
+          # ต้องมีด้วยเหตุผลเดียวกับสเต็ปบน — ไม่มี checkout ⇒ `gh run list` เดา repo เองไม่ได้
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           # ⛔ poll **มีเพดาน** 3 ครั้ง (~20 วินาที) — ห้ามวนจนกว่า run จะจบ
           for i in 1 2 3; do
             n=$(gh run list \
+                  --repo "$GH_REPO" \
                   --workflow readiness.yml \
                   --event workflow_dispatch \
                   --created ">=$DISPATCH_SINCE" \

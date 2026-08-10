@@ -79,6 +79,100 @@ function runScriptsOf(jobName: string): string[] {
     .map(stripShellComments);
 }
 
+/**
+ * แยก "คำสั่ง" ออกจากสคริปต์แบบหยาบ ๆ เพื่อตรวจทีละคำสั่ง
+ *
+ * ต่อบรรทัดที่ลงท้ายด้วย `\` เข้าด้วยกันก่อน (ไม่งั้น `gh run list \` กับ `--repo …`
+ * จะกลายเป็นคนละคำสั่ง) แล้วค่อยตัดด้วยตัวคั่นของ shell
+ *
+ * ⚠️ **หยาบโดยตั้งใจ:** ถ้าคำสั่งสองอันอยู่ในก้อนเดียวกัน `--repo` ของอันหนึ่ง
+ * จะถูกนับให้อีกอันด้วย ⇒ **ยอมหลวมดีกว่ายอมแดงผิด** — ตัวที่รับความเสี่ยงจริง
+ * คือการรัน job บน prod ไม่ใช่ test นี้
+ */
+function shellCommands(script: string): string[] {
+  return stripShellComments(script)
+    .replace(/\\\s*\n\s*/g, " ") // ต่อบรรทัดที่ถูกตัดด้วย backslash
+    .split(/[\n;]|&&|\|\|/)
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
+
+function jobHasCheckout(job: WorkflowJob): boolean {
+  return job.steps.some((s) => (s.uses ?? "").startsWith("actions/checkout"));
+}
+
+describe("job ที่ไม่มี `actions/checkout` — ทุกคำสั่ง `gh` ต้องระบุ repo", () => {
+  /**
+   * 🔴 **บั๊กจริงที่ข้อนี้เกิดมาจาก (run #26 · 2026-08-10):**
+   * `failed to run git: fatal: not a git repository`
+   * — job `dispatch` ไม่มี `actions/checkout` **โดยตั้งใจ** (มันต้อง "ไม่ตรวจอะไรเลย")
+   * ⇒ cwd ไม่ใช่ git repo ⇒ `gh workflow run` / `gh run list` ที่ต้อง **เดา** ว่าคือ repo ไหน
+   *   ไปหา `git remote` แล้วตาย
+   * ⇒ เส้นแบ่งคือ **"คำสั่งนั้นต้องเดา repo เองไหม"** ไม่ใช่ "ใช้ `gh` หรือเปล่า"
+   *   · `--repo <owner/repo>` = บอกตรง ๆ ✅
+   *   · `gh api /repos/<owner>/<repo>/…` = ชื่ออยู่ใน path แล้ว ✅
+   *
+   * 🔴🔴 **ห้ามอ่านข้อนี้ว่าปิด §G ข้อ 18**
+   * §G ข้อ 18 = *"guard test ค้ำโครงสร้างได้ แต่ไม่มีอะไรเคย **รัน** job นี้จริง"*
+   * ⇒ ข้อนี้ปิดแค่ **รูป `--repo` รูปเดียว** ซึ่งบังเอิญมีเงาเชิงโครงสร้างให้จับ
+   * ⇒ **ข้อ 18 ยังเปิดอยู่เต็ม ๆ** — ความล้มเหลวของ runtime environment แบบอื่น
+   *   (tool ไม่มีบน runner · env ที่ต้องมีแต่ไม่มี · สิทธิ์ไม่พอ) **ยังไม่มีอะไรจับได้ก่อน deploy**
+   *
+   * 🔴 **กับดักที่อันตรายกว่าทุกข้อในไฟล์นี้ — ต้อง strip คอมเมนต์**
+   * `readiness.yml` มีคอมเมนต์อธิบายบั๊กนี้อยู่เต็มไปหมด และคอมเมนต์นั้น**มีคำว่า
+   * `--repo`, `gh workflow run`, `/repos/` ครบ** ⇒ ถ้าไม่ strip **test จะผ่านเพราะ
+   * คอมเมนต์ของตัวเอง** แม้โค้ดจริงจะไม่มี `--repo` เลย
+   * ⇒ **false negative ที่เงียบสนิท** — ทิศตรงข้ามกับกับดักของข้อ A/B (ซึ่งเป็น false positive
+   *   ที่แดงให้เห็นทันที) ⇒ **ข้อนี้พังแล้วไม่มีใครรู้** จึงต้องมีเทสต์ mutation ยืนยันเสมอ
+   */
+  it("ทุกคำสั่ง `gh` ใน job ที่ไม่มี checkout ต้องมี `--repo` หรือ path `/repos/`", () => {
+    for (const [jobName, job] of Object.entries(workflow.jobs)) {
+      if (jobHasCheckout(job)) continue; // มี checkout ⇒ gh เดา repo จาก git remote ได้
+
+      for (const step of job.steps) {
+        if (typeof step.run !== "string") continue;
+
+        for (const cmd of shellCommands(step.run)) {
+          if (!/\bgh\b/.test(cmd)) continue;
+
+          const named = /--repo\b/.test(cmd) || /\/repos\//.test(cmd);
+          expect(
+            named,
+            `job "${jobName}" ไม่มี actions/checkout แต่คำสั่งนี้ไม่ได้ระบุ repo:\n  ${cmd}\n` +
+              `⇒ gh จะไปหา git remote ใน cwd แล้วตายด้วย "fatal: not a git repository" (run #26)`
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("ยืนยันว่ากฎนี้มีของให้ตรวจจริง — `dispatch` ไม่มี checkout และมีคำสั่ง `gh` อยู่", () => {
+    // กันกฎที่ผ่านตลอดกาลเพราะไม่เคยแตะอะไรเลย (เหมือนเคสกัน false-positive ของข้อ B)
+    const dispatch = workflow.jobs.dispatch;
+    expect(jobHasCheckout(dispatch)).toBe(false);
+
+    const ghCmds = dispatch.steps
+      .flatMap((s) => (typeof s.run === "string" ? shellCommands(s.run) : []))
+      .filter((c) => /\bgh\b/.test(c));
+    expect(ghCmds.length).toBeGreaterThanOrEqual(2); // gh workflow run + gh run list
+  });
+
+  it("job `check` มี checkout ⇒ กฎนี้ **ไม่บังคับ** กับมัน — โดยตั้งใจ", () => {
+    // 🔑 บันทึกช่องว่างที่ตั้งใจเปิดไว้ ไม่ใช่ช่องที่มองข้าม:
+    //    `check` มี `actions/checkout` ⇒ cwd เป็น git repo ⇒ `gh` เดา repo ได้เอง
+    //    ⇒ ถ้าเปลี่ยน `gh api` ของมันไปใช้ path ที่ไม่ขึ้นต้นด้วย `/repos/` **test นี้จะไม่แดง**
+    //    ⇒ ยอมรับได้เพราะมันจะ **ยังทำงานได้จริงบน runner** — กฎนี้ค้ำ "รันได้ไหม" ไม่ใช่ "สวยไหม"
+    // ⚠️ แต่ถ้าวันหนึ่งมีคนถอด checkout ออกจาก `check` กฎจะกลับมาบังคับทันทีโดยอัตโนมัติ
+    //    (เพราะเงื่อนไขผูกกับ "มี checkout ไหม" ไม่ใช่ชื่อ job) — ตรงนี้คือส่วนที่ทำให้กฎไม่เปราะ
+    //
+    // 📌 **วัดแล้ว (mutation 2026-08-10):** เปลี่ยน `gh api` ของ `check` เป็น path ที่ไม่ขึ้นต้น
+    //    ด้วย `/repos/` **ก็ยังแดง** — แต่แดงจากเคส *"assertion ของ cache ตรวจผ่าน REST API"*
+    //    **ไม่ใช่จากกฎข้อนี้** ⇒ เป็นการครอบโดยเคสอื่น ไม่ใช่โดยกฎนี้
+    //    ⛔ อย่าอ่านว่ากฎนี้ครอบ `check` อยู่แล้ว — ถ้าเคสนั้นถูกลบ ช่องจะเปิดทันที
+    expect(jobHasCheckout(workflow.jobs.check)).toBe(true);
+  });
+});
+
 describe("§H-12 — โครงสร้างของ readiness.yml ที่ห้ามถูกรื้อเงียบ ๆ", () => {
   it("มี job ครบสองตัว: `dispatch` และ `check`", () => {
     // ค้ำสมมติฐานของ test ทุกข้อด้านล่าง — ถ้า job ถูกเปลี่ยนชื่อ/ยุบรวม

@@ -19,8 +19,11 @@
   ⇒ **แถว H + I ยังว่าง**
 · ✅ **แต่ P2 เองทำงานเต็มระบบบน prod แล้ว** — แถว 10 (`verdict=OK` จาก live probe จริง)
 · ✅ §3.5 ตัดสินแล้ว 2026-08-09: การตีความ **(ข)** ถูก ⇒ gate เดิมของ §F ปิดไปแล้ว **แต่ประตูใหม่เปิดขึ้นแทน**
-· ✅ **แถว G ปิดแล้ว 2026-08-10** (Discord ส่งถึงจริง — แถว 12) ⇒ **มีผล 12 แถว · ว่าง 6 แถว** (A · C · D · E · H · I) · F = N/A
+· ✅ **แถว G ปิดแล้ว 2026-08-10** (Discord ส่งถึงจริง — แถว 12) ⇒ **แถวที่มีผล 14 แถว** (+13/+14 หลักฐานด้านบวกจาก deploy) · **ยังว่าง 6 แถว** (A · C · D · E · H · I) · F = N/A
   ⚠️ **ปิดจาก transition 02:12Z ที่เกิดก่อน merge §H-12 — ไม่ใช่จาก deploy ของ §H-12**
+· 🔴 **deploy รอบแรกหลัง merge §H-12 ไม่ได้วัดแถว H** — job `dispatch` **รันจริง** (⇒ `if:` ถูกต้อง = แถว 13)
+  แต่ **แดงที่ run #26** (`gh` เดา repo ไม่ได้ในสภาพไม่มี checkout) ⇒ **แถว H = ⬜ INCONCLUSIVE ไม่ใช่ FAIL**
+  ⇒ แก้ที่ `fix/phase-39-dispatch-repo-context` · **deploy ของ fix = การวัดรอบใหม่** · บทเรียน → erratum **§G ข้อ 18**
 · 🔴 **finding ใหม่ 2026-08-10 (นอกทุกแถว):** คาบจริงของ scheduled workflow ≈ **2 ชั่วโมง ไม่ใช่ 15 นาที**
   ⇒ **transition-only ถูกลัดวงจรไปแล้ว** · เป็นข้อมูลตั้งต้นของงาน incident → erratum **§G ข้อ 17**
 **อัปเดตล่าสุด:** 2026-08-10 (หลังปิดแถว G)
@@ -44,6 +47,9 @@
 
 | 10 | ✅ **P2 ทำงานเต็มระบบบน prod** *(หลักฐานด้านบวก)* | run #8 (`workflow_dispatch` บน `main`) — `scripts/readiness-check.ts scheduled` ยิงโดเมน production จริง | **`verdict=OK`** · `http 200: OK` · `lastCheckAt 2026-08-09T16:03:49.423Z` ⇒ **QStash + Redis + heartbeat + counter ปกติทั้งหมด** | 2026-08-09 |
 | 11 | **ผู้เฝ้ารันได้จริงบน GitHub Actions** (`npm ci` · secrets · probe token · `PROD_BASE_URL`) | run #8 รันจบและอ่าน shape ที่ auth ได้ | สำเร็จ — ไม่ใช่ `401`/`INCONCLUSIVE` | 2026-08-09 |
+
+| 13 | ✅ **ตัวกรอง `if:` ของ job `dispatch` ตรงกับที่ Vercel ส่งจริง** *(หลักฐานด้านบวก · ปิดสมมติฐานที่ไม่เคยถูกวัด)* | deploy จริงหลัง merge §H-12 — ดูว่า job `dispatch` **รัน** หรือ **`skipped`** | **รัน (ไม่ใช่ `skipped`)** ⇒ `deployment_status.state=='success'` **และ** `environment=='Production'` ตรงทั้งคู่ · ⚠️ **"ค่า ณ 2026-08-10" ไม่ใช่การรับประกัน — ไม่มีอะไรเฝ้าว่าจะเปลี่ยน (backlog B-11 ชั้น 2)** | 2026-08-10 |
+| 14 | ✅ **ตัวตรวจไม่ขึ้นเขียวทั้งที่ไม่มี run — ไม่มี false pass** *(หลักฐานด้านบวกของกฎข้อ 3 ในแบบ)* | run #26 (job `dispatch` แดงที่สเต็ปแรก) — ดู conclusion ของสเต็ป `Verify a run was actually created` | **`skipped`** (ไม่มี `if: always()`) ⇒ **ไม่มีการรายงานผ่านทั้งที่ไม่มี run ปลายทาง** ⇒ กฎ *"verify ต้องพิสูจน์ effect"* ทำงานจริง **ตั้งแต่การรันครั้งแรก** | 2026-08-10 |
 
 | 12 | ✅ **ช่องแจ้งเตือนของลำดับ 5 ส่งถึงจริง (Discord)** *(เดิมคือแถว **G** ของตารางที่ 2)* | เปิดห้อง Discord ดูข้อความจริง + ดึง log ของ run ที่ส่ง — หลักฐานดิบ: `~/Desktop/helpwise-evidence-phase39-h12/` (`g1-discord.txt` + screenshot · `g3-transition-runs.json` · `g3-run-31349121678.log`) | **run `31349121678`** · `event=schedule` · `createdAt 2026-08-10T02:11:43Z` · `conclusion=failure`<br>log: `[readiness-check] mode=scheduled verdict=FAIL prev=OK` · `[readiness-check] ส่งแจ้งเตือนแล้ว` · `[readiness-check] verdict=FAIL — job แดง`<br>Discord: `🔴 readiness FAIL` / `(scheduled · OK → FAIL)` / `ผล: http 503: FAIL` / `lastCheckAt: 2026-08-10T02:12:25.468Z` | 2026-08-10 |
 
@@ -86,7 +92,7 @@
 | C | **ลำดับ 6 — external pinger** | ตั้ง monitor + พิสูจน์ว่าดังจริง (`phase-39-pinger-runbook.md` ข้อ 5) | pinger แจ้งเตือนถึงปลายทางจริง · **ปลายทางคนละช่องกับ Slack ของลำดับ 5** | ⬜ |
 | D | **smoke ของจริงบน prod** | เรียก `/api/health/readiness` บนโดเมน production หลัง merge อย่างน้อย 1 path | ได้ marker + สถานะที่อ่านได้ (ไม่ใช่ `302`/SSO page) | ⬜ |
 | E | **cron รอบแรกหลัง merge เขียนทับ `ReadinessState`** | §F: ห้ามเชื่อค่าในตารางจนกว่า cron รอบแรกจะเขียน | `lastCheckAt` ขยับหลัง Run workflow | ⬜ |
-| H | 🔴 **ความจำข้ามทริกเกอร์ของผู้เฝ้า** (§G ข้อ 15) | ✅ **โค้ดเสร็จแล้ว** (ทาง A · §H-12) — อยู่บน `feature/phase-39-h12` **ยังไม่ merge** ⇒ **รอ `deployment_status` ตัวจริงเพื่อเก็บหลักฐาน** · ขั้นตอน + คำสั่ง + เส้นทางลบ → **`phase-39-h12-evidence-capture-2026-08-10.md`** | ✅ **เกณฑ์ที่ใช้จริง = H-1/H-2/H-3** (Dev รับแล้ว **2026-08-10 · ก่อน deploy และก่อนเห็นค่า `prev`**) — หลักฐานหลัก = log `mode=post-deploy … prev=` ที่ **`prev` ไม่ใช่ `—`** · รายละเอียด → เอกสารเก็บหลักฐาน<br>➕ **หลักฐานเสริม (ไม่ใช่เงื่อนไขปิดแถว):** ข้อความ recovery `FAIL → OK` ที่จะโผล่เองตอน incident ถูกซ่อม | ⬜ |
+| H | 🔴 **ความจำข้ามทริกเกอร์ของผู้เฝ้า** (§G ข้อ 15) | ✅ **โค้ดเสร็จแล้ว** (ทาง A · §H-12) — อยู่บน `feature/phase-39-h12` **ยังไม่ merge** ⇒ **รอ `deployment_status` ตัวจริงเพื่อเก็บหลักฐาน** · ขั้นตอน + คำสั่ง + เส้นทางลบ → **`phase-39-h12-evidence-capture-2026-08-10.md`** | ✅ **เกณฑ์ที่ใช้จริง = H-1/H-2/H-3** (Dev รับแล้ว **2026-08-10 · ก่อน deploy และก่อนเห็นค่า `prev`**) — หลักฐานหลัก = log `mode=post-deploy … prev=` ที่ **`prev` ไม่ใช่ `—`** · รายละเอียด → เอกสารเก็บหลักฐาน<br>➕ **หลักฐานเสริม (ไม่ใช่เงื่อนไขปิดแถว):** ข้อความ recovery `FAIL → OK` ที่จะโผล่เองตอน incident ถูกซ่อม | ⬜ **INCONCLUSIVE (2026-08-10)** — *"post-deploy run ไม่เคยถูกสร้าง — ยังไม่ได้วัด"*<br>deploy หลัง merge: job `dispatch` **รันจริง** (⇒ `if:` ถูกต้อง) แต่ **แดงที่ run #26** (`fatal: not a git repository` — `gh` เดา repo ไม่ได้เพราะ job ไม่มี `actions/checkout` ตามแบบ) ⇒ **ไม่มี run ปลายทางให้วัด**<br>⛔ **ไม่ใช่ FAIL** — ยังไม่มีใครวัดความจำข้ามทริกเกอร์เลยสักครั้ง · แก้แล้วที่ `fix/phase-39-dispatch-repo-context` ⇒ **deploy ของ fix = การวัดรอบใหม่** |
 | I | 🔴 **assertion "สเต็ปเขียว ≠ สเต็ปทำงาน"** (§G ข้อ 16) | ✅ **โค้ดเสร็จแล้ว** (§H-12 ส่วนที่ 2) — สเต็ป verify ผ่าน **REST API** (`gh api .../actions/caches?key=…`) · ⛔ ไม่ใช้ `actions/cache/restore` (ผู้ตรวจต้องไม่ใช่ชิ้นส่วนเดียวกับผู้ถูกตรวจ) · อยู่บน `feature/phase-39-h12` **ยังไม่ merge** | 🔴 **แถวนี้มีสองครึ่ง — ปิดครึ่งเดียวไม่นับ**<br>**I-a** cache entry มีจริง (ยืนยันผ่าน REST API) — ปิดได้ตอน deploy<br>**I-b** job **แดง** เมื่อ save ไม่เกิดจริง (ทดสอบด้วยการทำให้ save ล้มโดยตั้งใจ) — **ต้องทดลองแยก ยังไม่มีแผน** | ⬜ |
 | ~~G~~ | ~~**ช่องแจ้งเตือนของลำดับ 5 ส่งถึงจริง (Discord)**~~ | — | ✅ **ปิดแล้ว 2026-08-10** → ย้ายขึ้นเป็น **แถว 12** ของตารางที่ 1 | **✅** |
 | F | ~~**FeatureFlag**~~ | — | ✅ **N/A — ยืนยันแล้ว 2026-08-09** | **N/A** |
