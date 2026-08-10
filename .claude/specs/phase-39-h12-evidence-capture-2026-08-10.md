@@ -85,6 +85,130 @@ gh run view "$DISPATCH_ID" --repo "$GH_REPO" --log > "$EVID/h2-dispatch-run.log"
 
 ---
 
+## 🔴 ถ้าไม่มีหลักฐานของ H เลย — **แยกสาเหตุก่อนสรุป**
+
+> **นี่คือความเสี่ยงอันดับ 1 ของทั้งแบบ ไม่ใช่เคสขอบ**
+> `if:` ของ job `dispatch` เทียบ **สตริงตรงตัว**:
+> `github.event.deployment_status.environment == 'Production'`
+> ⇒ ถ้า Vercel ส่ง `'production'` ตัวเล็ก หรือชื่ออื่น (`'Production – helpwise'`, `'prod'`)
+> **job จะถูกข้ามเงียบ ๆ — ไม่มี error ให้เห็น ไม่มีสเต็ปแดง ไม่มีอะไรเลย**
+> ⇒ เป็น **fail-soft เต็มรูปแบบ** ซึ่ง `CLAUDE.md` § Post-merge gate บังคับไว้เองว่า
+> *"feature ที่ออกแบบให้ fail-soft ต้องมี assertion ยืนยัน happy path บน prod เสมอ"*
+> ⇒ **หัวข้อนี้คือ assertion ตัวนั้น** — ทำด้วยมือรอบนี้ · งานทำเป็นอัตโนมัติอยู่ที่ backlog **B-11**
+
+### ⛔ สิ่งที่ **ห้าม** ใช้แยกสาเหตุ
+
+**"ไม่มีข้อความใน Discord" ไม่ช่วยแยกอะไรเลยในรอบนี้** — เพราะ `prev=FAIL → verdict=FAIL`
+⇒ **เงียบตามดีไซน์อยู่แล้ว** ไม่ว่า `dispatch` จะทำงานหรือไม่ทำงาน
+⇒ ⛔ **ห้ามอ่านความเงียบเป็นสัญญาณว่า dispatch ไม่ทำงาน** และห้ามอ่านเป็นสัญญาณว่ามันทำงานด้วย
+· ความเงียบรอบนี้ **ไม่มีค่าเชิงข้อมูลสำหรับคำถามนี้เลย** — ต้องไปดูที่ run เท่านั้น
+
+### ขั้นที่ 0 — ตอบคำถามเดียวก่อน: **มี run จาก `deployment_status` ไหม**
+
+```bash
+gh run list --repo "$GH_REPO" --workflow readiness.yml --event deployment_status --limit 10 \
+  --json databaseId,conclusion,createdAt,headSha \
+  | tee "$EVID/x0-deployment-status-runs.json"
+```
+
+| ผลลัพธ์ | ไปที่ |
+| --- | --- |
+| มีอย่างน้อย 1 run (แม้ conclusion = `skipped`) | **อาการ (ก)** |
+| `[]` ว่างเปล่า | **อาการ (ข)** |
+
+---
+
+### อาการ (ก) — **มี run แต่ job `dispatch` ขึ้น `skipped`**
+
+**แปลว่า:** event มาถึง GitHub แล้ว · workflow ถูก trigger แล้ว · **แต่ `if:` กรองทิ้ง**
+⇒ ปัญหาอยู่ที่ **ค่าที่ Vercel ส่งมา ไม่ตรงกับสตริงที่เราเทียบ** — ไม่ใช่ที่ integration
+
+#### คำสั่งที่ใช้แยก
+
+```bash
+DS_ID=$(gh run list --repo "$GH_REPO" --workflow readiness.yml --event deployment_status \
+  --limit 1 --json databaseId --jq '.[0].databaseId') && echo "DS_ID=$DS_ID"
+
+# 1) ยืนยันว่า job ถูกข้ามจริง (ไม่ใช่ล้ม)
+gh api "/repos/$GH_REPO/actions/runs/$DS_ID/jobs" \
+  --jq '.jobs[] | {name, status, conclusion}' | tee "$EVID/xa1-jobs.json"
+
+# 2) 🔑 อ่าน "ค่าจริง" ที่ Vercel ส่ง — payload ของ deployment_status ไม่โผล่ใน gh run view
+#    ⇒ ต้องถามที่ Deployments API ซึ่งเป็นต้นทางเดียวกัน
+gh api "/repos/$GH_REPO/deployments?per_page=5" \
+  --jq '.[] | {id, environment, ref, sha: .sha[0:7], created_at}' | tee "$EVID/xa2-deployments.json"
+
+# 3) เอา id จากข้อ 2 มาอ่าน status ทีละใบ — ตรงนี้คือค่าที่ if: เอาไปเทียบเป๊ะ ๆ
+DEP_ID=<ใส่ id จากข้อ 2>
+gh api "/repos/$GH_REPO/deployments/$DEP_ID/statuses?per_page=10" \
+  --jq '.[] | {state, environment, environment_url, created_at}' | tee "$EVID/xa3-statuses.json"
+```
+
+#### สิ่งที่ต้องอ่านจากผลลัพธ์
+
+| field | เทียบกับ | ถ้าไม่ตรงแปลว่า |
+| --- | --- | --- |
+| `.environment` | สตริง **`Production`** (P ใหญ่) | ⚠️ ตัวการที่คาดไว้ — เช่นได้ `production` / ชื่อที่มี suffix |
+| `.state` | สตริง **`success`** | Vercel อาจส่ง `success` ตอนท้ายจริง แต่ใบที่ trigger เป็น `pending`/`in_progress` |
+
+> 🔑 **อ่านให้ตรง: ถ้า `environment` ไม่ตรง แปลว่า `if:` ทำงานถูกต้องตามที่เขียน — สิ่งที่ผิดคือสิ่งที่เราเขียน**
+> ไม่ใช่บั๊กของ GitHub และไม่ใช่บั๊กของ §H-12 · เป็น **สมมติฐานเรื่องสตริงที่ไม่เคยถูก verify**
+
+#### ทำอะไรต่อ
+
+1. บันทึกค่าจริงที่อ่านได้ลงเช็คลิสต์นี้ + `phase-39-closing-evidence-2026-08-09.md` **ก่อนแก้อะไร**
+2. 🔴 **หยุด — escalate ให้ Dev ตัดสิน** ว่าจะแก้ทางไหน (ทั้งสองทางแตะ `if:` = แตะกฎของแบบ ⇒ ไม่ใช่ดุลพินิจของ CC):
+   · เทียบแบบ case-insensitive · หรือ · เทียบกับสตริงจริงที่ Vercel ส่ง
+3. แถว **H บันทึกเป็น ⬜ INCONCLUSIVE** พร้อมเหตุผล *"dispatch ไม่เคยรัน เพราะ `if:` กรองทิ้ง"*
+   ⛔ **ห้ามบันทึกเป็น FAIL** — ยังไม่มีใครวัดความจำข้ามทริกเกอร์เลยสักครั้ง
+
+---
+
+### อาการ (ข) — **ไม่มี run จาก `deployment_status` เลย**
+
+**แปลว่า:** event **ไม่เคยมาถึง GitHub** ⇒ ปัญหาอยู่ **ฝั่ง Vercel integration** ไม่ใช่ที่ workflow
+
+#### คำสั่งที่ใช้แยก — แยกย่อยได้อีกชั้นหนึ่ง
+
+```bash
+# GitHub เคยได้รับ deployment จาก Vercel ไหม (deployment สร้างได้แม้ workflow ไม่ถูก trigger)
+gh api "/repos/$GH_REPO/deployments?per_page=10" \
+  --jq '.[] | {id, environment, ref, created_at}' | tee "$EVID/xb1-deployments.json"
+```
+
+| ผลลัพธ์ | แปลว่า | ทำอะไรต่อ |
+| --- | --- | --- |
+| **มี deployment** (และมี status) **แต่ไม่มี workflow run** | event มาถึง GitHub แล้ว **แต่ workflow ไม่ถูก trigger** | ตรวจ: workflow อยู่บน **default branch** แล้วจริงไหม (`gh api "/repos/$GH_REPO/contents/.github/workflows/readiness.yml?ref=main" --jq .sha`) · Actions ถูก disable ทั้ง repo หรือเปล่า · **60-day auto-disable** (ดูหัว `readiness.yml`) |
+| **ไม่มี deployment เลย** | Vercel **ไม่เคยสร้าง deployment status บน GitHub** | ไปที่ Vercel → Project Settings → **Git Integration** · ตรวจว่า deploy รอบนี้มาจาก git push จริง (ไม่ใช่ redeploy จาก dashboard ซึ่งอาจไม่ยิง event) |
+
+```bash
+# เสริม: ดูว่า deploy ล่าสุดที่ Vercel ทำ ผูกกับ commit ไหน (ใช้เทียบกับ main HEAD)
+git log --oneline -1 main
+```
+
+#### ทำอะไรต่อ
+
+1. บันทึกผลของทั้งสองคำสั่งลง `$EVID` **ก่อน**เข้าไปแตะอะไรบน dashboard
+2. แถว **H บันทึกเป็น ⬜ INCONCLUSIVE** เหตุผล *"event ไม่เคยมาถึง — ยังไม่ได้วัด"*
+3. ⚠️ **ถ้าเป็นเคส "redeploy จาก dashboard"** ⇒ ไม่ใช่บั๊ก ⇒ **แค่ต้องหา deploy ที่มาจาก git push จริงมาวัดใหม่**
+   ⇒ อย่าเพิ่งไปแก้อะไร
+
+---
+
+### 🔑 ตารางสรุปการแยกสาเหตุ — อ่านแถวเดียวจบ
+
+| สังเกตได้ | สาเหตุ | อยู่ฝั่งไหน | แถว H บันทึกว่า |
+| --- | --- | --- | --- |
+| run มี · job `dispatch` = `skipped` | `if:` กรองทิ้ง (สตริงไม่ตรง) | **โค้ดของเรา** | ⬜ INCONCLUSIVE |
+| ไม่มี run · **มี** deployment | workflow ไม่ถูก trigger | GitHub Actions config | ⬜ INCONCLUSIVE |
+| ไม่มี run · **ไม่มี** deployment | Vercel ไม่ยิง event | Vercel integration | ⬜ INCONCLUSIVE |
+| run มี · job `dispatch` รัน · `prev=—` | dispatch ทำงาน แต่ cache ยังไม่มีของให้อ่าน | ยังไม่ถึงเวลา | ⬜ INCONCLUSIVE (รอ cron) |
+| run มี · job `dispatch` รัน · **`prev` มีค่า** | ✅ ทุกอย่างทำงาน | — | ✅ **ผ่าน** |
+
+⛔ **ทั้งสี่แถวแรก = "ยังไม่ได้วัด" ไม่ใช่ "วัดแล้วไม่ผ่าน"** — ห้ามบันทึกแถว H เป็น FAIL จากอาการเหล่านี้
+
+---
+
 ## แถว I — assertion "สเต็ปเขียว ≠ สเต็ปทำงาน" (§G ข้อ 16)
 
 > 🔴 **แถวนี้มีสองครึ่ง และ deploy รอบนี้ปิดได้แค่ครึ่งเดียว — พูดให้ตรงตั้งแต่ต้น**
@@ -202,6 +326,7 @@ gh run list --repo "$GH_REPO" --workflow readiness.yml --limit 40 \
 | 1 | `export GH_REPO` / `EVID` (บนสุดของไฟล์นี้) | ก่อน merge |
 | 2 | (ถ้าต้องการ) snapshot `ReadinessState` + `MechanismHeartbeat` | 🔴 **≤ 15 นาที** หลัง post-deploy run |
 | 3 | ดึง log ของ run `dispatch` + run `post-deploy` (แถว H) | ≤ 1 ชม. |
+| 3b | 🔴 **ถ้าไม่เจอ run หรือ `dispatch` ขึ้น `skipped`** → ไป § *"ถ้าไม่มีหลักฐานของ H เลย"* **ก่อนสรุปอะไรทั้งสิ้น** | ≤ 1 ชม. |
 | 4 | ดึง cache entry ผ่าน REST API (แถว I-a) | ≤ 24 ชม. |
 | 5 | เปิดห้อง Discord เก็บ G-1/G-2 + log G-3 ของ transition 02:12Z | ไม่เร่ง (ทำได้ตั้งแต่ตอนนี้) |
 | 6 | เขียนผลลง `phase-39-closing-evidence-2026-08-09.md` — **เฉพาะแถวที่มีผลจริง** | หลังเก็บครบ |
