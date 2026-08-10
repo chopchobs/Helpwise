@@ -136,8 +136,15 @@ gh run list --repo "$GH_REPO" --workflow readiness.yml --event deployment_status
 
 | ผลลัพธ์ | ไปที่ |
 | --- | --- |
-| มีอย่างน้อย 1 run (แม้ conclusion = `skipped`) | **อาการ (ก)** |
-| `[]` ว่างเปล่า | **อาการ (ข)** |
+| มี run · job `dispatch` = **`skipped`** | **อาการ (ก)** — `if:` กรองทิ้ง |
+| มี run · job `dispatch` = **`failure`** | **อาการ (ค)** — รันแล้วพัง 🔴 *(เพิ่ม 2026-08-10 จากของจริง)* |
+| `[]` ว่างเปล่า | **อาการ (ข)** — event ไม่เคยมาถึง |
+
+> ⚠️ **อาการ (ก) กับ (ค) ต้องแยกกันเด็ดขาด — แก้คนละที่คนละแบบ**
+> (ก) = **ไม่เคยเข้าไปข้างใน job เลย** ⇒ ปัญหาอยู่ที่เงื่อนไข
+> (ค) = **เข้าไปแล้วตายข้างใน** ⇒ ปัญหาอยู่ที่สเต็ป
+> ⇒ ทั้งคู่ให้ผลปลายทางเหมือนกันเป๊ะ (**ไม่มี post-deploy run · แถว H วัดไม่ได้**)
+> ⇒ ถ้าดูแค่ *"ไม่มี run"* จะไปแก้ผิดที่
 
 ---
 
@@ -218,11 +225,61 @@ git log --oneline -1 main
 
 ---
 
+### อาการ (ค) — **job `dispatch` รันแล้วพัง** 🔴 *(เพิ่ม 2026-08-10 — เกิดจริงที่ run #26)*
+
+**แปลว่า:** `if:` ถูกต้อง · event มาถึง · job เข้าไปข้างในแล้ว · **แต่สเต็ปข้างในตาย**
+⇒ ปัญหาอยู่ที่ **สเต็ป** ไม่ใช่เงื่อนไข ⇒ อ่าน log ตรง ๆ ได้เลย ไม่ต้องไปไล่ payload
+
+#### ของจริงครั้งแรก — เก็บไว้เป็นตัวอย่าง
+
+```
+failed to run git: fatal: not a git repository (or any of the parent directories): .git
+```
+`gh workflow run` / `gh run list` ต้อง**เดา**ว่าคือ repo ไหน ⇒ ไปหา `git remote` ⇒ job นี้
+**ไม่มี `actions/checkout` โดยตั้งใจ** ⇒ cwd ไม่ใช่ git repo ⇒ ตาย
+· แก้แล้วด้วย `GH_REPO` + `--repo` (ไม่ใช่ด้วยการเพิ่ม checkout) → `readiness.yml` สเต็ปของ job `dispatch`
+
+#### คำสั่งที่ใช้แยก
+
+```bash
+DS_ID=$(gh run list --repo "$GH_REPO" --workflow readiness.yml --event deployment_status \
+  --limit 1 --json databaseId --jq '.[0].databaseId') && echo "DS_ID=$DS_ID"
+
+# 1) job ไหนพัง และสเต็ปไหน
+gh api "/repos/$GH_REPO/actions/runs/$DS_ID/jobs" \
+  --jq '.jobs[] | {name, conclusion, steps: [.steps[] | {name, conclusion}]}' \
+  | tee "$EVID/xc1-jobs.json"
+
+# 2) ข้อความ error จริง
+gh run view "$DS_ID" --repo "$GH_REPO" --log-failed | tee "$EVID/xc2-failed.log"
+```
+
+#### สิ่งที่ต้องอ่าน + ทำอะไรต่อ
+
+| อ่านอะไร | แปลว่า |
+| --- | --- |
+| สเต็ป **`Dispatch post-deploy check`** แดง | ยังไม่ได้สั่งอะไรเลย ⇒ **ไม่มี run ปลายทางแน่นอน** |
+| สเต็ป **`Verify a run was actually created`** = `skipped` | ✅ **ถูกต้อง** — ตัวตรวจไม่ขึ้นเขียวทั้งที่ไม่มี run (ดูกล่องด้านล่าง) |
+| สเต็ป `Dispatch…` เขียว แต่ `Verify…` แดง | สั่งไปแล้วแต่ run ไม่เกิด ⇒ เป็นเคสของ §H-12 ความเสี่ยงข้อ 4 ตัวจริง |
+
+> ✅ **บันทึกไว้เป็นหลักฐาน: กฎข้อ 3 ของแบบทำงานจริงในการรันครั้งแรก**
+> สเต็ป `Verify a run was actually created` **ไม่ขึ้นเขียว** เมื่อสเต็ปก่อนหน้าตาย (มันถูก `skipped`
+> เพราะไม่มี `if: always()`) ⇒ **ไม่มี false pass**
+> ⇒ ถ้าตอนนั้นเผลอใส่ `if: always()` ให้สเต็ปนี้ มันจะรันต่อ หา run ไม่เจอ แล้วแดงด้วยข้อความ
+>   *"สั่ง dispatch แล้วแต่ไม่พบ run"* ⇒ **ชี้ผิดที่** (บอกว่า dispatch สั่งแล้วแต่ run ไม่เกิด
+>   ทั้งที่ความจริงคือยังไม่เคยสั่ง) ⇒ การไม่ใส่ `if: always()` ตรงนี้เป็นสิ่งที่ถูก
+
+**ทำอะไรต่อ:** แก้สเต็ปที่พัง → deploy ใหม่ → **การ deploy ของ fix คือการวัดแถว H รอบใหม่**
+· แถว H ระหว่างนี้ = ⬜ **INCONCLUSIVE** เหตุผล *"post-deploy run ไม่เคยถูกสร้าง — ยังไม่ได้วัด"*
+
+---
+
 ### 🔑 ตารางสรุปการแยกสาเหตุ — อ่านแถวเดียวจบ
 
 | สังเกตได้ | สาเหตุ | อยู่ฝั่งไหน | แถว H บันทึกว่า |
 | --- | --- | --- | --- |
-| run มี · job `dispatch` = `skipped` | `if:` กรองทิ้ง (สตริงไม่ตรง) | **โค้ดของเรา** | ⬜ INCONCLUSIVE |
+| run มี · job `dispatch` = `skipped` | `if:` กรองทิ้ง (สตริงไม่ตรง) | **โค้ดของเรา — เงื่อนไข** | ⬜ INCONCLUSIVE |
+| run มี · job `dispatch` = `failure` | สเต็ปข้างในตาย (เกิดจริง run #26) | **โค้ดของเรา — สเต็ป** | ⬜ INCONCLUSIVE |
 | ไม่มี run · **มี** deployment | workflow ไม่ถูก trigger | GitHub Actions config | ⬜ INCONCLUSIVE |
 | ไม่มี run · **ไม่มี** deployment | Vercel ไม่ยิง event | Vercel integration | ⬜ INCONCLUSIVE |
 | run มี · job `dispatch` รัน · `prev=—` | dispatch ทำงาน แต่ cache ยังไม่มีของให้อ่าน | ยังไม่ถึงเวลา | ⬜ INCONCLUSIVE (รอ cron) |
