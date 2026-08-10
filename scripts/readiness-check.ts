@@ -136,6 +136,14 @@ async function fetchProbe(baseUrl: string, token: string | null): Promise<ProbeV
  *    ผ่าน Slack-compatible endpoint (`<discord-webhook>/slack`) ซึ่งรับ payload `{ text }`
  *    รูปแบบเดียวกับ Slack และตอบ `204` ⇒ `res.ok` เป็น true
  * ⇒ โค้ดนี้ใช้ได้กับทั้งสองเจ้าโดยไม่ต้องแยกทาง (backlog B-8 จะ rename + รองรับสอง payload)
+ *
+ * 🔴 **ข้อจำกัดของปลายทางที่ต้องรู้ก่อนแก้ข้อความแจ้งเตือน (บันทึก 2026-08-10):**
+ *    Slack-compatible endpoint ของ Discord เป็น **shim ที่รองรับแค่ subset ของ payload ฝั่ง Slack**
+ *    ⇒ ⛔ **ห้ามใช้ Slack Block Kit** (`blocks` / `attachments` / element ซับซ้อน) — ใช้ **ข้อความล้วนใน `text`** เท่านั้น
+ *    ⇒ ถ้าเปลี่ยนไปส่ง Block Kit: Discord อาจตอบ `204` เหมือนเดิมแต่ **ไม่ขึ้นข้อความในห้อง**
+ *      ⇒ `res.ok` เป็น true ⇒ job ยังเขียว ⇒ **ช่องเตือนเงียบโดยไม่มีอะไรบอกว่าเงียบ**
+ *      = รูปทรงเดียวกับ §G ข้อ 16 ("สเต็ปเขียว ≠ สเต็ปทำงาน") ย้ายมาอยู่ที่ปลายทางแจ้งเตือน
+ *    ⚠️ และเป็นความเงียบชนิดที่แถว **G** ของตารางหลักฐานปิดเฟสตั้งใจจะจับพอดี — อย่าเปิดรูใหม่ตรงนี้
  */
 async function notifySlack(webhook: string, text: string): Promise<void> {
   const res = await fetch(webhook, {
