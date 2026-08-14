@@ -40,8 +40,26 @@ export const READINESS_MARKER = "helpwise.readiness.v1";
  * 🔴 **สนามที่สาม:** `cron:` ใน `.github/workflows/readiness.yml` **ผูกด้วย import ไม่ได้ (YAML)**
  *    ⇒ มี test อ่านไฟล์ workflow มาเทียบกับค่านี้ (`readiness-cadence.test.ts`)
  *    เหตุผล: ค่าที่ถูกคัดลอกไว้หลายที่โดยไม่มีอะไรผูก คือรูปทรงที่ทำให้เกิด §G ข้อ 13 พอดี
+ *
+ * 🔴 **15 → 60 (2026-08-14) — นี่คือการ *พูดความจริง* ไม่ใช่การขยายเกณฑ์ให้ผู้เฝ้าเงียบ**
+ *
+ * วัดจาก GitHub Actions 89 run (109.50 ชม.): GitHub **ไม่ทำตามคาบ 15 นาทีที่เราประกาศไว้เลย**
+ * — สร้าง run ตามจังหวะของตัวเองที่ median **65.3 นาที** (ดู `.claude/evidence/phase-39-h17-2026-08-14/`)
+ * ⇒ ค่า `15` เป็น **สมมติฐานที่ถูกวัดแล้วว่าเท็จ** · ปล่อยไว้ = เกณฑ์ตั้งชนความเป็นจริงตลอดเวลา
+ *
+ * ⚠️ **ทำไมไม่ใช่การละเมิด "ข้อ 4" (ห้ามขยายเกณฑ์เพื่อให้ผู้เฝ้าเงียบ)** — ตรวจสามข้อแล้ว:
+ *   1. heartbeat ของ `readiness-probe` ถูกอ่าน **เฉพาะตอน probe รัน** (`readHeartbeats()` ถูกเรียก
+ *      ที่เดียวใน `runLiveProbe()`) ⇒ ถ้าผู้เฝ้าหยุดสนิท **ไม่มีใครอ่านมันเลย**
+ *      ⇒ มันตรวจ "ผู้เฝ้าหยุด" ไม่ได้โดยโครงสร้าง (circular) — ไม่เคยเป็นเครื่องตรวจจับตัวจริง
+ *   2. `readiness-cadence.test.ts` มี assertion อยู่แล้วว่า heartbeat ต้องดัง **ทีหลัง**
+ *      in-band gap check ⇒ **โค้ดเองประกาศว่า `detectGap()` คือตัวหลัก · heartbeat คือ backstop**
+ *   3. เกณฑ์ของ `sla-sweep` (300s × 3) ไม่ถูกกระทบ — มันเป็น literal ไม่ได้ derive จากค่านี้
+ *   ⇒ ตัวตรวจจับจริงคือ `detectGap()` ซึ่ง **แม่นขึ้น** เมื่อคาบตรงความจริง (ยิง 100% → 10.2% ของช่วง)
+ *
+ * ⚠️ **สิ่งที่ยังไม่รู้:** ประกาศเป็นรายชั่วโมงแล้ว GitHub จะให้อะไรกลับมา **ไม่มีใครวัด**
+ *    ⇒ ต้องรัน `gh run list` + `analyze.mjs` ซ้ำอีก **1 วันหลัง merge** ก่อนสรุปอะไรทั้งสิ้น
  */
-export const CRON_INTERVAL_MINUTES = 15;
+export const CRON_INTERVAL_MINUTES = 60;
 
 // =============================================================================
 // VERDICT
@@ -57,7 +75,13 @@ export const CRON_INTERVAL_MINUTES = 15;
  *    ต่างกันแค่ข้อความ: `FAIL` = ระบบพัง ไปดูว่าอะไรพัง · `INCONCLUSIVE` = วัดไม่ได้
  *    ต้องมีคนไปดูว่าทำไมวัดไม่ได้ (erratum §B(ค))
  */
-export type Verdict = "OK" | "DEGRADED" | "FAIL" | "STALE" | "INCONCLUSIVE";
+export type Verdict =
+  | "OK"
+  | "DEGRADED"
+  | "FAIL"
+  | "STALE"
+  | "WATCHER_LATE"
+  | "INCONCLUSIVE";
 
 /** verdict ที่ต้องส่งเสียงดัง — สองตัวนี้ดังเท่ากัน ต่างกันแค่ข้อความ */
 export const LOUD_VERDICTS: readonly Verdict[] = ["FAIL", "INCONCLUSIVE"];
@@ -97,7 +121,13 @@ export interface FailingComponent {
   detail: string;
 }
 
-const VALID_STATUSES = new Set(["OK", "DEGRADED", "FAIL", "STALE"]);
+const VALID_STATUSES = new Set([
+  "OK",
+  "DEGRADED",
+  "FAIL",
+  "STALE",
+  "WATCHER_LATE",
+]);
 
 /** ตัดข้อความยาวให้พอดีหนึ่งบรรทัด — เพดาน ไม่ใช่ "พยายามสั้น" */
 const DETAIL_MAX_CHARS = 90;
@@ -254,6 +284,14 @@ export function verdictHeadline(v: Verdict): string {
       return "🔴 readiness FAIL — ระบบพัง ไปดูว่าอะไรพัง";
     case "STALE":
       return "🟡 readiness STALE — ผลตรวจเก่าเกินไป ไม่มีอะไรวัดสดอยู่";
+    // 🔑 ต้องบอก **สองอย่าง** พร้อมกัน: ผลตรวจ *สด* + ของที่ค้างคือ *คาบของผู้เฝ้าเอง*
+    //    ⛔ ห้ามใช้ถ้อยคำของ STALE ซ้ำ — มันบอกตรงข้ามกับความจริงของเคสนี้
+    //    (incident 2026-08-10 §5.1: snapshot สดภายใน ~1 วินาที ตอนที่ถูกรายงานว่าค้าง)
+    case "WATCHER_LATE":
+      return (
+        "🟡 ผู้เฝ้าเต้นไม่ทันคาบของตัวเอง — ผลตรวจสด แต่รอบก่อนห่างเกินเกณฑ์ " +
+        "(ไปดูที่ scheduler ไม่ใช่ที่ระบบ)"
+      );
     case "INCONCLUSIVE":
       return "🔴 readiness INCONCLUSIVE — วัดไม่ได้ ต้องมีคนไปดูว่าทำไมวัดไม่ได้";
   }

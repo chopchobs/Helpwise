@@ -316,6 +316,59 @@ describe("readiness — §F: ไม่พบ heartbeat = FAIL เสมอ", () 
   });
 });
 
+describe("readiness — ข้อ 3: `WATCHER_LATE` ผ่าน route จริง (end-to-end)", () => {
+  /** heartbeat ที่เต้นล่าสุดเมื่อ `agoSeconds` วินาทีที่แล้ว */
+  const beat = (mechanism: string, agoSeconds: number, expected: number | null) => ({
+    mechanism,
+    lastBeatAt: new Date(Date.now() - agoSeconds * 1000),
+    expectedIntervalSeconds: expected,
+    updatedAt: new Date(),
+  });
+  const FRESH = 60;
+  const STALE = 300 * 3 + 60;
+
+  it("ผู้เฝ้าค้างคนเดียว → status=WATCHER_LATE และ **HTTP 200** (ระบบยังใช้งานได้)", async () => {
+    mocks.heartbeatFindMany.mockResolvedValue([
+      beat("sla-sweep", FRESH, 300),
+      beat("readiness-probe", STALE, 300),
+    ]);
+    const { res, json } = await callWith({ [READINESS_AUTH_HEADER]: TOKEN });
+
+    expect(json.data.components.heartbeat.status).toBe("watcher_late");
+    expect(json.data.status).toBe("WATCHER_LATE");
+    expect(json.data.reasons).toContain("heartbeat_watcher_late");
+    // 🔑 200 เพราะ component อื่น ok หมด + live probe รอบนี้สำเร็จ ⇒ ผู้ใช้ไม่กระทบ
+    //    (incident 2026-08-10: 503 ตอนนั้นคือคำตัดสินของผู้เฝ้า ไม่ใช่อาการของเว็บ)
+    expect(res.status).toBe(200);
+    expect(json.data.components.qstash.status).toBe("ok");
+    expect(json.data.components.redis.status).toBe("ok");
+  });
+
+  it("ผู้ถูกเฝ้าค้าง → FAIL + 503 เหมือนเดิม (เส้นทางลบ — ห้ามลดชั้นเป็น WATCHER_LATE)", async () => {
+    mocks.heartbeatFindMany.mockResolvedValue([
+      beat("sla-sweep", STALE, 300),
+      beat("readiness-probe", FRESH, 300),
+    ]);
+    const { res, json } = await callWith({ [READINESS_AUTH_HEADER]: TOKEN });
+
+    expect(json.data.status).toBe("FAIL");
+    expect(json.data.reasons).toContain("heartbeat_error");
+    expect(res.status).toBe(503);
+  });
+
+  it("ค้างทั้งคู่ → FAIL ชนะ แต่ detail บอกครบทั้งสองตัว", async () => {
+    mocks.heartbeatFindMany.mockResolvedValue([
+      beat("sla-sweep", STALE, 300),
+      beat("readiness-probe", STALE, 300),
+    ]);
+    const { json } = await callWith({ [READINESS_AUTH_HEADER]: TOKEN });
+
+    expect(json.data.status).toBe("FAIL");
+    expect(json.data.components.heartbeat.detail).toContain("sla-sweep");
+    expect(json.data.components.heartbeat.detail).toContain("readiness-probe");
+  });
+});
+
 describe("readiness — QStash ผ่าน client ตัวเดียวกับ publish", () => {
   it("live probe เรียก probeQStashReadOnly() ของ @/lib/queue (ไม่ประกอบ URL เอง)", async () => {
     await callWith({ [READINESS_AUTH_HEADER]: TOKEN });

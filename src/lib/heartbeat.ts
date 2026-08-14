@@ -32,11 +32,31 @@ import { CRON_INTERVAL_MINUTES } from "@/lib/readiness-verdict";
  * โดยธรรมชาติ (ไม่มี message เข้ามาก็ไม่เต้น ซึ่งไม่ใช่ความผิดปกติ)
  * ⇒ กลไกพวกนี้บอกได้แค่ "เคยทำงานล่าสุดเมื่อไร" ไม่ถูกใช้ตัดสิน stale
  */
+/**
+ * บทบาทของกลไกในระบบเฝ้า — **แยกด้วย field ไม่ใช่ยกเว้นตามชื่อ** (§H-5 · ข้อ 3)
+ *
+ * · `watched` — ของที่ถูกเฝ้า · ค้าง = **ระบบพัง** ⇒ `FAIL`
+ * · `watcher` — ตัวเฝ้าเอง · ค้าง = **ผู้เฝ้าเต้นไม่ทันคาบตัวเอง** ⇒ `WATCHER_LATE`
+ *   (ผลตรวจในรอบนั้น **สด** — สิ่งที่ค้างคือจังหวะของผู้เฝ้า ไม่ใช่ของระบบ)
+ *
+ * 🔴 **ทำไมต้องเป็น field ไม่ใช่ `if (m === "readiness-probe")`:**
+ * การยกเว้นตามชื่อคือที่ที่ภายหลังใช้ซ่อนของจริง — วันหนึ่งจะมีคนเติมชื่อที่สองเข้าไปในเงื่อนไข
+ * เพื่อให้เสียงเงียบลง โดยไม่มีใครต้องอธิบายว่าทำไมกลไกนั้นถึง "ไม่นับ"
+ * ⇒ บทบาทเป็นข้อเท็จจริงของกลไก ⇒ ต้องประกาศคู่กับกลไก และคอมไพเลอร์บังคับให้ครบทุกตัว
+ */
+export type MechanismRole = "watched" | "watcher";
+
+export interface MechanismSpec {
+  /** คาบที่คาด (วินาที) · `null` = event-driven ⇒ ตัดสิน "ค้าง" ไม่ได้ */
+  intervalSeconds: number | null;
+  role: MechanismRole;
+}
+
 export const MECHANISMS = {
   /** QStash schedule ทุก 5 นาที — กลไกเดียวที่มีคาบแน่นอน ⇒ ใช้ตัดสิน stale ได้ */
-  "sla-sweep": 300,
-  "send-email": null,
-  "webhook-deliver": null,
+  "sla-sweep": { intervalSeconds: 300, role: "watched" },
+  "send-email": { intervalSeconds: null, role: "watched" },
+  "webhook-deliver": { intervalSeconds: null, role: "watched" },
   /**
    * P2 เต้นเองทุก live probe — **คาบ = คาบของ cron ที่มาเรียก** ไม่ใช่ min-interval
    *
@@ -49,8 +69,12 @@ export const MECHANISMS = {
    * ✅ ตอนนี้ดึงจาก **แหล่งเดียวกับที่ `readiness-check.ts` ใช้** ⇒ สองค่าเพี้ยนจากกันไม่ได้อีก
    *    (`cron:` ใน workflow เป็นสนามที่สาม — ผูกด้วย import ไม่ได้ จึงมี test อ่าน yml มาเทียบ)
    */
-  "readiness-probe": CRON_INTERVAL_MINUTES * 60,
-} as const;
+  "readiness-probe": {
+    intervalSeconds: CRON_INTERVAL_MINUTES * 60,
+    // 🔑 ตัวเดียวที่เป็น `watcher` — มันคือ P2 เอง
+    role: "watcher",
+  },
+} as const satisfies Record<string, MechanismSpec>;
 
 export type MechanismName = keyof typeof MECHANISMS;
 
@@ -94,7 +118,7 @@ export async function recordHeartbeat(mechanism: MechanismName): Promise<void> {
       create: {
         mechanism,
         lastBeatAt: now,
-        expectedIntervalSeconds: MECHANISMS[mechanism],
+        expectedIntervalSeconds: MECHANISMS[mechanism].intervalSeconds,
       },
       update: { lastBeatAt: now },
     });
@@ -120,11 +144,15 @@ export interface HeartbeatRow {
 
 export interface HeartbeatReport {
   /**
-   *  ok      — กลไกที่มีคาบทุกตัวเต้นอยู่ในหน้าต่างที่คาด
-   *  error   — มีอย่างน้อยหนึ่งกลไกที่มีคาบค้างเกินหน้าต่าง
-   *  missing — **ไม่พบแถวของกลไกที่มีคาบเลย** ⇒ FAIL เสมอ (§F ห้าม fallback เป็น PASS)
+   *  ok           — กลไกที่มีคาบทุกตัวเต้นอยู่ในหน้าต่างที่คาด
+   *  error        — มีอย่างน้อยหนึ่งกลไก **`watched`** ที่ค้างเกินหน้าต่าง ⇒ ระบบพัง ⇒ `FAIL`
+   *  watcher_late — ค้างเฉพาะกลไก **`watcher`** ⇒ ผู้เฝ้าเต้นไม่ทันคาบตัวเอง ⇒ `WATCHER_LATE`
+   *  missing      — **ไม่พบแถวของกลไกที่มีคาบเลย** ⇒ FAIL เสมอ (§F ห้าม fallback เป็น PASS)
+   *
+   * ⚠️ ลำดับความรุนแรง: `missing`/`error` > `watcher_late` > `ok`
+   *    ⇒ ถ้าค้างทั้งสองบทบาทพร้อมกัน **`error` ชนะ** (ของที่ถูกเฝ้าพังสำคัญกว่าจังหวะของผู้เฝ้า)
    */
-  status: "ok" | "error" | "missing";
+  status: "ok" | "error" | "watcher_late" | "missing";
   detail: string;
   mechanisms: HeartbeatRow[];
 }
@@ -132,7 +160,7 @@ export interface HeartbeatReport {
 /** กลไกที่มีคาบ = ตัวที่ใช้ตัดสิน stale ได้ */
 const SCHEDULED_MECHANISMS = (
   Object.keys(MECHANISMS) as MechanismName[]
-).filter((m) => MECHANISMS[m] !== null);
+).filter((m) => MECHANISMS[m].intervalSeconds !== null);
 
 /**
  * อ่าน heartbeat ทั้งหมดแล้วสรุปเป็น component report
@@ -175,11 +203,31 @@ export async function readHeartbeats(now = new Date()): Promise<HeartbeatReport>
 
   const staleOnes = presentScheduled.filter((m) => m.stale === true);
   if (staleOnes.length > 0) {
+    const describe = (rows: HeartbeatRow[]) =>
+      rows.map((m) => `${m.mechanism} stale ${m.ageSeconds}s`).join(", ");
+    // 🔑 ข้อ 3: แยกตาม **บทบาท** ไม่ใช่ตามชื่อ — ของที่ถูกเฝ้าค้าง = ระบบพัง (`error`)
+    //    ส่วนผู้เฝ้าค้าง = จังหวะของผู้เฝ้าเอง (`watcher_late`) ⇒ ผลตรวจรอบนี้ยังสด
+    const watchedStale = staleOnes.filter(
+      (m) => MECHANISMS[m.mechanism as MechanismName].role === "watched"
+    );
+    if (watchedStale.length > 0) {
+      // ⚠️ ค้างทั้งสองบทบาท ⇒ `error` ชนะ แต่ **detail ต้องบอกครบทุกตัว** ไม่ใช่แค่ตัวที่ชนะ
+      //    (บทเรียน §H-13: ข้อความที่บอกไม่ครบ ทำให้ incident ต้องเริ่มจากศูนย์)
+      return { status: "error", detail: describe(staleOnes), mechanisms };
+    }
+    // 🔴 **ห้ามลดชั้น `missing` ลงมาเป็น `watcher_late`** — ถ้ากลไก `watched` **หายไปทั้งแถว**
+    //    พร้อมกับที่ผู้เฝ้าค้าง เคสนั้นคือ FAIL ตาม §F ไม่ใช่ "ผู้เฝ้าช้า"
+    //    (สาขานี้ `return` ก่อนสาขา `absent` ด้านล่าง ⇒ ต้องเช็คเองตรงนี้
+    //     — ช่องเดียวกับที่ incident 2026-08-10 §5.1 บันทึกไว้ว่า stale กลบ absent ได้)
+    const absentWhileWatcherLate = SCHEDULED_MECHANISMS.filter(
+      (name) => !presentScheduled.some((m) => m.mechanism === name)
+    );
+    if (absentWhileWatcherLate.length === 0) {
+      return { status: "watcher_late", detail: describe(staleOnes), mechanisms };
+    }
     return {
-      status: "error",
-      detail: staleOnes
-        .map((m) => `${m.mechanism} stale ${m.ageSeconds}s`)
-        .join(", "),
+      status: "missing",
+      detail: `no heartbeat yet: ${absentWhileWatcherLate.join(", ")} · ${describe(staleOnes)}`,
       mechanisms,
     };
   }
