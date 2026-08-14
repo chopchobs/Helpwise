@@ -263,7 +263,7 @@ jobs:
       # key ไม่ซ้ำทุกรอบ + restore-keys prefix ⇒ ได้ cache ล่าสุดเสมอ
       # (cache ของ GitHub เขียนทับ key เดิมไม่ได้ จึงต้องใช้รูปแบบนี้)
       - name: Restore readiness state
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .readiness-state
           key: readiness-state-${{ github.run_id }}
@@ -296,7 +296,7 @@ jobs:
       #    ซึ่งเป็นความเสียหายที่ transition-only ถูกออกแบบมาเพื่อกันพอดี
       - name: Save readiness state
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .readiness-state
           key: readiness-state-${{ github.run_id }}
