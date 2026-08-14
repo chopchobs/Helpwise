@@ -57,6 +57,24 @@ describe("⛔ ห้ามใช้ HTTP status code เป็นหลักฐ
     expect(r.verdict).toBe("STALE");
   });
 
+  it("200 พร้อม marker + status=WATCHER_LATE → WATCHER_LATE ไม่ใช่ OK", () => {
+    // 🔑 ข้อ 3: verdict ตัวใหม่ต้องอยู่ใน VALID_STATUSES ไม่งั้นจะกลายเป็น INCONCLUSIVE
+    //    (= "อ่านผลไม่ได้") ซึ่งดังเท่า FAIL ⇒ จะกลบความหมายที่เพิ่งแยกออกมาทั้งหมด
+    const r = classifyProbeResponse({
+      httpStatus: 200,
+      bodyText: body({ marker: READINESS_MARKER, status: "WATCHER_LATE" }),
+    });
+    expect(r.verdict).toBe("WATCHER_LATE");
+  });
+
+  it("status ที่ไม่รู้จัก → ยังเป็น INCONCLUSIVE (เส้นทางลบของข้อบน)", () => {
+    const r = classifyProbeResponse({
+      httpStatus: 200,
+      bodyText: body({ marker: READINESS_MARKER, status: "WATCHER_SLOW" }),
+    });
+    expect(r.verdict).toBe("INCONCLUSIVE");
+  });
+
   it("401 จากแอปเรา (มี marker) ยังอ่านได้ว่าไม่ใช่ INCONCLUSIVE ถ้ามี status", () => {
     // 401 ที่ไม่มี status = อ่านผลไม่ได้ → INCONCLUSIVE (แต่แยกจาก 'ไม่ถึงแอป' ได้ด้วย marker)
     const r = classifyProbeResponse({
@@ -100,6 +118,9 @@ describe("INCONCLUSIVE ต้องดังเท่า FAIL", () => {
     expect(LOUD_VERDICTS).not.toContain("STALE");
     expect(LOUD_VERDICTS).not.toContain("DEGRADED");
     expect(LOUD_VERDICTS).not.toContain("OK");
+    // WATCHER_LATE = ผู้เฝ้าช้า ไม่ใช่ระบบพัง ⇒ ไม่ควรทำให้ job แดง
+    // (ยังแจ้งตาม transition เหมือนเดิม — ⛔ ไม่ใช่การลดเสียง)
+    expect(LOUD_VERDICTS).not.toContain("WATCHER_LATE");
   });
 });
 
@@ -118,6 +139,17 @@ describe("transition-only รวม recovery", () => {
     expect(shouldAlert("OK", "STALE")).toBe(true);
   });
 
+  it("OK → WATCHER_LATE ต้องแจ้ง · และ WATCHER_LATE ซ้ำ → ไม่แจ้ง", () => {
+    expect(shouldAlert("OK", "WATCHER_LATE")).toBe(true);
+    expect(shouldAlert("WATCHER_LATE", "WATCHER_LATE")).toBe(false);
+    expect(shouldAlert("WATCHER_LATE", "OK")).toBe(true); // recovery
+  });
+
+  it("FAIL ↔ WATCHER_LATE ต้องแจ้งทั้งสองทาง (คนละความหมายคนละที่ต้องไปดู)", () => {
+    expect(shouldAlert("FAIL", "WATCHER_LATE")).toBe(true);
+    expect(shouldAlert("WATCHER_LATE", "FAIL")).toBe(true);
+  });
+
   it("FAIL → INCONCLUSIVE ต้องแจ้ง (คนละความหมาย แม้ดังเท่ากัน)", () => {
     expect(shouldAlert("FAIL", "INCONCLUSIVE")).toBe(true);
   });
@@ -127,7 +159,13 @@ describe("transition-only รวม recovery", () => {
   });
 
   it("ไม่รู้สถานะก่อนหน้า + ไม่ปกติ → แจ้ง (ดังไว้ก่อน)", () => {
-    for (const v of ["FAIL", "STALE", "DEGRADED", "INCONCLUSIVE"] as Verdict[]) {
+    for (const v of [
+      "FAIL",
+      "STALE",
+      "DEGRADED",
+      "WATCHER_LATE",
+      "INCONCLUSIVE",
+    ] as Verdict[]) {
       expect(shouldAlert(null, v)).toBe(true);
     }
   });

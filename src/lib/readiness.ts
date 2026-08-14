@@ -111,13 +111,31 @@ export const READINESS_AUTH_HEADER = "x-readiness-token";
  *              signature ปลอมเข้ามาแต่ delivery จริงยังผ่าน — erratum §C) → ลำดับ 3
  *   FAIL     — **ระบบพัง** (dependency ล่ม / ไม่พบ heartbeat / config หาย)
  *   STALE    — **วัดไม่ได้/ค่าที่มีเก่าเกินไป** ไม่ใช่ว่าระบบพัง แต่ต้องดังเท่ากัน
+ *   WATCHER_LATE — **ผู้เฝ้าเต้นไม่ทันคาบของตัวเอง** · ผลตรวจรอบนี้ **สด** ทุกอย่างวัดได้ปกติ
+ *                  สิ่งที่ค้างคือจังหวะของ scheduler ที่มาเรียก P2 ไม่ใช่ของระบบที่ถูกเฝ้า
  *
- * ⚠️ ลำดับความรุนแรง: FAIL > STALE > DEGRADED > OK
- *    STALE อยู่เหนือ DEGRADED เพราะ "ไม่รู้" อันตรายกว่า "รู้ว่ามีข้อสังเกต"
+ * ⚠️ ลำดับความรุนแรง: FAIL > STALE > WATCHER_LATE > DEGRADED > OK
+ *    · STALE อยู่เหนือ DEGRADED เพราะ "ไม่รู้" อันตรายกว่า "รู้ว่ามีข้อสังเกต"
+ *    · WATCHER_LATE อยู่ **ใต้** STALE เพราะเรา *วัดได้* (ค่าที่ได้สด) — แต่อยู่ **เหนือ** DEGRADED
+ *      เพราะ "ผู้เฝ้าเดินไม่ตรงคาบ" แปลว่าความเชื่อถือได้ของทุกสัญญาณหลังจากนี้ลดลง
+ *
+ * 🔴 **ทำไมไม่ใช้ `STALE` ซ้ำ (§H-9 · ตัดสิน 2026-08-14):** `status` ตัวนี้ถูกเก็บลง snapshot
+ *    **แล้วเสิร์ฟใน shape สาธารณะ** (`buildAnonymousReport`) ⇒ ถ้าใช้คำเดียวแทนสองเหตุการณ์
+ *    external pinger (แถว C) จะแยก *"snapshot เก่า"* ออกจาก *"ผู้เฝ้าคาบยาว"* **ไม่ได้ตลอดกาล**
+ *    ⇒ = สร้างความกำกวมขึ้นใน **สัญญาที่คนนอกใช้** ซึ่งแก้ทีหลังแพงกว่าแก้ภายในมาก
  */
-export type ReadinessStatus = "OK" | "DEGRADED" | "FAIL" | "STALE";
+export type ReadinessStatus =
+  | "OK"
+  | "DEGRADED"
+  | "FAIL"
+  | "STALE"
+  | "WATCHER_LATE";
 
-export type ComponentStatus = "ok" | "error" | "missing";
+/**
+ * `watcher_late` = **เฉพาะ component `heartbeat` เท่านั้น** — กลไกบทบาท `watcher`
+ * (`readiness-probe`) เต้นไม่ทันคาบของตัวเอง ⇒ **ไม่ใช่ระบบพัง** (ดู `MechanismRole`)
+ */
+export type ComponentStatus = "ok" | "error" | "watcher_late" | "missing";
 
 export interface ComponentReport {
   status: ComponentStatus;
@@ -281,6 +299,9 @@ async function readMechanismHeartbeats(): Promise<ComponentReport> {
 
 function heartbeatFreshness(report: ComponentReport): HeartbeatFreshness {
   if (report.status === "ok") return "fresh";
+  // `watcher_late` = ผู้เฝ้าช้า แต่ heartbeat ของ **ของที่ถูกเฝ้า** ยังสด
+  // ⇒ counter evaluation อ่านค่าที่มีได้ตามปกติ ไม่ใช่ "stale" ในความหมายของ inbound-counter
+  if (report.status === "watcher_late") return "fresh";
   if (report.status === "error") return "stale";
   return "unknown";
 }
@@ -424,15 +445,28 @@ export function rollUpStatus(
   degradedReasons: string[]
 ): { status: ReadinessStatus; reasons: string[] } {
   const reasons: string[] = [];
+  const watcherReasons: string[] = [];
 
   for (const [name, report] of Object.entries(components)) {
     if (report.status === "error") reasons.push(`${name}_error`);
     // 🔒 missing (โดยเฉพาะ heartbeat) = FAIL ตาม §F ห้าม fallback เป็น PASS
     if (report.status === "missing") reasons.push(`${name}_missing`);
+    // ผู้เฝ้าเต้นไม่ทันคาบตัวเอง — **ไม่ใช่ FAIL** แต่ห้ามกลืนเป็น OK เช่นกัน
+    if (report.status === "watcher_late") watcherReasons.push(`${name}_watcher_late`);
   }
 
   if (reasons.length > 0) {
-    return { status: "FAIL", reasons: [...reasons, ...degradedReasons] };
+    // ⚠️ ของที่ถูกเฝ้าพัง ชนะเสมอ — แต่ยังพก watcherReasons ไปด้วยเพื่อไม่ให้ข้อมูลหาย
+    return {
+      status: "FAIL",
+      reasons: [...reasons, ...watcherReasons, ...degradedReasons],
+    };
+  }
+  if (watcherReasons.length > 0) {
+    return {
+      status: "WATCHER_LATE",
+      reasons: [...watcherReasons, ...degradedReasons],
+    };
   }
   if (degradedReasons.length > 0) {
     return { status: "DEGRADED", reasons: degradedReasons };
@@ -525,7 +559,19 @@ function httpStatusFor(status: ReadinessStatus): number {
   // ⛔ status code นี้มีไว้ให้ pinger ที่อ่าน body ไม่ได้เท่านั้น
   //    **ห้ามใครใช้เป็นหลักฐาน** — หลักฐานคือ marker + field `status` ในเนื้อ response
   //    (erratum §B(ค): ไม่พบ marker ⇒ INCONCLUSIVE ไม่ว่า status code จะเป็นอะไร)
-  return status === "OK" || status === "DEGRADED" ? 200 : 503;
+  //
+  // 🔑 **WATCHER_LATE = 200 — ตัดสิน 2026-08-14 พร้อมเหตุผล:**
+  //    คำถามที่ status code ตอบคือ *"ระบบที่ถูกเฝ้ายังใช้งานได้ไหม"* ไม่ใช่ *"ทุกอย่างเรียบร้อยไหม"*
+  //    · WATCHER_LATE เกิดขึ้นได้ก็ต่อเมื่อ **live probe รอบนี้สำเร็จ** และ component อื่น `ok` หมด
+  //      ⇒ ผู้ใช้ไม่ได้รับผลกระทบ — นี่คือข้อสรุปที่ incident 2026-08-10 จ่ายราคาไปแล้วเพื่อได้มา
+  //      (`503` ตอนนั้นคือ *คำตัดสินของผู้เฝ้า* ไม่ใช่ *อาการของเว็บ* — และไม่มีใครแยกออก)
+  //    · ถ้าคืน 503 ⇒ external pinger (แถว C) ที่อ่าน body ไม่ได้ จะเห็น "เว็บล่ม" ทั้งที่เว็บปกติ
+  //      = false alarm ที่เราสร้างเอง และเป็น flap รูปแบบเดียวกับที่ทั้งเฟสนี้ตั้งใจกำจัด
+  //    ⛔ **200 ที่นี่ไม่ได้ลดเสียง** — Discord ยังดังตาม transition (`shouldAlert`) และตาม
+  //      in-band gap check เหมือนเดิมทุกประการ · ผู้ที่อ่าน body ยังเห็น `WATCHER_LATE` ชัดเจน
+  return status === "OK" || status === "DEGRADED" || status === "WATCHER_LATE"
+    ? 200
+    : 503;
 }
 
 /**
