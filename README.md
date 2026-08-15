@@ -50,6 +50,16 @@ working end to end.
   processing. The inbound-email webhook verifies a shared secret, then dedupes on a unique
   `(tenantId, messageId)` guard (`ProcessedInboundEmail`) — so provider retries never create
   duplicate tickets or double-charge state.
+- **A production watcher that reports its own limits.** A scheduled GitHub Actions job probes
+  `/api/health/readiness` and alerts only on verdict *transitions*. It spent 4.5 days reporting
+  `FAIL` on a healthy site: the staleness threshold was derived from the cron interval declared in
+  the workflow file, but measuring 89 real runs showed GitHub was firing roughly hourly, not every
+  15 minutes — so the watcher kept judging itself late and calling that an outage. The fix was to
+  declare the interval that was actually measured and to split "the watcher is late"
+  (`WATCHER_LATE`, HTTP 200) from "the system is down" (`FAIL`, HTTP 503), because those are
+  different facts and had been sharing one word. **This is not finished:** why GitHub throttles
+  this repo is still unknown, the threshold stays pinned to a value GitHub can change without
+  notice, and 3 of 21 closing-evidence rows are documented as deliberately unclosed.
 
 ## Architecture
 
@@ -230,3 +240,10 @@ prisma/
 - [`docs/deploy-checklist.md`](docs/deploy-checklist.md) — Pre-deploy verification checklist
 - [`docs/stripe-smoke.md`](docs/stripe-smoke.md) — Stripe billing smoke-test guide
 - [`CLAUDE.md`](CLAUDE.md) — Architecture, multi-tenancy rules, and conventions for contributors
+- [`.claude/specs/incident-2026-08-10-prod-503.md`](.claude/specs/incident-2026-08-10-prod-503.md)
+  — Incident write-up: the readiness watcher reporting `FAIL` for 4.5 days on a healthy site,
+  including the three times the evidence was withdrawn and what was predicted before measuring
+- [`.claude/evidence/phase-39-h17-2026-08-14/`](.claude/evidence/phase-39-h17-2026-08-14/)
+  — Raw GitHub Actions run data plus `analyze.mjs`. Every number quoted in that write-up is
+  reproducible by running the script against the JSON in this folder; the script is the definition
+  of each statistic, so nothing rests on remembering how a figure was computed
