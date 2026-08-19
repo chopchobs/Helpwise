@@ -10,7 +10,8 @@
 
 import { useState, useEffect, useCallback, useTransition } from "react";
 import Link from "next/link";
-import { Plus, RefreshCw, Inbox } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Plus, Inbox } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import FormAlert from "@/components/ui/FormAlert";
 import { formatDate } from "@/lib/ticket-ui";
@@ -73,6 +74,34 @@ function TicketCard({ ticket }: TicketCardProps) {
   );
 }
 
+/**
+ * Skeleton ระหว่างโหลด — โครงเดียวกับ TicketCard (สูงใกล้เคียง) เพื่อลด layout shift
+ * aria-hidden: เป็น decorative ล้วน; สถานะโหลดประกาศผ่าน role="status" ที่ครอบด้านนอก
+ */
+function TicketListSkeleton() {
+  return (
+    <div className="flex flex-col gap-3" role="status" aria-label="กำลังโหลดรายการคำขอ">
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          aria-hidden="true"
+          className="bg-surface rounded-xl border border-border p-4 animate-pulse"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <div className="h-3 w-10 rounded bg-stone" />
+            <div className="h-5 w-16 rounded-full bg-stone" />
+          </div>
+          <div className="h-4 w-3/4 rounded bg-stone" />
+          <div className="mt-3 flex items-center gap-4">
+            <div className="h-3 w-28 rounded bg-stone" />
+            <div className="h-3 w-16 rounded bg-stone" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface PaginationBarProps {
   page: number;
   totalPages: number;
@@ -116,6 +145,7 @@ function PaginationBar({ page, totalPages, onPageChange }: PaginationBarProps) {
 // =============================================================================
 
 export default function PortalTicketListPage() {
+  const router = useRouter();
   const [tickets, setTickets] = useState<PortalTicketSummary[]>([]);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
@@ -142,7 +172,9 @@ export default function PortalTicketListPage() {
 
       if (!res.ok || json.error) {
         if (res.status === 401) {
-          setError("กรุณา login ก่อนใช้งาน");
+          // session หมดอายุ/ไม่มี → พาไปหน้า login ทันที (replace: ห้าม back กลับมาหน้าที่ต้อง auth)
+          router.replace("/portal/login");
+          return;
         } else {
           setError(json.error?.message ?? "โหลดข้อมูลไม่สำเร็จ");
         }
@@ -158,7 +190,7 @@ export default function PortalTicketListPage() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [router]);
 
   // ใช้ startTransition เพื่อหลีกเลี่ยง cascading render ตาม react-hooks/set-state-in-effect
   // startTransition เป็น stable reference — ไม่ต้องใส่ใน deps
@@ -172,15 +204,16 @@ export default function PortalTicketListPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-2xl mx-auto px-4 py-8">
+    // flex-1 ไม่ใช่ min-h-screen — layout ของ portal คุม min-h-screen + header ให้แล้ว
+    <div className="flex-1 bg-background">
+      <div className="max-w-2xl mx-auto px-4 py-6 sm:py-8">
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-foreground">คำขอของฉัน</h1>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground">คำขอของฉัน</h1>
           <Link
             href="/portal/tickets/new"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-strong hover:bg-primary-strong-hover text-white text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary-strong hover:bg-primary-strong-hover text-white text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
           >
             <Plus size={16} aria-hidden="true" />
             แจ้งปัญหาใหม่
@@ -188,7 +221,7 @@ export default function PortalTicketListPage() {
         </div>
 
         {/* Filter */}
-        <div className="flex items-center gap-3 mb-4">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">
           <label htmlFor="portal-filter-status" className="text-sm text-secondary">
             กรองตามสถานะ:
           </label>
@@ -215,12 +248,7 @@ export default function PortalTicketListPage() {
 
         {/* List */}
         {isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="flex flex-col items-center gap-3 text-secondary">
-              <RefreshCw size={24} className="animate-spin" aria-hidden="true" />
-              <span className="text-sm">กำลังโหลด...</span>
-            </div>
-          </div>
+          <TicketListSkeleton />
         ) : tickets.length === 0 && !error ? (
           <div className="flex flex-col items-center py-16 gap-3 text-secondary">
             <Inbox size={40} aria-hidden="true" className="opacity-40" />

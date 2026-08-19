@@ -70,9 +70,16 @@ export default function PortalVerifyPage() {
         if (res.ok && json.data?.ok) {
           setStatus("success");
           // รอสักครู่เพื่อให้ user เห็น success state ก่อน redirect
-          // ปลายทางต้องเป็น "/portal/tickets" — "/portal" ไม่มี page.tsx (ไม่เคยมี) → contact เจอ 404
-          // ทันทีหลัง login สำเร็จ ตั้งแต่ Phase 3 (พบตอน Gate 2 ของ Phase 37)
-          setTimeout(() => router.push("/portal/tickets"), 1200);
+          //
+          // ⚠️ ต้องเป็น hard navigation (window.location) ไม่ใช่ router.push:
+          //    layout ของ (portal) เป็น server component ที่อ่าน contact session เพื่อ render header
+          //    client-side navigation ไม่ re-render layout ที่ share กันระหว่าง /portal/verify กับ
+          //    /portal/tickets → header จะค้างสถานะ "ยังไม่ login" (ไม่มีชื่อ/ปุ่มออกจากระบบ)
+          //    จนกว่าจะ reload. full page load อ่าน cookie ที่เพิ่ง set เสมอ
+          //
+          //    ใช้ replace ไม่ใช่ assign — URL หน้านี้ผูกกับ token ที่ถูก consume ไปแล้ว
+          //    ถ้ากด Back จะย้อนมาเจอ error page
+          setTimeout(() => window.location.replace("/portal/tickets"), 1200);
         } else {
           // token หมดอายุ / ถูกใช้ไปแล้ว / ไม่พบ
           setErrorMessage(json.error?.message ?? "ลิงก์ไม่ถูกต้องหรือหมดอายุ กรุณาขอลิงก์ใหม่");
@@ -91,7 +98,7 @@ export default function PortalVerifyPage() {
   // === Verifying state ===
   if (status === "verifying") {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4 py-12">
+      <div className="flex flex-1 items-center justify-center px-4 py-8 sm:py-12">
       <AuthCard>
         <div className="flex flex-col items-center text-center gap-4 py-4">
           <Loader2
@@ -112,7 +119,7 @@ export default function PortalVerifyPage() {
   // === Success state ===
   if (status === "success") {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4 py-12">
+      <div className="flex flex-1 items-center justify-center px-4 py-8 sm:py-12">
       <AuthCard>
         <div className="flex flex-col items-center text-center gap-4 py-4">
           <div className="w-12 h-12 rounded-full bg-success-tint flex items-center justify-center">
@@ -130,7 +137,7 @@ export default function PortalVerifyPage() {
 
   // === Error state ===
   return (
-    <div className="flex min-h-screen items-center justify-center px-4 py-12">
+    <div className="flex flex-1 items-center justify-center px-4 py-8 sm:py-12">
     <AuthCard>
       <div className="flex flex-col items-center text-center gap-4 py-4">
         <div className="w-12 h-12 rounded-full bg-danger-tint flex items-center justify-center">
