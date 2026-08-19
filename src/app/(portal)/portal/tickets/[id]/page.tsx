@@ -105,6 +105,7 @@ interface PortalReplyBoxProps {
  * ส่งเฉพาะ body — ไม่มี visibility field เลย (backend บังคับ PUBLIC)
  */
 function PortalReplyBox({ ticketId, isClosed, isSolved, onMessageSent }: PortalReplyBoxProps) {
+  const router = useRouter();
   const [body, setBody] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +155,11 @@ function PortalReplyBox({ ticketId, isClosed, isSolved, onMessageSent }: PortalR
       const json = (await res.json()) as PortalPostMessageResponse;
 
       if (!res.ok || json.error) {
+        if (res.status === 401) {
+          // session หมดอายุระหว่างพิมพ์ → พาไป login (ข้อความที่พิมพ์ค้างจะหาย — known limitation)
+          router.replace("/portal/login");
+          return;
+        }
         setError(json.error?.message ?? "ส่งข้อความไม่สำเร็จ กรุณาลองใหม่");
         return;
       }
@@ -252,6 +258,50 @@ function PortalReplyBox({ ticketId, isClosed, isSolved, onMessageSent }: PortalR
   );
 }
 
+/**
+ * Skeleton ระหว่างโหลด — เลียนโครงจริง (back link → header card → thread card)
+ * เพื่อลด layout shift ตอนข้อมูลมาถึง
+ */
+function TicketDetailSkeleton() {
+  return (
+    <div className="flex-1 bg-background">
+      <div
+        className="max-w-2xl mx-auto px-4 py-6 sm:py-8"
+        role="status"
+        aria-label="กำลังโหลดคำขอ"
+      >
+        <div aria-hidden="true" className="animate-pulse">
+          {/* ปุ่มย้อนกลับ — h-5 ให้ระยะถึง card ใบแรกตรงกับของจริง (top 133) */}
+          <div className="h-5 w-24 rounded bg-stone mb-6" />
+
+          {/* header card */}
+          <div className="bg-surface rounded-xl border border-border p-5 mb-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-3 w-10 rounded bg-stone" />
+              <div className="h-5 w-16 rounded-full bg-stone" />
+            </div>
+            {/* subject + บรรทัด "ผู้ดูแล" — ความสูงรวมของ card ให้ตรงกับเคสที่มีผู้ดูแล
+                (ticket ที่ไม่มีผู้ดูแล/subject 2 บรรทัด จะคลาดไป ~20-25px — ยอมรับได้) */}
+            <div className="h-6 w-2/3 rounded bg-stone" />
+            <div className="h-4 w-40 rounded bg-stone mt-3" />
+          </div>
+
+          {/* thread card */}
+          <div className="bg-surface rounded-xl border border-border overflow-hidden">
+            <div className="px-5 py-3 border-b border-border bg-stone">
+              <div className="h-4 w-32 rounded bg-surface" />
+            </div>
+            <div className="px-5 py-4 flex flex-col gap-4">
+              <div className="h-16 w-full rounded-lg bg-stone" />
+              <div className="h-16 w-5/6 self-end rounded-lg bg-stone" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // =============================================================================
 // MAIN COMPONENT
 // =============================================================================
@@ -279,7 +329,9 @@ export default function PortalTicketDetailPage() {
 
       if (!res.ok || json.error) {
         if (res.status === 401) {
-          setError("กรุณา login ก่อนใช้งาน");
+          // session หมดอายุ/ไม่มี → พาไปหน้า login ทันที (replace: ห้าม back กลับมาหน้าที่ต้อง auth)
+          router.replace("/portal/login");
+          return;
         } else if (res.status === 404) {
           setError("ไม่พบคำขอนี้");
         } else {
@@ -294,7 +346,7 @@ export default function PortalTicketDetailPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [ticketId]);
+  }, [ticketId, router]);
 
   // ใช้ startTransition เพื่อหลีกเลี่ยง cascading render ตาม react-hooks/set-state-in-effect
   // startTransition เป็น stable reference — ไม่ต้องใส่ใน deps
@@ -317,20 +369,13 @@ export default function PortalTicketDetailPage() {
 
   // ─── Loading ───────────────────────────────────────────────────────────────
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-secondary">
-          <RefreshCw size={28} className="animate-spin" aria-hidden="true" />
-          <span className="text-sm">กำลังโหลด...</span>
-        </div>
-      </div>
-    );
+    return <TicketDetailSkeleton />;
   }
 
   // ─── Error ─────────────────────────────────────────────────────────────────
   if (error || !ticket) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+      <div className="flex-1 bg-background flex items-center justify-center px-4 py-8">
         <div className="bg-surface rounded-xl border border-border p-8 max-w-md w-full text-center">
           <p className="text-danger font-medium mb-4">{error ?? "เกิดข้อผิดพลาด"}</p>
           <button
@@ -349,8 +394,9 @@ export default function PortalTicketDetailPage() {
   const isClosed = ticket.status === "CLOSED";
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-2xl mx-auto px-4 py-8">
+    // flex-1 ไม่ใช่ min-h-screen — layout ของ portal คุม min-h-screen + header ให้แล้ว
+    <div className="flex-1 bg-background">
+      <div className="max-w-2xl mx-auto px-4 py-6 sm:py-8">
 
         {/* Back button */}
         <button

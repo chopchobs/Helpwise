@@ -94,44 +94,30 @@ export default function DemoPersonaBanner({
   }
 
   return (
-    <div className="mb-3 rounded-lg border border-border bg-stone p-3">
-      <div className="flex items-start gap-2">
-        <Users size={16} className="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
+    /*
+     * แถวเดียวเสมอ (ไม่ collapse) — นี่คือ live demo: ถ้าซ่อนไว้หลังปุ่มขยาย
+     * คนดูจะไม่กด แล้วไม่มีใครรู้ว่ามีฟีเจอร์ presence
+     * กล่องแสดง URL ยาวถูกตัดออก เหลือแค่ปุ่มคัดลอก — จะโผล่กลับมาเฉพาะตอน copy ไม่สำเร็จ
+     */
+    <div className="mb-3 rounded-lg border border-border bg-stone px-3 py-2">
+      <div className="flex items-center gap-2">
+        <Users size={16} className="shrink-0 text-primary" aria-hidden="true" />
 
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-foreground">
-            อยากเห็น real-time presence ไหม?
-          </p>
-          <p className="mt-0.5 text-xs text-secondary">
-            คัดลอกลิงก์ด้านล่างไปเปิดใน{" "}
-            <span className="font-medium text-foreground">incognito</span> หรืออีกเบราว์เซอร์
-            เพื่อเข้าเป็น agent คนที่ 2 แล้วดู ticket ใบนี้พร้อมกัน — ถ้าเปิดในเบราว์เซอร์นี้
-            session ปัจจุบันจะถูกทับ
-          </p>
+        {/* ข้อความบรรทัดเดียว — ตัดด้วย truncate ไม่ให้ดันความสูงบนจอแคบ */}
+        <p className="min-w-0 flex-1 truncate text-xs text-secondary">
+          <span className="font-semibold text-foreground">อยากเห็น real-time presence?</span>{" "}
+          คัดลอกลิงก์ไปเปิดใน incognito เพื่อเข้าเป็น agent คนที่ 2
+        </p>
 
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            {/* แสดง URL เป็น text ที่ select ได้เสมอ — เผื่อ copy อัตโนมัติใช้ไม่ได้ */}
-            <code className="min-w-0 flex-1 break-all rounded border border-border bg-surface px-2 py-1 text-[11px] select-all text-primary-ink">
-              {shareUrl}
-            </code>
-            <button
-              type="button"
-              onClick={() => void handleCopy()}
-              aria-label="คัดลอกลิงก์สำหรับเปิดเป็น agent คนที่ 2"
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary-strong px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-primary-strong-hover focus:outline-none focus:ring-2 focus:ring-primary"
-            >
-              <Copy size={13} aria-hidden="true" />
-              คัดลอกลิงก์
-            </button>
-          </div>
-
-          {/* live region — ประกาศผลการคัดลอกให้ screen reader ทั้งสำเร็จและล้มเหลว */}
-          <p role="status" aria-live="polite" className="mt-1 text-xs text-secondary">
-            {copyState === "copied" && "คัดลอกลิงก์แล้ว"}
-            {copyState === "failed" &&
-              "คัดลอกอัตโนมัติไม่ได้ กรุณาเลือกลิงก์ด้านบนแล้วคัดลอกเอง"}
-          </p>
-        </div>
+        <button
+          type="button"
+          onClick={() => void handleCopy()}
+          aria-label="คัดลอกลิงก์สำหรับเปิดเป็น agent คนที่ 2"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary-strong px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-primary-strong-hover focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          <Copy size={13} aria-hidden="true" />
+          <span className="hidden sm:inline">คัดลอกลิงก์</span>
+        </button>
 
         <button
           type="button"
@@ -142,6 +128,29 @@ export default function DemoPersonaBanner({
           <X size={14} aria-hidden="true" />
         </button>
       </div>
+
+      {/* live region — ประกาศผลการคัดลอกให้ screen reader ทั้งสำเร็จและล้มเหลว */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {copyState === "copied" && "คัดลอกลิงก์แล้ว"}
+        {copyState === "failed" && "คัดลอกอัตโนมัติไม่ได้ กรุณาคัดลอกลิงก์ด้านล่างเอง"}
+      </p>
+
+      {/* ยืนยันผลแบบเห็นด้วยตา — ไม่ดันความสูงเพราะแทนที่ในบรรทัดเดียวกันไม่ได้ จึงโชว์เฉพาะตอนสำเร็จ */}
+      {copyState === "copied" && (
+        <p className="mt-1 text-xs text-success">คัดลอกลิงก์แล้ว</p>
+      )}
+
+      {/* fallback: copy อัตโนมัติไม่ได้ (non-secure context / user ปฏิเสธ) → คืนกล่อง URL ให้เลือกเอง */}
+      {copyState === "failed" && (
+        <div className="mt-2">
+          <p className="mb-1 text-xs text-secondary">
+            คัดลอกอัตโนมัติไม่ได้ — เลือกลิงก์นี้แล้วคัดลอกเอง
+          </p>
+          <code className="block break-all rounded border border-border bg-surface px-2 py-1 text-[11px] select-all text-primary-ink">
+            {shareUrl}
+          </code>
+        </div>
+      )}
     </div>
   );
 }

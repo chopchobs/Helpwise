@@ -73,7 +73,9 @@ export default function PortalNewTicketPage() {
 
       if (!res.ok || json.error) {
         if (res.status === 401) {
-          setFormError("กรุณา login ก่อนใช้งาน");
+          // session หมดอายุ/ไม่มี → พาไปหน้า login ทันที (replace: ห้าม back กลับมาหน้าที่ต้อง auth)
+          router.replace("/portal/login");
+          return;
         } else {
           setFormError(json.error?.message ?? "สร้างคำขอไม่สำเร็จ กรุณาลองใหม่");
         }
@@ -90,8 +92,8 @@ export default function PortalNewTicketPage() {
   }
 
   return (
-    // centering page — layout ของ route group เป็น plain wrapper แล้ว
-    <div className="flex min-h-screen items-start justify-center px-4 py-12">
+    // flex-1 ไม่ใช่ min-h-screen — layout ของ portal คุม min-h-screen + header ให้แล้ว
+    <div className="flex flex-1 items-start justify-center px-4 py-8 sm:py-12">
     <div className="w-full max-w-lg">
       {/* Back button */}
       <button
